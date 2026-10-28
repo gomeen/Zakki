@@ -16,10 +16,24 @@ struct ContentView: View {
                         }
                     }
                 }
+                .navigationDestination(for: UInt64.self) { tabID in
+                    editorDestination(tabID: tabID)
+                }
                 .sheet(isPresented: $showingPicker) {
                     DocumentPicker { url in
                         model.importFile(at: url)
                     }
+                }
+                .alert(
+                    Strings.saveFailedTitle,
+                    isPresented: Binding(
+                        get: { model.saveError != nil },
+                        set: { if !$0 { model.clearSaveError() } }
+                    )
+                ) {
+                    Button(Strings.ok, role: .cancel) {}
+                } message: {
+                    Text(model.saveError ?? "")
                 }
                 .alert(
                     Strings.importFailedTitle,
@@ -66,11 +80,25 @@ struct ContentView: View {
             } else {
                 List {
                     ForEach(Array(tabs.enumerated()), id: \.offset) { index, tab in
-                        TabRow(tab: tab, active: index == snapshot.active)
+                        NavigationLink(value: tab.id) {
+                            TabRow(tab: tab, active: index == snapshot.active)
+                        }
                     }
                 }
                 .listStyle(.plain)
             }
+        }
+    }
+
+    // 编辑器目的地：按 id 取最新快照中的标签（写回后正文随之更新）。
+    @ViewBuilder
+    private func editorDestination(tabID: UInt64) -> some View {
+        if let snapshot = model.snapshot, let tab = snapshot.tabs?.first(where: { $0.id == tabID }) {
+            EditorHostView(tab: tab, writable: snapshot.writable, reason: snapshot.reason)
+                .navigationTitle(tab.name.isEmpty ? Strings.untitledTab : tab.name)
+                .navigationBarTitleDisplayMode(.inline)
+        } else {
+            ContentUnavailableView(Strings.noTabsTitle, systemImage: "tray")
         }
     }
 }
