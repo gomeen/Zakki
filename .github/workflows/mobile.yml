@@ -1,0 +1,52 @@
+# Zakki 移动端 CI：绑定产物重建 + iOS 工程单测；只有 mobile/ 或 core/ 变动才触发，
+# 桌面改动走 ci.yml（其 paths-ignore 掉 mobile/**，两个工作流不重叠跑全量 macOS）。
+name: mobile
+
+on:
+  push:
+    branches: [main]
+    paths: ['mobile/**', 'core/**']
+  pull_request:
+    paths: ['mobile/**', 'core/**']
+
+jobs:
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # gomobile/gobind 版本由 mobile/binding/go.mod 的 tool directive 固定
+          go-version-file: mobile/binding/go.mod
+
+      # 目标自身显式 DEVELOPER_DIR、临时构建 gobind，干净 runner 可复现
+      - name: make mobile-framework
+        run: make mobile-framework
+
+      - name: brew install xcodegen
+        run: brew install xcodegen
+
+      - name: xcodegen generate
+        run: xcodegen generate
+        working-directory: mobile/ios
+
+      - name: xcodebuild test
+        working-directory: mobile/ios
+        env:
+          # mobile-framework 的 export 只作用于 make 进程树，这里单独补齐
+          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+        run: |
+          set -euo pipefail
+          # runner 镜像的模拟器型号与 iOS 运行时随更新变化，不能硬编码（本地 iPhone 17/OS 26.5
+          # 在 runner 上未必存在）；从可用设备列表取第一个 iPhone 及其所在运行时拼 destination。
+          dest="$(xcrun simctl list devices available | awk '
+            /^-- iOS/ {ios=$3}
+            /iPhone/ && !found {gsub(/^ +/, ""); sub(/ \(.*/, ""); printf "platform=iOS Simulator,name=%s,OS=%s", $0, ios; found=1}
+          ')"
+          if [ -z "$dest" ]; then
+            echo "没有可用的 iPhone 模拟器" >&2
+            exit 1
+          fi
+          echo "destination: $dest"
+          xcodebuild test -project Zakki.xcodeproj -scheme Zakki -destination "$dest"

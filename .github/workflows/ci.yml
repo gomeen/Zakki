@@ -4,9 +4,12 @@
 name: ci
 
 on:
+  # 移动端改动走 mobile.yml；paths 与 paths-ignore 不能混用于同一触发器，桌面侧只加 ignore
   push:
     branches: [main]
+    paths-ignore: ['mobile/**']
   pull_request:
+    paths-ignore: ['mobile/**']
 
 jobs:
   check:

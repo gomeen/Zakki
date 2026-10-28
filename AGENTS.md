@@ -17,6 +17,7 @@ Zakki：基于 [MyGo](https://github.com/egoist/mygo) 原生 UI 的 macOS/Window
 - `internal/` 其余：纯逻辑与持久化（`markdown`、`codehl`、`notes`、`prefs`、`atomicfile`），禁止依赖 MyGo 与 `internal/app`。
 - `locales/`：i18n 目录（`en.json` 源 + `zh-Hans.json`），`go tool mygo generate` 生成 `catalog_gen.go`；中英键位一致性有测试。改用户可见文案一律经 `locales.*`，不得写死字面量。
 - `vendor/` + `patches/`：MyGo 原生区间样式补丁；改依赖前读 [patches/README.md](patches/README.md)，用 `make vendor` 刷新，不能用 `-mod=mod` 绕过补丁。
+- `mobile/`：`mobile/binding` 独立 Go module（绑定构建，`require zakki/core` 并 `replace => ../../core`，唯一允许依赖 golang.org/x/mobile 的模块）+ `mobile/ios` iOS 工程；不参与桌面 `make check` 的 Go 构建与测试。
 
 ## 硬规则
 

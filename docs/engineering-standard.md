@@ -26,6 +26,7 @@
 ```text
 zakki/
 ├── core/                     # 共享数据内核（嵌套 module zakki/core，零第三方依赖）
+├── mobile/                   # mobile/binding 独立 module（gomobile bind）+ mobile/ios iOS 工程
 ├── locales/                  # i18n；mygo generate → catalog_gen.go
 ├── main.go
 ├── internal/
@@ -88,7 +89,8 @@ flowchart TD
    - 叶子模块：零第三方依赖（`core/go.mod` 不得出现 `require`）、禁止依赖 MyGo 与任何 `zakki/internal/*`，`make arch-check` 直接校验；
    - 单一事实源：时间令牌（`@`/`~`/`^`）与重复实例展开的语义只在 `core` 写一份，桌面 `internal/markdown` 与未来移动端（gomobile bind）都是消费方，禁止各自持拷贝；
    - 对外边界只跨字符串、数值、布尔与 JSON（gomobile 形状）；
-   - 内部包 `markdown` 允许且仅允许额外依赖 `core`；测试随 `make test`/`make race` 经 `go -C core` 执行。
+   - 内部包 `markdown` 允许且仅允许额外依赖 `core`；测试随 `make test`/`make race` 经 `go -C core` 执行；
+   - 移动端绑定同仓：`mobile/binding` 是独立 Go module（`require zakki/core` 并 `replace => ../../core`），是**唯一允许依赖 golang.org/x/mobile 的模块**；`mobile/ios` 是 XcodeGen 工程，不参与任何 Go 构建；两者都不参与桌面 `make check` 的根 module 构建与测试，core 仍是零依赖叶子。
 
 机械校验：`make arch-check`（实现见根目录 `Makefile`，已纳入 `make check` 与 CI）。
 
