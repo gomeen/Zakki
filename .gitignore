@@ -8,8 +8,9 @@ mygo_windows_*.syso
 **/mygo-update.key
 /zakki.exe
 
-# 移动端绑定产物（make mobile-framework 生成，不入库）
+# 移动端：绑定产物（make mobile-framework 生成）与 XcodeGen 工程生成物均不入库
 /mobile/ios/Frameworks/
+/mobile/ios/*.xcodeproj
 
 # 本地 AI 技能工具产物
 .taste-skill/

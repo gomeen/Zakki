@@ -1,0 +1,66 @@
+# Zakki iOS 工程（XcodeGen）。Zakki.xcodeproj 是生成物，不入库（见 .gitignore）；
+# 绑定产物 Frameworks/Zakkicore.xcframework 由根目录 make mobile-framework 生成，不入库。
+name: Zakki
+options:
+  bundleIdPrefix: com.gomeen
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    # Swift 6 编译器（Xcode 26 自带）以语言模式 5 编译，暂不开启 Swift 6 严格并发。
+    SWIFT_VERSION: "5.0"
+
+targets:
+  Zakki:
+    type: application
+    platform: iOS
+    sources:
+      - Zakki
+    dependencies:
+      - framework: Frameworks/Zakkicore.xcframework
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gomeen.zakki.ios
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1"
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"
+    info:
+      path: Zakki/Info.plist
+      properties:
+        CFBundleDisplayName: Zakki
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        ITSAppUsesNonExemptEncryption: false
+
+  ZakkiTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - ZakkiTests
+    dependencies:
+      - target: Zakki
+      - framework: Frameworks/Zakkicore.xcframework
+        embed: false
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @loader_path/Frameworks"
+
+schemes:
+  Zakki:
+    build:
+      targets:
+        Zakki: all
+        ZakkiTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - ZakkiTests
