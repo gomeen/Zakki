@@ -117,6 +117,11 @@ final class NotesModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.saveDebounceInterval, execute: item)
     }
 
+    // 用户确认保存失败提示后清除。
+    func clearSaveError() {
+        saveError = nil
+    }
+
     // 仅供测试注入被污染的基线以触发 write_protected 兑底路径；生产流程不调用。
     func debugReplaceRawForTesting(_ newRaw: String) {
         raw = newRaw

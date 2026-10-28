@@ -127,6 +127,28 @@ final class EditorDocument {
         return text.replacingOccurrences(of: "\u{FFFC}", with: "")
     }
 
+    // 缓冲区间覆盖的片段（宿主按文档投影渲染兜底修正时用）。
+    func pieces(in bufferRange: NSRange) -> [EditorPiece] {
+        let range = clampBuffer(bufferRange)
+        guard range.length > 0 else { return [] }
+        var out: [EditorPiece] = []
+        var cursor = 0
+        for piece in pieces {
+            let pieceRange = NSRange(location: cursor, length: piece.bufferLength)
+            let intersect = NSIntersectionRange(pieceRange, range)
+            if intersect.length > 0 {
+                switch piece {
+                case .text(let s):
+                    out.append(.text((s as NSString).substring(with: NSRange(location: intersect.location - pieceRange.location, length: intersect.length))))
+                case .token:
+                    out.append(piece)
+                }
+            }
+            cursor = pieceRange.location + pieceRange.length
+        }
+        return out
+    }
+
     // MARK: 编辑
 
     // 应用一次缓冲编辑并按需重扫受影响行。detectTokens=false 时跳过收簇识别
@@ -212,6 +234,10 @@ final class EditorDocument {
     // MARK: 内部：派生缓存
 
     private func rebuildDerived() {
+        // 清理组装过程中可能产生的空文本片段（空文档收敛为 pieces = []）。
+        if pieces.contains(where: { if case .text(let s) = $0 { return s.isEmpty }; return false }) {
+            pieces = pieces.filter { if case .text(let s) = $0 { return !s.isEmpty }; return true }
+        }
         bufferText = pieces.map(\.bufferText).joined()
         rawText = pieces.map(\.rawText).joined()
         bufferLength = (bufferText as NSString).length
@@ -301,18 +327,24 @@ final class EditorDocument {
         return rawStarts[idx]
     }
 
-    // 按缓冲区间切分 pieces：返回区间前与区间后的片段（跨界文本片段沿边界拆开，
-    // 区间内片段丢弃）。组件占单个缓冲字符，只可能被完整包含或完整保留。
+    // 按缓冲区间切分 pieces：区间前与区间后的片段（跨界文本片段沿边界拆开，
+    // 区间内片段丢弃）。空区间（纯插入）在片段内部时同样正确拆为两半。
     private func splitPieces(atBufferRange range: NSRange) -> (before: [EditorPiece], after: [EditorPiece]) {
         var before: [EditorPiece] = []
         var after: [EditorPiece] = []
         var cursor = 0
         for piece in pieces {
             let pieceEnd = cursor + piece.bufferLength
-            let head = max(0, range.location - cursor)
-            let tail = max(0, pieceEnd - (range.location + range.length))
-            if let p = substring(of: piece, head: head, tail: tail, side: .head) { before.append(p) }
-            if let p = substring(of: piece, head: head, tail: tail, side: .tail) { after.append(p) }
+            if pieceEnd <= range.location {
+                before.append(piece)
+            } else if cursor >= range.location + range.length {
+                after.append(piece)
+            } else {
+                let headLength = max(0, range.location - cursor)
+                let tailLength = max(0, pieceEnd - (range.location + range.length))
+                if let p = substring(of: piece, head: headLength, tail: tailLength, side: .head) { before.append(p) }
+                if let p = substring(of: piece, head: headLength, tail: tailLength, side: .tail) { after.append(p) }
+            }
             cursor = pieceEnd
         }
         return (before, after)
@@ -324,10 +356,16 @@ final class EditorDocument {
         var cursor = 0
         for piece in pieces {
             let pieceEnd = cursor + piece.rawLength
-            let head = max(0, range.location - cursor)
-            let tail = max(0, pieceEnd - (range.location + range.length))
-            if let p = rawSubstring(of: piece, head: head, tail: tail, side: .head) { before.append(p) }
-            if let p = rawSubstring(of: piece, head: head, tail: tail, side: .tail) { after.append(p) }
+            if pieceEnd <= range.location {
+                before.append(piece)
+            } else if cursor >= range.location + range.length {
+                after.append(piece)
+            } else {
+                let headLength = max(0, range.location - cursor)
+                let tailLength = max(0, pieceEnd - (range.location + range.length))
+                if let p = rawSubstring(of: piece, head: headLength, tail: tailLength, side: .head) { before.append(p) }
+                if let p = rawSubstring(of: piece, head: headLength, tail: tailLength, side: .tail) { after.append(p) }
+            }
             cursor = pieceEnd
         }
         return (before, after)
@@ -335,43 +373,30 @@ final class EditorDocument {
 
     private enum Side { case head, tail }
 
-    // 取片段在切分边界一侧的部分；整段落在该侧时原样返回（含 token，不可丢失）。
+    // 取片段在切分边界一侧的部分；只在对应侧非空时返回（组件只能被完整保留或丢弃）。
     private func substring(of piece: EditorPiece, head: Int, tail: Int, side: Side) -> EditorPiece? {
-        let body = piece.bufferLength - head - tail
+        guard case .text(let s) = piece else { return nil }
+        let length = (s as NSString).length
         switch side {
         case .head:
-            if body > 0 {
-                guard case .text(let s) = piece, head > 0 else { return nil }
-                return .text((s as NSString).substring(with: NSRange(location: 0, length: head)))
-            }
-            return head > 0 ? piece : nil
+            guard head > 0 else { return nil }
+            return .text((s as NSString).substring(with: NSRange(location: 0, length: head)))
         case .tail:
-            if body > 0 {
-                guard case .text(let s) = piece, tail > 0 else { return nil }
-                let length = (s as NSString).length
-                return .text((s as NSString).substring(with: NSRange(location: length - tail, length: tail)))
-            }
-            return tail > 0 ? piece : nil
+            guard tail > 0 else { return nil }
+            return .text((s as NSString).substring(with: NSRange(location: length - tail, length: tail)))
         }
     }
 
-    // raw 侧切分只发生在行边界；组件不跨行，整段落在边界一侧时原样保留。
+    // raw 侧切分只发生在行边界；组件不跨行，不会被切到，防御下按文本处理。
     private func rawSubstring(of piece: EditorPiece, head: Int, tail: Int, side: Side) -> EditorPiece? {
         let length = piece.rawLength
-        let body = length - head - tail
         switch side {
         case .head:
-            if body > 0 {
-                guard head > 0 else { return nil }
-                return .text((piece.rawText as NSString).substring(with: NSRange(location: 0, length: head)))
-            }
-            return head > 0 ? piece : nil
+            guard head > 0 else { return nil }
+            return .text((piece.rawText as NSString).substring(with: NSRange(location: 0, length: head)))
         case .tail:
-            if body > 0 {
-                guard tail > 0 else { return nil }
-                return .text((piece.rawText as NSString).substring(with: NSRange(location: head + body, length: tail)))
-            }
-            return tail > 0 ? piece : nil
+            guard tail > 0 else { return nil }
+            return .text((piece.rawText as NSString).substring(with: NSRange(location: head + (length - head - tail), length: tail)))
         }
     }
 

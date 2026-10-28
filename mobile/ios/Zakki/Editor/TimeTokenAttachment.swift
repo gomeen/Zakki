@@ -43,7 +43,7 @@ enum EditorRender {
     static func pieces(_ pieces: [EditorPiece], base: [NSAttributedString.Key: Any] = baseAttributes) -> NSAttributedString {
         let out = NSMutableAttributedString()
         for piece in pieces {
-            out.append(piece(piece, base: base))
+            out.append(Self.piece(piece, base: base))
         }
         return out
     }

@@ -42,11 +42,13 @@ struct TimeTokenInfo: Equatable {
     }
 
     init(hit: TimeTokenHit) {
+        // recur 空串表示无重复（core 的 suffix JSON 字段全出），回退为 nil。
+        let recurRaw = hit.suffix.recur.flatMap { $0.isEmpty ? nil : $0 }
         self.init(
             due: hit.suffix.due,
             hasAlert: hit.suffix.hasAlert,
-            recur: hit.suffix.recur.flatMap { RecurProjection.parse($0) },
-            recurRaw: hit.suffix.recur
+            recur: recurRaw.flatMap { RecurProjection.parse($0) },
+            recurRaw: recurRaw
         )
     }
 
