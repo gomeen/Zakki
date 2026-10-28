@@ -256,8 +256,8 @@ UI 区分「已排定」「待同步／待续排」「权限受限」，不将�
 
 ## 8. 实施验证清单
 
-- [ ] M1：同仓 mobile/binding + replace 可复现，x/mobile 版本在其 go.mod 固定，replace 相对路径正确；双平台绑定构建与 Go／gomobile 升级回归。
-- [ ] M1：高版本写保护；未知字段嵌套往返；桌面专属 settings 原值保留；超过 9 标签不丢数据。
+- [x] M1：同仓 mobile/binding + replace 可复现（replace 相对 `mobile/binding/go.mod` 解析），x/mobile 版本由其 go.mod tool directive 固定；绑定构建进 `make mobile-framework` 与 mobile.yml，干净 runner 可复现（[#25](https://github.com/gomeen/Zakki/pull/25)）；Go／gomobile 升级回归随未来升级动作执行。
+- [x] M1：高版本写保护；未知字段嵌套往返；桌面专属 settings 原值保留；超过 9 标签不丢数据——core/model 与 zakkicore 契约测试、iOS XCTest 与模拟器实测覆盖（[#25](https://github.com/gomeen/Zakki/pull/25)，记录见 [2026-10-28-m1-scaffold-verification](reports/2026-10-28-m1-scaffold-verification.md)）。
 - [x] 工程守护 #17：core 与 vendor/zakki/core 的共享非测试源码一致性检查进入 make check；
   排除绑定目录及模块元数据，故意改坏副本或添加额外源码会使检查失败；core 另在纽约时区回归（R3）。
 - [ ] M3／M5：Find／Split／Replace 一致性，UTF-16 中文／emoji 保护区，未知规则整簇普通文本，
