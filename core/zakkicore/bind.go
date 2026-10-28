@@ -27,13 +27,14 @@ func guard[T any](out *T, err *error) {
 }
 func coded(code string, err error) error {
 	description := map[string]string{
-		"invalid_json":   "JSON 格式非法",
-		"invalid_due":    "截止时刻非法",
-		"invalid_alert":  "提醒配置非法",
-		"invalid_recur":  "重复后缀非法",
-		"invalid_rule":   "重复规则非法",
-		"invalid_args":   "参数非法",
-		"invalid_offset": "UTF-16 保护区间非法",
+		"invalid_json":    "JSON 格式非法",
+		"invalid_due":     "截止时刻非法",
+		"invalid_alert":   "提醒配置非法",
+		"invalid_recur":   "重复后缀非法",
+		"invalid_rule":    "重复规则非法",
+		"invalid_args":    "参数非法",
+		"invalid_offset":  "UTF-16 保护区间非法",
+		"write_protected": "原文件处于写保护状态",
 	}[code]
 	return fmt.Errorf("%s: %s: %w", code, description, err)
 }
