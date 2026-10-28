@@ -27,12 +27,14 @@
 - 共享内核 `core/` 是桌面仓库内的**嵌套 Go module `zakki/core`**，零第三方依赖，禁止依赖
   MyGo 和 `zakki/internal/*`。目标绑定目录／包名为 **`core/zakkicore` / `zakkicore`**，
   gomobile 输出 XCFramework／AAR。已有绑定构建实验不等于移动产品落地。
-- 新建 `zakki-mobile` 仓库，**用 git submodule 固定桌面仓库的一个提交**，例如检出在
-  `third_party/zakki`；绑定构建模块声明 `require zakki/core v0.0.0` 并使用
-  `replace zakki/core => ../third_party/zakki/core`（例：构建模块位于 `binding/`）。
-  replace 相对包含它的 go.mod 所在目录解析，CI 先初始化 submodule 并验证固定提交；
-  不通过 `go get zakki/core` 获取，也不把本地 replace 当作版本锁。升级以 submodule 指针和
-  绑定产物一起评审（R10）。
+- 绑定构建模块与桌面**同仓**：`mobile/binding` 是独立 Go module（模块路径
+  `zakki/mobile/binding`），其 go.mod 声明 `require zakki/core` 并
+  `replace zakki/core => ../../core`（replace 相对包含它的 go.mod 所在目录解析）；
+  `golang.org/x/mobile` 只出现在该模块，经 tool directive 固定版本。
+  不通过 `go get zakki/core` 获取，也不把本地 replace 当作版本锁。升级以 mobile/binding
+  内固定的 x/mobile 版本与重建产物一起评审（R10）。
+- iOS 工程在 `mobile/ios`，用 XcodeGen 维护（`project.yml` 生成 .xcodeproj，
+  生成物不提交）；绑定产物（XCFramework／AAR）不入库，CI 重建验证。
 - 移动 CI 检查绑定产物、Go／gomobile 版本与客户端编译；桌面 `make check` 继续测试 core。
   gomobile 仍属 experimental，工具链升级必须重建双平台产物。
 - 分发：iOS 免费个人签名，按 7 天重签演练；Android APK 侧载。v1 不上架。
@@ -240,7 +242,7 @@ UI 区分「已排定」「待同步／待续排」「权限受限」，不将�
 
 | 里程碑 | 内容 | 出口标准 |
 |---|---|---|
-| M1 脚手架 | iOS 工程、submodule + replace、目标绑定／XCFramework、model 提取、CI；系统文件选择器导入 zakki.json | 模拟器显示真实导入文件的标签；高版本写保护、未知字段／桌面设置往返测试通过 |
+| M1 脚手架 | iOS 工程、同仓 mobile/binding + replace、目标绑定／XCFramework、model 提取、CI；系统文件选择器导入 zakki.json | 模拟器显示真实导入文件的标签；高版本写保护、未知字段／桌面设置往返测试通过 |
 | M2 编辑器 | iOS 双模式、标签、最小主题集、导出本地文件 | 长中文重度编辑由用户验收；M4 前经系统文件导入／导出手动交换，不承诺自动回传桌面 |
 | M3 iOS 提醒 | iOS 令牌弹层、单次通知重排、完成推进、重复、Time Sensitive 能力验证 | **仅 iOS** 到点响、槽位策略、重签／重启分场景恢复、状态展示通过；不要求 Android 出口 |
 | M4 同步 | GitHub 后端、§2.2 的冲突处理与留档、桌面同步配套 | 桌面 ↔ iPhone 双向同步、CAS 冲突与旧 Git 暂停可复现；§2.2 判定表四种情况与 conflicts/ 留档生成可复现 |
@@ -250,7 +252,7 @@ UI 区分「已排定」「待同步／待续排」「权限受限」，不将�
 
 ## 8. 实施验证清单
 
-- [ ] M1：submodule 固定提交可复现，replace 相对路径正确；双平台绑定构建与 Go／gomobile 升级回归。
+- [ ] M1：同仓 mobile/binding + replace 可复现，x/mobile 版本在其 go.mod 固定，replace 相对路径正确；双平台绑定构建与 Go／gomobile 升级回归。
 - [ ] M1：高版本写保护；未知字段嵌套往返；桌面专属 settings 原值保留；超过 9 标签不丢数据。
 - [x] 工程守护 #17：core 与 vendor/zakki/core 的共享非测试源码一致性检查进入 make check；
   排除绑定目录及模块元数据，故意改坏副本或添加额外源码会使检查失败；core 另在纽约时区回归（R3）。
@@ -290,7 +292,8 @@ UI 区分「已排定」「待同步／待续排」「权限受限」，不将�
   第二台设备加入不能直接假设迁址可用。文件提供方能力、原子发布和 capability 须验证后设计入口。
 - R9：**接受多设备同一实例各响一次**，本地去重不跨设备协调；冲突留档文件（D13）不参与调度，
   不会因此重复提醒。不能把正常多设备重复的接受扩大为默认接受冲突副本重复。
-- R10：gomobile 工具链及运行时体积随内核增长，submodule／绑定产物必须共同固定并验证。
+- R10：gomobile 工具链及运行时体积随内核增长；绑定构建模块与桌面同仓，x/mobile 版本在
+  mobile/binding/go.mod 固定，绑定产物不入库、CI 重建验证。
 - R13：`^w@` 与行尾 `@` 自动弹层的歧义已在桌面修复：光标前的非空白片段以 `^` 开头时不触发。
   移动端若实现同类行尾触发，须沿用同一规则。
 - 双原生有两套 UI 成本，已接受；桌面改动到手机仍受同步时机限制，属于尽力而为。
