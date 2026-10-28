@@ -70,4 +70,5 @@ golang.org/x/text/language
 # zakki/core v0.0.0-00010101000000-000000000000 => ./core
 ## explicit; go 1.27
 zakki/core
+zakki/core/model
 # zakki/core => ./core
