@@ -14,7 +14,7 @@ ARCH_RULES := \
 	notes:atomicfile \
 	prefs:atomicfile,fonts
 
-.PHONY: fmt-check vet test race arch-check vendor-check check build build-windows vendor
+.PHONY: fmt-check vet test race arch-check vendor-check check build build-windows vendor mobile-framework
 
 fmt-check:
 	@echo "==> gofmt 检查：仓库源码（排除 build/、.mygo/ 与 vendor/）"
@@ -83,3 +83,21 @@ build:
 build-windows:
 	@echo "==> go tool mygo build：打包 Windows x64 到 build/windows-amd64/（安装器需要 NSIS）"
 	go tool mygo build -platform windows/amd64
+
+# iOS 绑定产物（生成物，不入库，见 .gitignore）。gomobile 版本由
+# mobile/binding/go.mod 的 tool directive 固定，不经 ~/go/bin 预装二进制；
+# gobind 同属 x/mobile，每次从同一模块临时构建后前置到 PATH，
+# 保证干净 CI 机器（macos-latest，~/go/bin 为空）也能跑。
+# gomobile 需要 iOS SDK，必须用完整 Xcode（显式 DEVELOPER_DIR，不依赖 xcode-select）。
+mobile-framework: export DEVELOPER_DIR := /Applications/Xcode.app/Contents/Developer
+mobile-framework:
+	@echo "==> gomobile bind：mobile/ios/Frameworks/Zakkicore.xcframework（ios + simulator）"
+	@mkdir -p mobile/ios/Frameworks
+	@bin=$$(mktemp -d); \
+	trap 'rm -rf "$$bin"' EXIT; \
+	go -C mobile/binding build -o "$$bin/gobind" golang.org/x/mobile/cmd/gobind || exit 1; \
+	PATH="$$bin:$$PATH" go -C mobile/binding tool gomobile bind \
+		-target ios,iossimulator \
+		-o ../ios/Frameworks/Zakkicore.xcframework \
+		zakki/core/zakkicore || exit 1; \
+	echo "    产出：mobile/ios/Frameworks/Zakkicore.xcframework"

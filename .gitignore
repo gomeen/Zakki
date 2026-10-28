@@ -8,6 +8,9 @@ mygo_windows_*.syso
 **/mygo-update.key
 /zakki.exe
 
+# 移动端绑定产物（make mobile-framework 生成，不入库）
+/mobile/ios/Frameworks/
+
 # 本地 AI 技能工具产物
 .taste-skill/
 skills-lock.json
