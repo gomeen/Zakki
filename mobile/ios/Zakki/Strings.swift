@@ -65,4 +65,13 @@ enum Strings {
     static func pillUntil(_ date: String) -> String {
         t("until \(date)", "至 \(date)")
     }
+
+    // MARK: 编辑器与写回
+
+    static var saveFailedTitle: String { t("Save Failed", "保存失败") }
+
+    static func saveFailedMessage(code: String) -> String {
+        t("Your changes could not be saved (\(code)). They stay pending and will retry.",
+          "改动暂未能保存（\(code)），将保持待写并重试。")
+    }
 }
