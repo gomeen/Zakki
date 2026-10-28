@@ -1,6 +1,17 @@
-// M1 最小做法：用户可见文案集中在这一处英文源字符串，M2 再接 i18n
-// （键位与措辞对齐桌面 locales/en.json 的风格）。
+import Foundation
+
+// 用户可见文案集中在这一处：英文为源，系统首选语言为中文时取中文
+//（#26 i18n 口径：随票新增文案即时双语化，#30 收口统一核对；键位与措辞对齐桌面 locales）。
 enum Strings {
+    static func t(_ en: String, _ zh: String) -> String {
+        if let first = Locale.preferredLanguages.first, first.lowercased().hasPrefix("zh") {
+            return zh
+        }
+        return en
+    }
+
+    // MARK: M1 既有文案（双语化随 M2 装配票补齐）
+
     static let importButton = "Import zakki.json"
     static let importFailedTitle = "Import Failed"
     static let ok = "OK"
@@ -27,5 +38,31 @@ enum Strings {
         case nil:
             return "This file stays write-protected."
         }
+    }
+
+    // MARK: 时间组件胶囊（M2-1 临时样式，档位用语对齐桌面 locales）
+
+    static var pillAlert: String { t("Reminder", "提醒") }
+    static var pillListSeparator: String { t(", ", "、") }
+    static var pillDaily: String { t("Every day", "每天") }
+    static var pillWeekly: String { t("Every week", "每周") }
+    static var pillMonthly: String { t("Every month", "每月") }
+    static var pillYearly: String { t("Every year", "每年") }
+    static var pillUnitDay: String { t("days", "天") }
+    static var pillUnitWeek: String { t("weeks", "周") }
+    static var pillUnitMonth: String { t("months", "月") }
+    static var pillUnitYear: String { t("years", "年") }
+    static var pillAccessibilityLabel: String { t("Time reminder", "时间提醒") }
+
+    static func pillInterval(_ n: Int, _ unit: String) -> String {
+        t("Every \(n) \(unit)", "每 \(n) \(unit)")
+    }
+
+    static func pillWeeklyOn(_ names: String) -> String {
+        t("Weekly \(names)", "每周\(names)")
+    }
+
+    static func pillUntil(_ date: String) -> String {
+        t("until \(date)", "至 \(date)")
     }
 }
