@@ -49,6 +49,16 @@ enum NotesCore {
         }
         return out
     }
+
+    // 时区同步（规格 §3.2）：启动与时区变化时调用；空串恢复 time.Local。
+    static func setLocation(_ name: String) {
+        var err: NSError?
+        _ = ZakkicoreSetLocation(name, &err)
+        if let err {
+            // 时区名来自系统（IANA 标识），理论不会失败；防御性忽略并留调试断言。
+            assertionFailure("SetLocation 失败: \(err)")
+        }
+    }
 }
 
 // 绑定层返回的 Go 错误（`code: 说明` 格式），上层按前缀码分类。
