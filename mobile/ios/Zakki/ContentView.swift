@@ -81,11 +81,13 @@ struct ContentView: View {
                 List {
                     ForEach(Array(tabs.enumerated()), id: \.offset) { index, tab in
                         NavigationLink(value: tab.id) {
-                            TabRow(tab: tab, active: index == snapshot.active)
+                            TabRow(tab: tab, active: index == snapshot.active, slot: index)
                         }
                     }
                 }
                 .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .background(Color(uiColor: Theme.Semantic.background))
             }
         }
     }
@@ -106,11 +108,19 @@ struct ContentView: View {
 struct TabRow: View {
     let tab: NotesTab
     let active: Bool
+    let slot: Int
+
+    // 「当前」徽标 = 标签胶囊：底色/文字色按桌面收敛规则派生
+    //（目标 5:1、底线 4.5:1、向黑白混合 ≤12%），浅深外观同一套（同桌面）。
+    private var pill: TabPill.Palette {
+        let base = ThemeTagPalette.parse(tab.color) ?? ThemeTagPalette.color(at: slot)
+        return TabPill.palette(base: base)
+    }
 
     var body: some View {
         HStack(spacing: 12) {
             Circle()
-                .fill(tab.displayColor)
+                .fill(tab.displayColor(fallbackSlot: slot))
                 .frame(width: 12, height: 12)
             VStack(alignment: .leading, spacing: 2) {
                 Text(tab.name.isEmpty ? Strings.untitledTab : tab.name)
@@ -126,8 +136,8 @@ struct TabRow: View {
                     .font(.caption2.bold())
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(Color.accentColor.opacity(0.15), in: Capsule())
-                    .foregroundStyle(Color.accentColor)
+                    .background(Color(uiColor: pill.background.uiColor), in: Capsule())
+                    .foregroundStyle(Color(uiColor: pill.text.uiColor))
             }
         }
         .padding(.vertical, 2)
@@ -160,19 +170,11 @@ extension NotesTab {
         text.split(separator: "\n", omittingEmptySubsequences: false).first.map(String.init) ?? ""
     }
 
-    // 桌面调色板的 #rrggbb（小写十六进制）；空串或非法值给中性占位色。
-    var displayColor: Color {
-        var hex = color.trimmingCharacters(in: .whitespacesAndNewlines)
-        if hex.hasPrefix("#") {
-            hex.removeFirst()
+    // 桌面 tabColor：记录颜色优先（#rrggbb），无效/缺失按槽位回退内置调色板。
+    func displayColor(fallbackSlot: Int) -> Color {
+        if let rgb = ThemeTagPalette.parse(color) {
+            return Color(uiColor: rgb.uiColor)
         }
-        guard hex.count == 6, let value = UInt64(hex, radix: 16) else {
-            return Color(uiColor: .systemGray)
-        }
-        return Color(
-            red: Double((value >> 16) & 0xFF) / 255,
-            green: Double((value >> 8) & 0xFF) / 255,
-            blue: Double(value & 0xFF) / 255
-        )
+        return Color(uiColor: ThemeTagPalette.color(at: fallbackSlot).uiColor)
     }
 }
