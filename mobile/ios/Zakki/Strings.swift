@@ -87,6 +87,18 @@ enum Strings {
         t("Could not update tabs (\(code)).", "标签更新未能保存（\(code)）。")
     }
 
+    // MARK: M2-4 标签管理与导出
+
+    static var edit: String { t("Edit", "编辑") }
+    static var done: String { t("Done", "完成") }
+    static var cancel: String { t("Cancel", "取消") }
+    static var addTab: String { t("Add Tab", "新建标签") }
+    static var exportFile: String { t("Export zakki.json", "导出 zakki.json") }
+    static var renameTab: String { t("Rename", "重命名") }
+    static var renameTabTitle: String { t("Rename Tab", "重命名标签") }
+    static var renameTabMessage: String { t("Give this tab a name. Leave it blank to show Untitled.", "给这个标签起个名字，留空则显示未命名。") }
+    static var tabColor: String { t("Tab Color", "标签颜色") }
+
     // MARK: M2-2 模式切换
 
     // 浮动切换钮的无障碍文案（图标指向要切去的模式）。

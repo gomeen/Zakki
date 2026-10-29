@@ -3,19 +3,19 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var model: NotesModel
     @State private var showingPicker = false
+    // 重排模式：List 进编辑态只为拖拽排序（onMove）；导航与左滑操作在非编辑态。
+    @State private var reordering = false
+    // 换色面板与重命名弹窗的目标标签。
+    @State private var colorTarget: NotesTab?
+    @State private var renameTarget: NotesTab?
+    @State private var renameText = ""
 
     var body: some View {
         NavigationStack {
             mainContent
                 .navigationTitle("Zakki")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button(Strings.importButton) {
-                            showingPicker = true
-                        }
-                    }
-                }
+                .toolbar { toolbarContent }
                 .navigationDestination(for: UInt64.self) { tabID in
                     editorDestination(tabID: tabID)
                 }
@@ -23,6 +23,29 @@ struct ContentView: View {
                     DocumentPicker { url in
                         model.importFile(at: url)
                     }
+                }
+                .sheet(item: $colorTarget) { tab in
+                    TabColorPickerSheet(tab: tab)
+                }
+                .alert(
+                    Strings.renameTabTitle,
+                    isPresented: Binding(
+                        get: { renameTarget != nil },
+                        set: { if !$0 { renameTarget = nil } }
+                    )
+                ) {
+                    TextField(Strings.untitledTab, text: $renameText)
+                    Button(Strings.renameTab) {
+                        if let target = renameTarget {
+                            model.renameTab(id: target.id, name: renameText)
+                        }
+                        renameTarget = nil
+                    }
+                    Button(Strings.cancel, role: .cancel) {
+                        renameTarget = nil
+                    }
+                } message: {
+                    Text(Strings.renameTabMessage)
                 }
                 .alert(
                     Strings.saveFailedTitle,
@@ -49,6 +72,40 @@ struct ContentView: View {
         }
     }
 
+    // 导出=交出沙盒 zakki.json 的 URL（写保护文件也允许备份）；标签管理入口
+    // 只在 writable 时出现（模型层同样拒绝，UI 隐藏是第一道门）。
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItemGroup(placement: .primaryAction) {
+            if model.snapshot != nil {
+                ShareLink(item: model.fileURL) {
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .accessibilityLabel(Strings.exportFile)
+            }
+            if let snapshot = model.snapshot, snapshot.writable {
+                Button {
+                    model.addTab(name: "", color: NotesModel.unusedTabColor(for: snapshot.tabs ?? []))
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel(Strings.addTab)
+                .disabled((snapshot.tabs?.count ?? 0) >= 9)
+            }
+            Button(Strings.importButton) {
+                showingPicker = true
+            }
+        }
+        ToolbarItem(placement: .navigationBarLeading) {
+            if let snapshot = model.snapshot, snapshot.writable,
+               (snapshot.tabs?.count ?? 0) >= 2 {
+                Button(reordering ? Strings.done : Strings.edit) {
+                    reordering.toggle()
+                }
+            }
+        }
+    }
+
     @ViewBuilder
     private var mainContent: some View {
         if let snapshot = model.snapshot {
@@ -67,7 +124,8 @@ struct ContentView: View {
         }
     }
 
-    // active 是磁盘里的当前标签下标，M1 仅做展示高亮，不做打开态记忆。
+    // active 是磁盘里的当前标签下标，M1 语义保持仅展示高亮；点行走 NavigationLink
+    // 进编辑器（设备本地打开，不写 shared active）。
     private func tabList(_ snapshot: NotesSnapshot) -> some View {
         let tabs = snapshot.tabs ?? []
         return Group {
@@ -79,15 +137,48 @@ struct ContentView: View {
                 )
             } else {
                 List {
-                    ForEach(Array(tabs.enumerated()), id: \.offset) { index, tab in
+                    ForEach(Array(tabs.enumerated()), id: \.element.id) { index, tab in
                         NavigationLink(value: tab.id) {
                             TabRow(tab: tab, active: index == snapshot.active, slot: index)
                         }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            // 只剩一个标签时不给删除入口（桌面「至少保留一个」parity）。
+                            if snapshot.writable, tabs.count >= 2 {
+                                Button(role: .destructive) {
+                                    model.deleteTab(id: tab.id)
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                            }
+                        }
+                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                            if snapshot.writable {
+                                Button {
+                                    renameTarget = tab
+                                    renameText = tab.name
+                                } label: {
+                                    Label(Strings.renameTab, systemImage: "pencil")
+                                }
+                                .tint(Color(uiColor: Theme.Semantic.accent))
+                                Button {
+                                    colorTarget = tab
+                                } label: {
+                                    Label(Strings.tabColor, systemImage: "paintpalette")
+                                }
+                                .tint(Color(uiColor: Theme.Semantic.accent))
+                            }
+                        }
+                    }
+                    .onMove { source, destination in
+                        var ids = tabs.map(\.id)
+                        ids.move(fromOffsets: source, toOffset: destination)
+                        model.reorderTabs(ids: ids)
                     }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .background(Color(uiColor: Theme.Semantic.background))
+                .environment(\.editMode, .constant(reordering ? .active : .inactive))
             }
         }
     }
@@ -104,6 +195,8 @@ struct ContentView: View {
         }
     }
 }
+
+extension NotesTab: Identifiable {}
 
 struct TabRow: View {
     let tab: NotesTab
@@ -141,6 +234,59 @@ struct TabRow: View {
             }
         }
         .padding(.vertical, 2)
+    }
+}
+
+// 换色面板：桌面 12 色板（M2-3 Theme），选中勾的显色消费胶囊收敛色保证对比。
+struct TabColorPickerSheet: View {
+    let tab: NotesTab
+    @EnvironmentObject private var model: NotesModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 48), spacing: 20)], spacing: 20) {
+                ForEach(Array(ThemeTagPalette.colors.enumerated()), id: \.offset) { _, hex in
+                    swatch(hex)
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(Color(uiColor: Theme.Semantic.background))
+            .navigationTitle(Strings.tabColor)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(Strings.editorDone) { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private func swatch(_ hex: String) -> some View {
+        let selected = tab.color.caseInsensitiveCompare(hex) == .orderedSame
+        let base = ThemeTagPalette.parse(hex)
+        return Button {
+            // 落盘成功才收起面板；失败由模型层上报，面板留在原地可重试。
+            if model.setTabColor(id: tab.id, color: hex) {
+                dismiss()
+            }
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(Color(uiColor: base?.uiColor ?? .clear))
+                if selected {
+                    let pill = TabPill.palette(base: base ?? ThemeRGB(0, 0, 0))
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(Color(uiColor: pill.text.uiColor))
+                }
+            }
+            .frame(width: 44, height: 44)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Strings.tabColor)
     }
 }
 
