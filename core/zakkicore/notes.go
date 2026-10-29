@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"zakki/core/model"
 )
@@ -115,4 +116,179 @@ func EncodeNotes(raw, tabsJSON string) (out string, err error) {
 		return "", fmt.Errorf("internal: 内部处理异常: %w", e)
 	}
 	return string(encoded), nil
+}
+
+// ---- M2-4 标签管理写路径（桌面 parity 参照 internal/app/tab_model.go） ----
+
+// decodeForWrite 是标签管理写路径共用的前置分类：解析失败/版本超前/legacy/
+// 标签超限一律 write_protected（口径与 EncodeNotes 完全一致），通过后按三层
+// 未知字段保真解码。DefaultTabCount 留零：写路径不补默认标签，极端的无标签
+// 文件加标签时不会凭空长出 7 个默认标签，新 id 才能按现有最大 id+1（从 1 起）。
+func decodeForWrite(raw string) (model.Document, error) {
+	var peek struct {
+		Version int               `json:"version"`
+		Tabs    []json.RawMessage `json:"tabs"`
+	}
+	if e := json.Unmarshal([]byte(raw), &peek); e != nil {
+		return model.Document{}, coded("write_protected", errors.New("文件损坏，无法解析"))
+	}
+	if peek.Version > model.CurrentDataVersion {
+		return model.Document{}, coded("write_protected", &model.VersionError{Version: peek.Version})
+	}
+	if peek.Version < model.CurrentDataVersion {
+		return model.Document{}, coded("write_protected", errors.New("文件版本低于当前支持，请先用桌面端打开升级"))
+	}
+	if len(peek.Tabs) > model.MaxTabCount {
+		return model.Document{}, coded("write_protected", fmt.Errorf("%w：%d 个，最多 %d 个", model.ErrTooManyTabs, len(peek.Tabs), model.MaxTabCount))
+	}
+	doc, e := model.Decode([]byte(raw), model.MigrateOptions{MaxTabCount: model.MaxTabCount})
+	if e != nil {
+		return model.Document{}, coded("write_protected", e)
+	}
+	return doc, nil
+}
+
+func encodeForWrite(doc model.Document) (string, error) {
+	encoded, e := model.Encode(doc)
+	if e != nil {
+		return "", fmt.Errorf("internal: 内部处理异常: %w", e)
+	}
+	return string(encoded), nil
+}
+
+func tabIndexByID(tabs []model.Tab, id uint64) int {
+	for i, tb := range tabs {
+		if tb.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// clampIndex 把下标收敛到 0..n-1；调用方保证 n > 0（调用点都已有标签）。
+func clampIndex(v, n int) int {
+	return min(max(v, 0), n-1)
+}
+
+// addNoteTabResult 是 AddNoteTab 的返回形状；新 id 由客户端从这里取，不自行计算。
+type addNoteTabResult struct {
+	Raw string `json:"raw"`
+	ID  uint64 `json:"id"`
+}
+
+// AddNoteTab 在 raw 末尾追加一个标签，返回 {"raw":新文件JSON,"id":新id}。
+// 写保护分类先行（与 EncodeNotes 同口径）；已有 MaxTabCount 个标签时报
+// invalid_args——先自查 len 再解码，9 满文件超限给 invalid_args 而非
+// write_protected。新 id 为现有最大 id+1（无标签文件从 1 起）；active 落到
+// 末尾新索引（桌面 addTab parity）。Name/Color 原样存储，命名与选色职责在客户端。
+func AddNoteTab(raw, name, color string) (out string, err error) {
+	defer guard(&out, &err)
+	doc, err := decodeForWrite(raw)
+	if err != nil {
+		return "", err
+	}
+	if len(doc.File.Tabs) >= model.MaxTabCount {
+		return "", coded("invalid_args", fmt.Errorf("已有 %d 个标签，最多 %d 个", len(doc.File.Tabs), model.MaxTabCount))
+	}
+	var maxID uint64
+	for _, tb := range doc.File.Tabs {
+		if tb.ID > maxID {
+			maxID = tb.ID
+		}
+	}
+	id := maxID + 1
+	doc.File.Tabs = append(doc.File.Tabs, model.Tab{ID: id, Name: name, Color: color})
+	doc.File.Active = len(doc.File.Tabs) - 1
+	encoded, e := encodeForWrite(doc)
+	if e != nil {
+		return "", e
+	}
+	res, e := json.Marshal(addNoteTabResult{Raw: encoded, ID: id})
+	if e != nil {
+		panic(e) // 形状固定不会发生；交给 recover 防线按内部异常处理
+	}
+	return string(res), nil
+}
+
+// DeleteNoteTab 按 id 删除标签并返回整个新文件 JSON。写保护先行；只剩一个
+// 标签（桌面「至少保留一个」）与 id 不存在都报 invalid_args。active 语义与
+// 桌面 deleteTabNow 一致：删的是 active 落到 min(i, len-1)，否则按 id 跟随
+// 原 active 标签，末尾 clamp。
+func DeleteNoteTab(raw string, id int64) (out string, err error) {
+	defer guard(&out, &err)
+	if id < 0 {
+		return "", coded("invalid_args", fmt.Errorf("标签 id %d 非法", id))
+	}
+	doc, err := decodeForWrite(raw)
+	if err != nil {
+		return "", err
+	}
+	i := tabIndexByID(doc.File.Tabs, uint64(id))
+	if i < 0 {
+		return "", coded("invalid_args", fmt.Errorf("标签 id %d 不在原文件中", id))
+	}
+	if len(doc.File.Tabs) <= 1 {
+		return "", coded("invalid_args", errors.New("至少保留一个标签"))
+	}
+	activeID := doc.File.Tabs[doc.File.Active].ID
+	doc.File.Tabs = slices.Delete(doc.File.Tabs, i, i+1)
+	if doc.File.Active == i {
+		doc.File.Active = min(i, len(doc.File.Tabs)-1)
+	} else if k := tabIndexByID(doc.File.Tabs, activeID); k >= 0 {
+		doc.File.Active = k
+	}
+	doc.File.Active = clampIndex(doc.File.Active, len(doc.File.Tabs))
+	return encodeForWrite(doc)
+}
+
+// ReorderNoteTabs 按 idsJSON 给出的完整排列重排标签并返回整个新文件 JSON。
+// 写保护先行；idsJSON 必须是现有 id 的完整排列（长度一致、无重复且集合一致），
+// 否则报 invalid_args（解析失败报 invalid_json）。active 按 id 跟随到新位置
+// （桌面 reorderTab parity）。
+func ReorderNoteTabs(raw, idsJSON string) (out string, err error) {
+	defer guard(&out, &err)
+	doc, err := decodeForWrite(raw)
+	if err != nil {
+		return "", err
+	}
+	var ids []int64
+	if e := json.Unmarshal([]byte(idsJSON), &ids); e != nil {
+		return "", coded("invalid_json", e)
+	}
+	if len(ids) != len(doc.File.Tabs) {
+		return "", coded("invalid_args", fmt.Errorf("排列含 %d 个 id，与标签数 %d 不一致", len(ids), len(doc.File.Tabs)))
+	}
+	byID := make(map[uint64]model.Tab, len(doc.File.Tabs))
+	for _, tb := range doc.File.Tabs {
+		byID[tb.ID] = tb
+	}
+	reordered := make([]model.Tab, 0, len(ids))
+	seen := make(map[uint64]bool, len(ids))
+	for _, id := range ids {
+		if id < 0 {
+			return "", coded("invalid_args", fmt.Errorf("标签 id %d 非法", id))
+		}
+		tb, ok := byID[uint64(id)]
+		if !ok {
+			return "", coded("invalid_args", fmt.Errorf("标签 id %d 不在原文件中", id))
+		}
+		if seen[uint64(id)] {
+			return "", coded("invalid_args", fmt.Errorf("标签 id %d 重复", id))
+		}
+		seen[uint64(id)] = true
+		reordered = append(reordered, tb)
+	}
+	// activeID 必须在重排前捕获（桌面 reorderTab 同样先拿原 active 标签的 id）。
+	var activeID uint64
+	if len(doc.File.Tabs) > 0 {
+		activeID = doc.File.Tabs[doc.File.Active].ID
+	}
+	doc.File.Tabs = reordered
+	if len(doc.File.Tabs) > 0 {
+		if k := tabIndexByID(doc.File.Tabs, activeID); k >= 0 {
+			doc.File.Active = k
+		}
+		doc.File.Active = clampIndex(doc.File.Active, len(doc.File.Tabs))
+	}
+	return encodeForWrite(doc)
 }
