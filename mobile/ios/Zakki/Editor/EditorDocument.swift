@@ -179,12 +179,19 @@ final class EditorDocument {
         guard !lines.isEmpty else { return EditOutcome() }
         let firstLine = lineIndex(atRawOffset: min(oldRawStart, rawLength))
         let lastLine = lineIndex(atRawOffset: max(oldRawStart, min(regionEnd - 1, rawLength - 1)))
+        // 变异后、重扫前的几何快照：重扫会把本次命中的簇以 token 片元写回 pieces，
+        // 命中映射若用重扫后的几何会落在命中自身的组件字符上，被“缓冲长度 1”
+        // 的过滤条件误跳过。
+        let mutatedPieces = pieces
+        let mutatedBufferStarts = pieceBufferStarts
+        let mutatedRawStarts = pieceRawStarts
         let hits = rescanLines(firstLine...lastLine)
 
         // 把命中区间映射回视图当前缓冲坐标（= 新缓冲：前缀与替换区与旧缓冲共几何）。
         // 替换区在识别路径上必为纯文本（token 片段只随撤销/重做路径进来，且不识别），
-        // 故区内 raw 与缓冲偏移 1:1。已是组件的命中（缓冲长度 1）不产生替换。
-        let replacementBufferLen = replacement.reduce(0) { $0 + $1.bufferLength }
+        // 故区内 raw 与缓冲偏移 1:1；替换区之前用旧几何、之后用变异后几何映射，
+        // 才能正确跨越行内既有组件（其缓冲长度 1 ≠ raw 长度）。已是组件的命中
+        //（缓冲长度 1）不产生替换。
         func mappedBufferOffset(_ newRaw: Int) -> Int {
             if newRaw <= oldRawStart {
                 return bufferOffset(ofRawOffset: newRaw, pieces: oldPieces, bufferStarts: oldBufferStarts, rawStarts: oldRawStarts)
@@ -192,7 +199,7 @@ final class EditorDocument {
             if newRaw < regionEnd {
                 return range.location + (newRaw - oldRawStart)
             }
-            return range.location + replacementBufferLen + (newRaw - regionEnd)
+            return bufferOffset(ofRawOffset: newRaw, pieces: mutatedPieces, bufferStarts: mutatedBufferStarts, rawStarts: mutatedRawStarts)
         }
 
         var outcome = EditOutcome()
@@ -288,16 +295,20 @@ final class EditorDocument {
         return NSRange(location: location, length: end - location)
     }
 
-    // 旧几何映射：raw 偏移 → 缓冲偏移。
-    private func bufferOffset(ofRawOffset offset: Int) -> Int {
+    // 当前几何的坐标映射（模式切换的光标换算与测试共用）。
+    // raw 偏移 → 缓冲偏移：簇内钳到组件首，簇尾及之后落到组件后一格。
+    func bufferOffset(ofRawOffset offset: Int) -> Int {
         bufferOffset(ofRawOffset: offset, pieces: pieces, bufferStarts: pieceBufferStarts, rawStarts: pieceRawStarts)
     }
 
-    private func rawOffset(ofBufferOffset offset: Int) -> Int {
+    // 缓冲偏移 → raw 偏移：组件首映射簇首，组件后映射簇尾。
+    func rawOffset(ofBufferOffset offset: Int) -> Int {
         rawOffset(ofBufferOffset: offset, pieces: pieces, bufferStarts: pieceBufferStarts, rawStarts: pieceRawStarts)
     }
 
     // 通用映射：raw 偏移 → 缓冲偏移（用调用方抓取的前缀和，兼容变异前后两套几何）。
+    // 组件片元占缓冲 1 个字符：簇尾及之后落到组件后一格，簇内钳到组件首
+    //（组件不可内部定位，选区恢复时取边界即可）。
     private func bufferOffset(ofRawOffset offset: Int, pieces: [EditorPiece], bufferStarts: [Int], rawStarts: [Int]) -> Int {
         guard !pieces.isEmpty, !rawStarts.isEmpty else { return 0 }
         var idx = 0
@@ -309,10 +320,11 @@ final class EditorDocument {
         if case .text(let s) = piece {
             return bufferStarts[idx] + min(delta, (s as NSString).length)
         }
-        return bufferStarts[idx]
+        return delta >= piece.rawLength ? bufferStarts[idx] + 1 : bufferStarts[idx]
     }
 
     // 通用映射：缓冲偏移 → raw 偏移（用调用方抓取的前缀和，兼容变异前后两套几何）。
+    // 组件片元占缓冲 1 个字符：组件后（delta ≥ 1）映射簇尾，组件首映射簇首。
     private func rawOffset(ofBufferOffset offset: Int, pieces: [EditorPiece], bufferStarts: [Int], rawStarts: [Int]) -> Int {
         guard !pieces.isEmpty, !bufferStarts.isEmpty else { return 0 }
         var idx = 0
@@ -324,7 +336,7 @@ final class EditorDocument {
         if case .text(let s) = piece {
             return rawStarts[idx] + min(delta, (s as NSString).length)
         }
-        return rawStarts[idx]
+        return delta >= 1 ? rawStarts[idx] + piece.rawLength : rawStarts[idx]
     }
 
     // 按缓冲区间切分 pieces：区间前与区间后的片段（跨界文本片段沿边界拆开，
