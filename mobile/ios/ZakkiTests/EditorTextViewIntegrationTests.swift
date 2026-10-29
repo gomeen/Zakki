@@ -184,4 +184,38 @@ final class EditorTextViewIntegrationTests: XCTestCase {
         XCTAssertEqual(editor.document.rawText, "locked")
         XCTAssertEqual(UIPasteboard.general.string, "")
     }
+
+    // M2-5 回归：键入补全令牌时收簇先挂起（收簇挂起窗口内 document 有意领先于存储），
+    // 窗口内再入的对账通知不得重入（否则 diff 分支会把文档重置回存储旧文本并重复挂
+    // 收簇 → 双重 flush 越界）；窗口收束由 flush 落存储自身通知完成权威对账，
+    // 撤销栈只含键入与收簇两个单元（无样式步）。
+    @MainActor
+    func testTypingCollapseThroughPendingWindowCollapsesOnceWithCleanUndoUnits() {
+        let editor = makeEditor(raw: "# 标题\n\n正文 ")
+        editor.selectedRange = NSRange(location: (editor.textStorage.string as NSString).length, length: 0)
+        type(cluster, into: editor)
+        XCTAssertEqual(editor.textStorage.string, "# 标题\n\n正文 \(fffc)", "收组件恰好一次")
+        XCTAssertEqual(editor.document.rawText, "# 标题\n\n正文 \(cluster)", "flush 后权威对账：文档与缓冲一致")
+        XCTAssertEqual(editor.undoUnitCount, 2, "撤销栈=键入单元+收簇单元，无样式步")
+        XCTAssertEqual(editor.redoUnitCount, 0)
+        editor.undoManager?.undo()
+        XCTAssertEqual(editor.textStorage.string, "# 标题\n\n正文 \(cluster)", "先撤销收组件")
+        XCTAssertEqual(editor.document.rawText, "# 标题\n\n正文 \(cluster)")
+        editor.undoManager?.undo()
+        XCTAssertEqual(editor.textStorage.string, "# 标题\n\n正文 ", "再撤销输入")
+        XCTAssertEqual(editor.document.rawText, "# 标题\n\n正文 ")
+    }
+
+    // 多行文档键入不改字符（含 blank 行）：视图全链路（含 enforceBufferInvariant）回归。
+    @MainActor
+    func testTypingOnMultiLineDocumentPreservesBlankLines() {
+        let editor = makeEditor(raw: "aaa\n\nbbb")
+        editor.selectedRange = NSRange(location: 1, length: 0)
+        editor.insertText("X")
+        XCTAssertEqual(editor.textStorage.string, "aXaa\n\nbbb")
+        XCTAssertEqual(editor.document.rawText, "aXaa\n\nbbb")
+        editor.selectedRange = NSRange(location: 8, length: 0)
+        editor.insertText("Y")
+        XCTAssertEqual(editor.textStorage.string, "aXaa\n\nbbYb")
+    }
 }

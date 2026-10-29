@@ -443,13 +443,15 @@ final class EditorDocument {
                 var ranges = MarkdownProtection.inlineProtectedRanges(in: tail)
                 ranges = ranges.map { NSRange(location: $0.location, length: $0.length) }
                 if let hit = Self.findTimeToken(in: tail, protectedJSON: MarkdownProtection.protectedJSON(ranges: ranges)) {
-                    let abs = NSRange(location: searchStart + hit.range.location, length: hit.range.length)
+                    let hitInLine = NSRange(location: searchStart + hit.range.location, length: hit.range.length)
                     let head = lineNSString.substring(with: NSRange(location: searchStart, length: hit.range.location))
                     pendingText += head
                     flushText()
                     spanPieces.append(.token(hit.raw))
-                    hits.append(TimeTokenHit(range: abs, raw: hit.raw, suffix: hit.suffix))
-                    searchStart = abs.location + abs.length
+                    // 命中区间必须换算 raw 绝对坐标：apply 的映射按全文 raw 偏移解释，
+                    // 行内相对坐标只与首行重合时巧合成立，多行文档会收错区间。
+                    hits.append(TimeTokenHit(range: NSRange(location: line.rawStart + hitInLine.location, length: hitInLine.length), raw: hit.raw, suffix: hit.suffix))
+                    searchStart = hitInLine.location + hitInLine.length
                 } else {
                     pendingText += tail
                     break
@@ -460,7 +462,11 @@ final class EditorDocument {
 
         guard range.upperBound >= range.lowerBound, range.lowerBound < lines.count else { return hits }
         let spanStart = lines[range.lowerBound].rawStart
-        let spanEnd = lines[range.upperBound].rawStart + lines[range.upperBound].rawLength
+        // 重建 span 只覆盖到末行行尾文本（不含行尾换行）：spanPieces 只携带行内文本与
+        // 行间换行，末行行尾换行留在 after 里。否则单行重扫会吞掉行尾换行，
+        // 多行文档每次键入经 enforceBufferInvariant 被写坏（blank 行丢失）。
+        let upperLine = lines[range.upperBound]
+        let spanEnd = upperLine.rawStart + (upperLine.text as NSString).length
         let (before, after) = splitPieces(atRawRange: NSRange(location: spanStart, length: spanEnd - spanStart))
         pieces = before + spanPieces + after
         rebuildDerived()
