@@ -3,10 +3,10 @@ package notes
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"time"
 
+	"zakki/core/model"
 	"zakki/internal/atomicfile"
 )
 
@@ -149,8 +149,23 @@ func (s *Store) completeSave(revision uint64, err error) {
 	}
 }
 
+// encodeDisk 把文件与载入时捕获的三层未知字段快照组装后交给共享编码器：
+// 快照只在锁内读取，Encode 不改 map；TabUnknown 只输出 f.Tabs 里仍存在
+// 的 id，删除的标签连同其未知字段不再落盘，新建标签天然没有未知字段。
+func (s *Store) encodeDisk(f File) ([]byte, error) {
+	s.mu.Lock()
+	doc := model.Document{
+		File:            f,
+		Unknown:         s.topUnknown,
+		SettingsUnknown: s.settingsUnknown,
+		TabUnknown:      s.tabUnknown,
+	}
+	s.mu.Unlock()
+	return model.Encode(doc)
+}
+
 func (s *Store) writeFile(f File) error {
-	raw, err := json.MarshalIndent(f, "", "  ")
+	raw, err := s.encodeDisk(f)
 	if err != nil {
 		return err
 	}

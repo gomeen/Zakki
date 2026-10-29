@@ -57,10 +57,10 @@ M1 拟从 `internal/notes/file.go` 提取 core 的 model 能力，统一 File／
 - 数据升版本须协调桌面与移动端的读取能力、迁移测试与回退保护，不能靠规则语法版本替代。
 - settings 中 `alwaysOnTop`、`hideOnEscape` 等桌面专属项在移动端不提供修改入口、不赋移动默认值，
   原值和未知项原样往返；移动 UI 的有效偏好单独留在设备，不能覆盖桌面配置。
-- 后续事项：同一数据版本内各端写的已知键相同。M1 起移动端经 `core/model` 的
-  Decode/Encode 保留未知字段读写；桌面后续也切换到这套读写（当前 save/load 仍是
-  `json.MarshalIndent`／强类型解码，会把移动端保留的未知字段在下次保存时丢弃），
-  已单独开票 [#24](https://github.com/gomeen/Zakki/issues/24)。
+- 同一数据版本内各端写的已知键相同。移动端与桌面均经 `core/model` 的 Decode/Encode
+  保留未知字段读写：桌面 save/load 已切换（顶层、settings、tab 三层未知字段往返
+  保留，无未知字段时输出与旧 `json.MarshalIndent` 逐字节相同），
+  已随 [#24](https://github.com/gomeen/Zakki/issues/24) 完成。
 
 ### 2.2 同步协议（双后端，任一时刻只激活一个）
 
