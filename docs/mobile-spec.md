@@ -258,6 +258,8 @@ UI 区分「已排定」「待同步／待续排」「权限受限」，不将�
 
 - [x] M1：同仓 mobile/binding + replace 可复现（replace 相对 `mobile/binding/go.mod` 解析），x/mobile 版本由其 go.mod tool directive 固定；绑定构建进 `make mobile-framework` 与 mobile.yml，干净 runner 可复现（[#25](https://github.com/gomeen/Zakki/pull/25)）；Go／gomobile 升级回归随未来升级动作执行。
 - [x] M1：高版本写保护；未知字段嵌套往返；桌面专属 settings 原值保留；超过 9 标签不丢数据——core/model 与 zakkicore 契约测试、iOS XCTest 与模拟器实测覆盖（[#25](https://github.com/gomeen/Zakki/pull/25)，记录见 [2026-10-28-m1-scaffold-verification](reports/2026-10-28-m1-scaffold-verification.md)）。
+- [x] M2：iOS 双模式编辑器（实时渲染／源码）、令牌簇往返与写回管道、源码模式与 Markdown 快捷栏、最小主题集与防漂移同步、标签管理绑定扩展与系统分享导出、实时 Markdown 样式渲染——XCTest 126 条与 Go 契约测试覆盖（[#31](https://github.com/gomeen/Zakki/pull/31)–[#34](https://github.com/gomeen/Zakki/pull/34)、[#37](https://github.com/gomeen/Zakki/pull/37)），验证记录见 [2026-10-29-m2-editor-verification](reports/2026-10-29-m2-editor-verification.md)。
+- [ ] M2：长中文重度编辑人工验收（[#26](https://github.com/gomeen/Zakki/issues/26) 清单：导入个人数据副本、撤销／剪贴板／IME 组字、实时样式浅深色与横屏过目、写保护保持只读、导出→桌面再保存未知字段不丢、横屏软键盘、拖拽排序与分享面板手感）。
 - [x] 工程守护 #17：core 与 vendor/zakki/core 的共享非测试源码一致性检查进入 make check；
   排除绑定目录及模块元数据，故意改坏副本或添加额外源码会使检查失败；core 另在纽约时区回归（R3）。
 - [ ] M3／M5：Find／Split／Replace 一致性，UTF-16 中文／emoji 保护区，未知规则整簇普通文本，
