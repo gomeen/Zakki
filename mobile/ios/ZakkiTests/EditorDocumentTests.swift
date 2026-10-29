@@ -248,6 +248,52 @@ final class EditorDocumentTests: XCTestCase {
         XCTAssertFalse(doc.bufferText.contains(fffc))
     }
 
+    // MARK: 坐标映射（缓冲 ↔ raw，模式切换与命中替换共用）
+
+    // 组件片元端点的坐标映射：组件前/后必须映射到 raw 的簇首/簇尾，簇内钳到簇首。
+    func testBufferRawOffsetMappingAtTokenEndpoints() {
+        let doc = EditorDocument(raw: "a \(cluster) b")
+        let clusterLen = (cluster as NSString).length
+        // 缓冲: a(0) ' '(1) FFFC(2) ' '(3) b(4)；raw: a(0) ' '(1) 簇(2..<2+len) ' ' b。
+        XCTAssertEqual(doc.rawOffset(ofBufferOffset: 0), 0)
+        XCTAssertEqual(doc.rawOffset(ofBufferOffset: 2), 2, "组件首 → 簇首")
+        XCTAssertEqual(doc.rawOffset(ofBufferOffset: 3), 2 + clusterLen, "组件后 → 簇尾")
+        XCTAssertEqual(doc.rawOffset(ofBufferOffset: 5), doc.rawLength, "文档尾")
+        XCTAssertEqual(doc.bufferOffset(ofRawOffset: 2), 2, "簇首 → 组件首")
+        XCTAssertEqual(doc.bufferOffset(ofRawOffset: 2 + clusterLen), 3, "簇尾 → 组件后")
+        XCTAssertEqual(doc.bufferOffset(ofRawOffset: doc.rawLength), doc.bufferLength, "raw 尾 → 缓冲尾")
+        XCTAssertEqual(doc.bufferOffset(ofRawOffset: 5), 2, "簇内钳到组件首（组件不可内部定位）")
+    }
+
+    // 组件后键入普通文本：重扫会再次命中既有组件，但其缓冲区间长度为 1，不得产生替换。
+    func testTypingRightAfterTokenDoesNotReproduceReplacement() {
+        let doc = EditorDocument(raw: "")
+        for ch in cluster {
+            _ = doc.apply(.init(replacedRange: NSRange(location: doc.bufferLength, length: 0), replacement: [.text(String(ch))]), detectTokens: true)
+        }
+        XCTAssertEqual(doc.bufferText, fffc)
+        let outcome = doc.apply(
+            .init(replacedRange: NSRange(location: 1, length: 0), replacement: [.text(" x")]),
+            detectTokens: true
+        )
+        XCTAssertTrue(outcome.replacements.isEmpty, "既有组件的重扫命中不得产生视图替换")
+        XCTAssertEqual(doc.bufferText, "\(fffc) x")
+        XCTAssertEqual(doc.rawText, "\(cluster) x")
+    }
+
+    // 组件前键入普通文本：命中既有组件时区间必须收敛为组件本身，不得吞掉行尾文本。
+    func testTypingBeforeTokenKeepsTailText() {
+        let raw = "hi \(cluster) tail"
+        let doc = EditorDocument(raw: raw)
+        let outcome = doc.apply(
+            .init(replacedRange: NSRange(location: 0, length: 0), replacement: [.text("> ")]),
+            detectTokens: true
+        )
+        XCTAssertTrue(outcome.replacements.isEmpty, "既有组件的重扫命中不得产生视图替换")
+        XCTAssertEqual(doc.rawText, "> \(raw)")
+        XCTAssertEqual(doc.bufferText, "> hi \(fffc) tail")
+    }
+
     // 围栏内键入令牌：不收组件（增量路径与初始化路径一致）。
     func testTypingInsideFenceDoesNotCollapse() {
         let doc = EditorDocument(raw: "```\n")

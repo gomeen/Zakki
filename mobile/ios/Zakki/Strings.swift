@@ -80,4 +80,22 @@ enum Strings {
     }
 
     static var editorDone: String { t("Done", "完成") }
+
+    // MARK: M2-2 模式切换
+
+    // 浮动切换钮的无障碍文案（图标指向要切去的模式）。
+    static var modeToggleToSource: String { t("Switch to source", "切换到源码") }
+    static var modeToggleToLive: String { t("Switch to live rendering", "切换到实时渲染") }
+
+    // MARK: M2-2 Markdown 快捷栏
+
+    // 按钮无障碍标签（按钮字形为 Markdown 记号符号，不本地化）。
+    static var toolbarHeading1: String { t("Heading 1", "一级标题") }
+    static var toolbarHeading2: String { t("Heading 2", "二级标题") }
+    static var toolbarBulletList: String { t("Bulleted list", "无序列表") }
+    static var toolbarTaskList: String { t("Task list", "任务列表") }
+    static var toolbarQuote: String { t("Quote", "引用") }
+    static var toolbarBold: String { t("Bold", "粗体") }
+    static var toolbarCode: String { t("Code", "代码") }
+    static var toolbarInsertTime: String { t("Insert time", "插入时间") }
 }
