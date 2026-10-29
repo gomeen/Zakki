@@ -80,4 +80,10 @@ enum Strings {
     }
 
     static var editorDone: String { t("Done", "完成") }
+
+    // MARK: M2-2 模式切换
+
+    // 浮动切换钮的无障碍文案（图标指向要切去的模式）。
+    static var modeToggleToSource: String { t("Switch to source", "切换到源码") }
+    static var modeToggleToLive: String { t("Switch to live rendering", "切换到实时渲染") }
 }
