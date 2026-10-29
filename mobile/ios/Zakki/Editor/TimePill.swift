@@ -52,7 +52,7 @@ struct TimeTokenInfo: Equatable {
         )
     }
 
-    // M2-1 临时文案（M2-3 按桌面主题重做）；档位用语对齐桌面 locales。
+    // 档位文案对齐桌面 locales（双语集中 Strings.swift）。
     var displayText: String {
         var parts: [String] = [due]
         if hasAlert { parts.append(Strings.pillAlert) }
@@ -98,27 +98,31 @@ struct TimeTokenInfo: Equatable {
     }
 }
 
-// 时间组件胶囊（NSTextAttachment 位图）。M2-1 临时样式：静态渲染、不支持动态色
-//（深浅色切换沿用旧位图），主题与交互属 M2-3/M3。
+// 时间组件胶囊（NSTextAttachment 位图）。颜色从主题语义色推导（浅深两套，
+// 随 traits 解析；桌面无独立 pill 主题色，spike 的朱红/反演占位值不作依据）；
+// 几何沿用组件规格（高 22 · 圆角 11 · 水平内边距 8 · 字号 12 · 边框 1）。
+// 位图不支持动态色，明暗切换由 TimeTokenAttachment.refreshAppearance 重画。
 enum TimePill {
-    static func image(for info: TimeTokenInfo) -> UIImage {
+    static func image(for info: TimeTokenInfo, traits: UITraitCollection) -> UIImage {
+        let colors = Theme.pillColors(recurring: info.recur != nil, dark: traits.userInterfaceStyle == .dark)
         let label = UILabel()
         label.text = info.displayText
-        label.font = .systemFont(ofSize: 12, weight: info.recur == nil ? .regular : .semibold)
-        label.textColor = info.recur == nil ? .secondaryLabel : UIColor(red: 0.70, green: 0.33, blue: 0.12, alpha: 1)
+        label.font = .systemFont(ofSize: Theme.Typography.pillSize, weight: info.recur == nil ? .regular : .semibold)
+        label.textColor = colors.text.uiColor
         label.sizeToFit()
-        let pad: CGFloat = 8
-        let height: CGFloat = 22
+        let pad = Theme.Typography.pillPadH
+        let height = Theme.Typography.pillHeight
         let size = CGSize(width: ceil(label.frame.width) + pad * 2, height: height)
         return UIGraphicsImageRenderer(size: size).image { _ in
             let rect = CGRect(origin: .zero, size: size)
-            let path = UIBezierPath(roundedRect: rect, cornerRadius: height / 2)
-            let recurring = info.recur != nil
-            (recurring ? UIColor(red: 0.99, green: 0.95, blue: 0.92, alpha: 1) : UIColor.secondarySystemBackground).setFill()
+            let path = UIBezierPath(roundedRect: rect, cornerRadius: Theme.Typography.pillRadius)
+            colors.background.uiColor.setFill()
             path.fill()
-            (recurring ? UIColor(red: 0.70, green: 0.33, blue: 0.12, alpha: 1) : UIColor.separator).setStroke()
-            path.lineWidth = 1
-            path.stroke()
+            if let border = colors.borderColor {
+                border.uiColor.setStroke()
+                path.lineWidth = Theme.Typography.pillBorder
+                path.stroke()
+            }
             label.drawText(in: rect.insetBy(dx: pad, dy: (height - label.frame.height) / 2))
         }
     }

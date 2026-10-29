@@ -27,7 +27,7 @@ final class EditorViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = Theme.Semantic.background
         editorView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(editorView)
         editorView.onContentChanged = { [weak self] raw in

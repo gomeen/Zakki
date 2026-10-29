@@ -63,10 +63,17 @@ final class EditorTextView: UITextView, UITextViewDelegate {
     init(raw: String, writable: Bool) {
         document = EditorDocument(raw: raw)
         super.init(frame: .zero, textContainer: nil)
-        backgroundColor = .systemBackground
-        font = .preferredFont(forTextStyle: .body)
-        adjustsFontForContentSizeCategory = true
-        textContainerInset = UIEdgeInsets(top: 12, left: 12, bottom: 16, right: 12)
+        backgroundColor = Theme.Semantic.background
+        // iOS 无公开的选区叠色 API：选区与光标由 accent 驱动（主题选区叠色
+        // 令牌保留在 Theme.Semantic 供后续接入）。
+        tintColor = Theme.Semantic.accent
+        font = Theme.Typography.bodyFont
+        textContainerInset = UIEdgeInsets(
+            top: Theme.Typography.padY,
+            left: Theme.Typography.padX,
+            bottom: Theme.Typography.padY,
+            right: Theme.Typography.padX
+        )
         isEditable = writable
         isSelectable = true
         delegate = self
@@ -91,6 +98,9 @@ final class EditorTextView: UITextView, UITextViewDelegate {
         let pillTap = UITapGestureRecognizer(target: self, action: #selector(pillTapped(_:)))
         addGestureRecognizer(pillTap)
         self.pillTap = pillTap
+        // 装配期 UITraitCollection.current 未必等于视图最终外观，按视图 traits
+        // 重画一次胶囊位图；入层次后如遇明暗切换再由 traitCollectionDidChange 接手。
+        refreshPillAppearances()
     }
 
     @available(*, unavailable)
@@ -437,6 +447,32 @@ final class EditorTextView: UITextView, UITextViewDelegate {
     }
 
     // MARK: 点组件只吞 tap（时间弹层属 M3）
+
+    // 胶囊位图不带动态色：明暗外观切换后按新 traits 重画全部附件（原地换图，
+    // 不改文本、不进撤销栈）；期间跳过对账，属性编辑的通知不进收簇识别。
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard let previousTraitCollection,
+              previousTraitCollection.hasDifferentColorAppearance(comparedTo: traitCollection) else { return }
+        refreshPillAppearances()
+    }
+
+    private func refreshPillAppearances() {
+        let storage = textStorage
+        var hasPill = false
+        storage.enumerateAttribute(
+            .attachment,
+            in: NSRange(location: 0, length: storage.length)
+        ) { value, _, _ in
+            guard let attachment = value as? TimeTokenAttachment else { return }
+            attachment.refreshAppearance(traits: self.traitCollection)
+            hasPill = true
+        }
+        guard hasPill else { return }
+        isReconciling = true
+        defer { isReconciling = false }
+        storage.edited(.editedAttributes, range: NSRange(location: 0, length: storage.length), changeInLength: 0)
+    }
 
     @objc private func pillTapped(_ recognizer: UITapGestureRecognizer) {
         // M3 在此打开时间弹层；M2-1 刻意无动作。
