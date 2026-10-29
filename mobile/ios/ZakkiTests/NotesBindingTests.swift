@@ -143,4 +143,49 @@ final class NotesBindingTests: XCTestCase {
             XCTAssertEqual((error as? NotesCoreError)?.code, "write_protected")
         }
     }
+
+    // M2-4 标签管理三函数的返回形状与错误码契约（绑定层视角）。
+    func testAddTabReturnsNewFileAndID() throws {
+        let result = try NotesCore.addTab(v3Sample, name: "新", color: "#00a3b4")
+        XCTAssertEqual(result.id, 3, "新 id 应为现有最大 id+1")
+        let out = try NotesCore.decode(result.raw)
+        XCTAssertTrue(out.writable)
+        XCTAssertEqual(out.tabs?.count, 3)
+        XCTAssertEqual(out.tabs?[2].id, 3)
+        XCTAssertEqual(out.tabs?[2].name, "新")
+        XCTAssertEqual(out.active, 2)
+    }
+
+    func testTabManagementErrorCodes() throws {
+        // 写保护：三个函数同口径。
+        XCTAssertThrowsError(try NotesCore.addTab(v4Sample, name: "", color: "")) { error in
+            XCTAssertEqual((error as? NotesCoreError)?.code, "write_protected")
+        }
+        XCTAssertThrowsError(try NotesCore.deleteTab(v2Sample, id: 1)) { error in
+            XCTAssertEqual((error as? NotesCoreError)?.code, "write_protected")
+        }
+        XCTAssertThrowsError(try NotesCore.reorderTabs(v4Sample, ids: [1])) { error in
+            XCTAssertEqual((error as? NotesCoreError)?.code, "write_protected")
+        }
+        // invalid_args：满 9 / 只剩一个 / id 不存在 / 非排列。
+        let nine = (1...9).map { "{\"id\":\($0),\"text\":\"t\"}" }.joined(separator: ",")
+        let nineTabs = "{\"version\":3,\"active\":0,\"tabs\": [\(nine)]}"
+        XCTAssertThrowsError(try NotesCore.addTab(nineTabs, name: "", color: "")) { error in
+            XCTAssertEqual((error as? NotesCoreError)?.code, "invalid_args")
+        }
+        let single = "{\"version\":3,\"active\":0,\"tabs\":[{\"id\":1,\"text\":\"甲\"}]}"
+        XCTAssertThrowsError(try NotesCore.deleteTab(single, id: 1)) { error in
+            XCTAssertEqual((error as? NotesCoreError)?.code, "invalid_args")
+        }
+        XCTAssertThrowsError(try NotesCore.deleteTab(v3Sample, id: 99)) { error in
+            XCTAssertEqual((error as? NotesCoreError)?.code, "invalid_args")
+        }
+        XCTAssertThrowsError(try NotesCore.reorderTabs(v3Sample, ids: [1, 3])) { error in
+            XCTAssertEqual((error as? NotesCoreError)?.code, "invalid_args")
+        }
+        // 非法 idsJSON：invalid_json。
+        XCTAssertThrowsError(try NotesCore.reorderTabs(v3Sample, ids: [])) { error in
+            XCTAssertEqual((error as? NotesCoreError)?.code, "invalid_args", "空数组长度与标签数不一致")
+        }
+    }
 }
