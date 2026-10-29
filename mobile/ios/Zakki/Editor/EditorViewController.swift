@@ -44,7 +44,7 @@ final class EditorViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = Theme.Semantic.background
         if let editorView {
             install(editorView)
             editorView.onContentChanged = { [weak self] raw in
@@ -113,9 +113,9 @@ final class EditorViewController: UIViewController {
         editorView = nil
 
         let source = UITextView()
-        source.backgroundColor = .systemBackground
+        source.backgroundColor = Theme.Semantic.background
         source.font = .monospacedSystemFont(ofSize: 14, weight: .regular)
-        source.textColor = .label
+        source.textColor = Theme.Semantic.text
         source.textContainerInset = UIEdgeInsets(top: 12, left: 12, bottom: 16, right: 12)
         source.isEditable = writable
         source.keyboardDismissMode = .interactive
