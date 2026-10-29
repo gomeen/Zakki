@@ -127,6 +127,102 @@ final class NotesModel: ObservableObject {
         raw = newRaw
     }
 
+    // 导出/分享入口交出的沙盒文件 URL（无文件时 UI 隐藏分享按钮）。
+    var fileURL: URL { sandboxURL }
+
+    // MARK: 标签管理（M2-4）
+
+    // 管理操作不走防抖：变更经绑定即时原子落盘，成功后以新 JSON 为 raw 基线并
+    // 重解码快照（active 等磁盘语义以落盘文件为准）。写失败如实上报且状态不动。
+    @discardableResult
+    private func commitTabChange(_ makeNewRaw: (String) throws -> String) -> Bool {
+        guard let snap = snapshot, snap.writable, snap.tabs != nil else {
+            saveError = Strings.tabChangeFailedMessage(code: "write_protected")
+            return false
+        }
+        // 先冲刷防抖中的正文改动：结构变更基于过期基线会把待写正文冲掉。
+        flushPendingSave()
+        guard pendingTabIDs.isEmpty, let raw else { return false } // flush 失败已上报
+        do {
+            let out = try makeNewRaw(raw)
+            try FileManager.default.createDirectory(at: sandboxURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(out.utf8).write(to: sandboxURL, options: .atomic)
+            self.raw = out
+            do {
+                snapshot = try NotesCore.decode(out)
+            } catch {
+                // 文件已落盘但快照重解码失败：与启动解码同渠道上报，不吞。
+                importError = error.localizedDescription
+                return false
+            }
+            saveError = nil
+            return true
+        } catch {
+            saveError = Strings.tabChangeFailedMessage(code: (error as? NotesCoreError)?.code ?? "io")
+            return false
+        }
+    }
+
+    // 结构性变更（增/删/排序）：绑定直接产出新文件 JSON。
+    @discardableResult
+    private func performStructuralChange(_ change: (String) throws -> String) -> Bool {
+        commitTabChange(change)
+    }
+
+    // 新增标签到末尾并切为磁盘 active（末尾）；颜色由调用方用 unusedTabColor 选，
+    // Name 传空串由 UI 显示 Untitled。返回新 id 便于调用方导航。
+    @discardableResult
+    func addTab(name: String, color: String) -> Bool {
+        performStructuralChange { raw in
+            try NotesCore.addTab(raw, name: name, color: color).raw
+        }
+    }
+
+    @discardableResult
+    func deleteTab(id: UInt64) -> Bool {
+        performStructuralChange { try NotesCore.deleteTab($0, id: id) }
+    }
+
+    @discardableResult
+    func reorderTabs(ids: [UInt64]) -> Bool {
+        performStructuralChange { try NotesCore.reorderTabs($0, ids: ids) }
+    }
+
+    // 已知字段覆盖类变更（重命名/换色）：与 updateTabText 同用 EncodeNotes 管道，
+    // 但即时落盘。桌面 renameTab parity：名称去首尾空白，空串=未命名。
+    @discardableResult
+    func renameTab(id: UInt64, name: String) -> Bool {
+        overlayTab(id: id) { $0.name = name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    }
+
+    @discardableResult
+    func setTabColor(id: UInt64, color: String) -> Bool {
+        overlayTab(id: id) { $0.color = color }
+    }
+
+    private func overlayTab(id: UInt64, mutate: (inout NotesTab) -> Void) -> Bool {
+        guard let snap = snapshot, snap.writable, var tabs = snap.tabs,
+              let i = tabs.firstIndex(where: { $0.id == id }) else {
+            saveError = Strings.tabChangeFailedMessage(code: "write_protected")
+            return false
+        }
+        let before = tabs[i]
+        mutate(&tabs[i])
+        guard tabs[i] != before else { return true } // 无变化不落盘
+        return commitTabChange { try NotesCore.encode($0, tabs: tabs) }
+    }
+
+    // 桌面 unusedTabColor 移植：优先未被现有标签占用的调色板色（大小写不敏感，
+    // 空/非法色不占位）；全部占用时回退 palette[标签数 % 12]。
+    static func unusedTabColor(for tabs: [NotesTab]) -> String {
+        for cand in ThemeTagPalette.colors {
+            if !tabs.contains(where: { $0.color.caseInsensitiveCompare(cand) == .orderedSame }) {
+                return cand
+            }
+        }
+        return ThemeTagPalette.hex(at: tabs.count)
+    }
+
     // 立即落盘全部待写改动（编辑器关闭/退后台时也调用，幂等）。
     func flushPendingSave() {
         saveWorkItem?.cancel()

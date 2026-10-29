@@ -81,6 +81,12 @@ enum Strings {
 
     static var editorDone: String { t("Done", "完成") }
 
+    // MARK: 标签管理错误上报（M2-4，模型层）
+
+    static func tabChangeFailedMessage(code: String) -> String {
+        t("Could not update tabs (\(code)).", "标签更新未能保存（\(code)）。")
+    }
+
     // MARK: M2-2 模式切换
 
     // 浮动切换钮的无障碍文案（图标指向要切去的模式）。
