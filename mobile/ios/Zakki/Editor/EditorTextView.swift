@@ -60,6 +60,15 @@ final class EditorTextView: UITextView, UITextViewDelegate {
     private var storageObserver: NSObjectProtocol?
     private var pillTap: UITapGestureRecognizer?
 
+    // M2-5 实时样式：只加属性不改字符，全部写入口都在 isReconciling 包裹内
+    //（不进撤销栈、不触发 onContentChanged、观察者不重入）。
+    let markdownStyler = MarkdownStyler()
+    private let fragmentProvider = MarkdownFragmentProvider()
+
+    // 测试探针：显式撤销/重做单元数（样式通路不得改变这两个数）。
+    var undoUnitCount: Int { undoStack.count }
+    var redoUnitCount: Int { redoStack.count }
+
     init(raw: String, writable: Bool) {
         document = EditorDocument(raw: raw)
         super.init(frame: .zero, textContainer: nil)
@@ -79,8 +88,11 @@ final class EditorTextView: UITextView, UITextViewDelegate {
         delegate = self
         keyboardDismissMode = .interactive
         typingAttributes = EditorRender.baseAttributes
+        // 挂引用竖线 fragment 提供者早于首渲染，首次排版即走自定义 fragment。
+        ensureFragmentProviderInstalled()
         // 初始渲染先于挂观察者，避免自身装配触发对账。
         attributedText = EditorRender.pieces(document.pieces)
+        applyInitialMarkdownStyles()
         // 用通知而非 storage.delegate：UITextView 可能已占用该代理位，通知支持多观察者。
         storageObserver = NotificationCenter.default.addObserver(
             forName: NSTextStorage.didProcessEditingNotification,
@@ -336,6 +348,10 @@ final class EditorTextView: UITextView, UITextViewDelegate {
 
     // 存储内容变化的对账入口：diff 同步文档，再落实文档的收组件决策。
     private func reconcile(storage: NSTextStorage, editedRange: NSRange) {
+        // 收簇挂起期间 document 有意领先于存储（M2-5 样式失效的再入通知也落在此窗口），
+        // 此时 diff 会把文档重置回存储旧文本并重复挂起收簇；挂起 flush 落存储后的
+        // 通知才是权威对账时机。
+        guard deferredCollapses.isEmpty else { return }
         isReconciling = true
         defer { isReconciling = false }
 
@@ -371,8 +387,65 @@ final class EditorTextView: UITextView, UITextViewDelegate {
         }
 
         enforceBufferInvariant()
+        applyMarkdownStyles(after: newBuffer, in: storage, editedRange: editedRange)
         if mutated {
             onContentChanged?(document.rawText)
+        }
+    }
+
+    // MARK: 实时样式（M2-5）
+
+    // init 全量渲染后的整篇上样式；观察者尚未挂上，包 isReconciling 仅保持口径统一。
+    private func applyInitialMarkdownStyles() {
+        isReconciling = true
+        defer { isReconciling = false }
+        markdownStyler.restyleDocument(storage: textStorage)
+    }
+
+    // 对账收尾后补齐样式：以对账入口的存储快照与收尾快照做公共前后缀定位脏区
+    //（涵盖原生输入、收簇替换与不变式修正的全部落点，撤销/重做回放路径的
+    // applyOp 直写存储也会经通知进这里，回放后的受影响行由此补上样式）。
+    // 组字期间不上样式（canCollapse 同款门控时机），提交后的 reconcile 会补上。
+    private func applyMarkdownStyles(after entryBuffer: String, in storage: NSTextStorage, editedRange: NSRange) {
+        guard markedTextRange == nil else { return }
+        ensureFragmentProviderInstalled()
+        let finalBuffer = storage.string
+        let dirty: NSRange?
+        if finalBuffer != entryBuffer {
+            let prefix = Self.commonPrefixLength(entryBuffer, finalBuffer)
+            let oldLength = (entryBuffer as NSString).length
+            let newLength = (finalBuffer as NSString).length
+            let suffixLimit = min(oldLength, newLength) - prefix
+            let suffix = Self.commonSuffixLength(entryBuffer, finalBuffer, limit: max(0, suffixLimit))
+            dirty = NSRange(location: prefix, length: max(0, newLength - suffix - prefix))
+        } else if editedRange.location != NSNotFound, editedRange.location >= 0 {
+            dirty = editedRange
+        } else {
+            dirty = nil
+        }
+        guard let dirty else { return }
+        markdownStyler.restyleEditedLines(storage: storage, dirty: dirty)
+    }
+
+    // 明暗切换整篇重上：动态色自动跟随，重上同时刷新段样式与引用竖线颜色。
+    // internal：测试走同一路径验证不变式（样式不改字符/不进撤销栈/无写回）。
+    func applyMarkdownThemeRefresh() {
+        guard markedTextRange == nil else { return }
+        isReconciling = true
+        defer { isReconciling = false }
+        ensureFragmentProviderInstalled()
+        markdownStyler.restyleDocument(storage: textStorage)
+    }
+
+    // 引用竖线 fragment 提供者：UITextView 自身是 textLayoutManager 的 delegate，
+    // 提供者用 forwarding 保留其原行为；系统可能在内部重设 delegate，每次重上前
+    // 核查并重挂。
+    private func ensureFragmentProviderInstalled() {
+        guard let layoutManager = textLayoutManager else { return }
+        if layoutManager.delegate !== fragmentProvider {
+            fragmentProvider.owner = markdownStyler
+            fragmentProvider.originalDelegate = layoutManager.delegate
+            layoutManager.delegate = fragmentProvider
         }
     }
 
@@ -473,6 +546,7 @@ final class EditorTextView: UITextView, UITextViewDelegate {
         guard let previousTraitCollection,
               previousTraitCollection.hasDifferentColorAppearance(comparedTo: traitCollection) else { return }
         refreshPillAppearances()
+        applyMarkdownThemeRefresh()
     }
 
     private func refreshPillAppearances() {

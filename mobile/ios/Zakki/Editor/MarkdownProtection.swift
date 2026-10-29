@@ -38,6 +38,12 @@ enum MarkdownProtection {
 
     // 解析开栏行：≥3 个同字符；反引号开栏的 info 串不得再含反引号。
     static func parseFenceOpeningLine(_ line: String) -> FenceMarker? {
+        // 快速路径：首字符不是围栏符/前导空格的行直接排除，避免逐行 NSString 桥接
+        //（整篇重上时对每一行都会调到这里）。
+        let raw = line.utf16
+        if let first = raw.first, first != backtick, first != tilde, first != space {
+            return nil
+        }
         guard let content = fenceLineContent(line) else { return nil }
         let ns = content as NSString
         let n = ns.length
@@ -97,23 +103,24 @@ enum MarkdownProtection {
 
     // 行内代码（反引号对）与链接 [text](url) 的区间，含标记符；粗体/斜体不保护。
     // 移植 inlineSpans 的扫描语义，仅保留 code/link 两类（UTF-16 坐标与 rune 坐标
-    // 对 ASCII 标记字符等价，代理对不会与之混淆）。
+    // 对 ASCII 标记字符等价，代理对不会与之混淆）。扫描基于 utf16 数组，
+    // 避免逐字符 NSString 消息派发（整篇重上的热路径）。
     static func inlineProtectedRanges(in line: String) -> [NSRange] {
-        let ns = line as NSString
-        let n = ns.length
+        let u = Array(line.utf16)
+        let n = u.count
         var out: [NSRange] = []
         var i = 0
         func nextOccurrence(_ ch: unichar, from start: Int) -> Int? {
             guard start < n else { return nil }
             var j = start
             while j < n {
-                if ns.character(at: j) == ch { return j }
+                if u[j] == ch { return j }
                 j += 1
             }
             return nil
         }
         while i < n {
-            let c = ns.character(at: i)
+            let c = u[i]
             switch c {
             case backtick:
                 if let j = nextOccurrence(backtick, from: i + 1) {
@@ -123,7 +130,7 @@ enum MarkdownProtection {
                 }
             case openBracket:
                 if let cb = nextOccurrence(closeBracket, from: i + 1),
-                   cb + 1 < n, ns.character(at: cb + 1) == openParen,
+                   cb + 1 < n, u[cb + 1] == openParen,
                    let pe = nextOccurrence(closeParen, from: cb + 2) {
                     out.append(NSRange(location: i, length: pe + 1 - i))
                     i = pe + 1

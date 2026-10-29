@@ -303,4 +303,42 @@ final class EditorDocumentTests: XCTestCase {
         XCTAssertEqual(doc.pieces, [.text("```\n"), .text(cluster)])
         XCTAssertFalse(doc.bufferText.contains(fffc))
     }
+
+    // MARK: 多行重扫回归（M2-5 期间发现的既有缺陷修复）
+
+    // 单行重扫不得吞行尾换行：blank 行在后续每次键入中都必须存活。
+    func testRescanSingleLineKeepsTrailingNewline() {
+        let doc = EditorDocument(raw: "aaa\n\nbbb")
+        _ = doc.apply(.init(replacedRange: NSRange(location: 1, length: 0), replacement: [.text("X")]), detectTokens: true)
+        XCTAssertEqual(doc.rawText, "aXaa\n\nbbb")
+        XCTAssertEqual(doc.bufferText, "aXaa\n\nbbb")
+    }
+
+    // 重扫 blank 行本身：空 span 不应删除该行。
+    func testRescanBlankLineKeepsItself() {
+        let doc = EditorDocument(raw: "aaa\n\nbbb")
+        _ = doc.apply(.init(replacedRange: NSRange(location: 4, length: 0), replacement: []), detectTokens: true)
+        XCTAssertEqual(doc.rawText, "aaa\n\nbbb")
+    }
+
+    // MARK: 多行非首行收簇回归（M2-5 期间发现的既有缺陷修复）
+
+    // 重扫命中区间必须换算 raw 绝对坐标：非首行的行内相对坐标会被 apply 的映射
+    // 收错区间，吞掉行首至令牌之间的全部文本。
+    func testTypingCollapseOnLaterLineCollapsesOnlyTheCluster() {
+        let prefix = "# 标题\n\n正文 "
+        let doc = EditorDocument(raw: prefix)
+        var ops: [EditorDocument.BufferReplacement] = []
+        for ch in cluster {
+            ops += doc.apply(
+                .init(replacedRange: NSRange(location: doc.bufferLength, length: 0), replacement: [.text(String(ch))]),
+                detectTokens: true
+            ).replacements
+        }
+        XCTAssertEqual(ops.count, 1)
+        XCTAssertEqual(ops[0].range, NSRange(location: (prefix as NSString).length, length: (cluster as NSString).length), "只收簇本身")
+        XCTAssertEqual(ops[0].piece, .token(cluster))
+        XCTAssertEqual(doc.rawText, prefix + cluster)
+        XCTAssertEqual(doc.bufferText, prefix + fffc)
+    }
 }
