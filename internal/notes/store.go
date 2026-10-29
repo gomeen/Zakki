@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"zakki/core/model"
 	"zakki/internal/atomicfile"
 )
 
@@ -34,8 +35,12 @@ type Store struct {
 	diskKnown, diskExists, syncPending     bool
 	diskHash                               [32]byte
 	savedContent                           []byte
-	stateWrite                             func(string, []byte) error
-	stateRemove                            func(string) error
+	// 未知字段快照由 Load 在锁内替换，encodeDisk 在锁内读取；
+	// TabUnknown 按 id 索引，已删 id 不在 f.Tabs 里时 Encode 自然落选。
+	topUnknown, settingsUnknown map[string]json.RawMessage
+	tabUnknown                  map[uint64]map[string]json.RawMessage
+	stateWrite                  func(string, []byte) error
+	stateRemove                 func(string) error
 
 	// RunGit 仅供构造后、启动后台任务前注入；nil 使用系统 CLI。
 	RunGit                           GitRunner
@@ -78,19 +83,34 @@ func (s *Store) DataPath() string { s.mu.Lock(); defer s.mu.Unlock(); return s.d
 
 // ParseRaw 保留磁盘格式迁移；不修改文件及写保护状态。
 func (s *Store) ParseRaw(raw []byte) (File, bool, error) {
-	var f File
-	if err := json.Unmarshal(raw, &f); err != nil {
-		return File{}, false, err
-	}
-	if !HasHideOnEscapeKey(raw) {
-		f.Settings.HideOnEscape = true
-	}
-	hadTabs := len(f.Dots) > 0 || len(f.Tabs) > 0
-	f, err := Migrate(f, s.migrate)
+	f, hadTabs, _, err := s.decodeDisk(raw)
 	return f, hadTabs, err
 }
 
-// Load 读取并记住磁盘指纹；不存在的全新文件允许首次保存。
+// decodeDisk 经 core/model 解码原始字节：迁移后的文件、迁移前的 hadTabs
+// 探测与三层未知字段快照；hideOnEscape 缺键默认 true 的语义在 Decode 内。
+func (s *Store) decodeDisk(raw []byte) (File, bool, model.Document, error) {
+	doc, err := model.Decode(raw, s.migrate)
+	if err != nil {
+		return File{}, false, model.Document{}, err
+	}
+	return doc.File, hadTabsIn(raw), doc, nil
+}
+
+// hadTabsIn 探测原始 JSON 是否带 dots 或 tabs；Decode 只返回迁移后的
+// 文件（Migrate 会从 dots 生成 tabs），这里做轻量形状探测。
+func hadTabsIn(raw []byte) bool {
+	var probe struct {
+		Dots []string          `json:"dots"`
+		Tabs []json.RawMessage `json:"tabs"`
+	}
+	if json.Unmarshal(raw, &probe) != nil {
+		return false
+	}
+	return len(probe.Dots) > 0 || len(probe.Tabs) > 0
+}
+
+// Load 读取并记住磁盘指纹与三层未知字段快照；不存在的全新文件允许首次保存。
 // hadTabs 报告原始 JSON 是否带标签（dots 或 tabs），供空文件欢迎文案判断。
 func (s *Store) Load() (f File, exists, hadTabs bool, err error) {
 	s.writeMu.Lock()
@@ -112,8 +132,9 @@ func (s *Store) Load() (f File, exists, hadTabs bool, err error) {
 		}
 		return File{}, false, false, err
 	}
+	var doc model.Document
 	if err == nil {
-		f, hadTabs, err = s.ParseRaw(raw)
+		f, hadTabs, doc, err = s.decodeDisk(raw)
 	}
 	if err != nil {
 		s.mu.Lock()
@@ -122,13 +143,14 @@ func (s *Store) Load() (f File, exists, hadTabs bool, err error) {
 		s.ReportPersist("读取失败", err)
 		return File{}, false, false, err
 	}
-	content, err := json.MarshalIndent(f, "", "  ")
+	content, err := model.Encode(doc)
 	if err != nil {
 		return File{}, false, false, err
 	}
 	s.mu.Lock()
 	s.diskKnown, s.diskExists, s.invalid, s.syncPending = true, true, false, false
 	s.diskHash, s.savedContent = sha256.Sum256(raw), content
+	s.topUnknown, s.settingsUnknown, s.tabUnknown = doc.Unknown, doc.SettingsUnknown, doc.TabUnknown
 	s.resetLoadedSaveLocked()
 	s.lastSaveErr = ""
 	s.mu.Unlock()

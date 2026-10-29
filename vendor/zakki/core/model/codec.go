@@ -9,8 +9,8 @@ import (
 )
 
 // Document 是一次 Decode 的完整结果：迁移后的 File 与三层未知字段。
-// 移动端只改已知字段后经 Encode 写回，未知字段原样保留；
-// 桌面后续切换到这套读写（当前写盘仍是无未知字段保留的 MarshalIndent）。
+// 桌面 internal/notes 与移动端绑定都只改已知字段后经 Encode 写回，
+// 未知字段跨端往返保留，同一数据版本内各端写出同形的 zakki.json。
 type Document struct {
 	// File 是走完 Migrate 的已知字段。
 	File File
