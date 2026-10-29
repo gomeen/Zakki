@@ -23,6 +23,9 @@ final class EditorViewController: UIViewController {
     private var modeFab: UIVisualEffectView?
     private var modeIcon: UIImageView?
 
+    // 底部 Markdown 快捷栏（inputAccessoryView）：两种模式的文本视图共用同一实例。
+    private let toolbar = MarkdownToolbar()
+
     init(raw: String, writable: Bool, reason: String) {
         self.writable = writable
         editorView = EditorTextView(raw: raw, writable: writable)
@@ -49,6 +52,10 @@ final class EditorViewController: UIViewController {
             }
         }
         if writable {
+            toolbar.onAction = { [weak self] action in
+                guard let self, let active = self.activeTextView() else { return }
+                MarkdownSnippet.apply(action, to: active)
+            }
             setupModeFab()
         }
     }
@@ -57,6 +64,9 @@ final class EditorViewController: UIViewController {
     private func install(_ textView: UITextView) {
         textView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(textView)
+        if writable {
+            textView.inputAccessoryView = toolbar
+        }
         NSLayoutConstraint.activate([
             textView.topAnchor.constraint(equalTo: view.topAnchor),
             textView.leadingAnchor.constraint(equalTo: view.leadingAnchor),

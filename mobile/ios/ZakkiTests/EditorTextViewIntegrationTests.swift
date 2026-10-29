@@ -32,6 +32,26 @@ final class EditorTextViewIntegrationTests: XCTestCase {
         XCTAssertEqual(editor.document.rawText, cluster)
     }
 
+    // 空缓冲整段 insertText（快捷栏插时间的程序化路径）：收组件后不触发 UIKit
+    // 空文档路径的陈旧区间查询（iOS 26 实测越界，走直接存储写规避），
+    // 撤销序与逐字键入一致（先撤销收组件、再撤销输入）。
+    @MainActor
+    func testWholeTokenInsertOnEmptyBufferCollapsesAndUndoes() {
+        let editor = makeEditor(raw: "")
+        editor.insertText(cluster)
+        XCTAssertEqual(editor.text, fffc)
+        XCTAssertEqual(editor.document.rawText, cluster)
+        editor.undoManager?.undo()
+        XCTAssertEqual(editor.text, cluster, "先撤销收组件")
+        editor.undoManager?.undo()
+        XCTAssertEqual(editor.text, "", "再撤销输入")
+        editor.undoManager?.redo()
+        XCTAssertEqual(editor.text, cluster, "重做先恢复输入")
+        editor.undoManager?.redo()
+        XCTAssertEqual(editor.text, fffc, "重做再收组件")
+        XCTAssertEqual(editor.document.rawText, cluster)
+    }
+
     @MainActor
     func testDeleteBackwardRemovesWholeCluster() {
         let editor = makeEditor(raw: "")

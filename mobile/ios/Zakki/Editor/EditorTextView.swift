@@ -117,12 +117,30 @@ final class EditorTextView: UITextView, UITextViewDelegate {
 
     // 键入保持原生实现（TextKit2 的 insertText: 内部簿记与组字兼容，不可绕开），
     // 仅用前后差分补记撤销原子操作；连续键入并入同一撤销单元。
+    // 例外：空缓冲时 UIKit 的 insertText: 空文档内部路径会在随后的收组件直接
+    // 存储写之后用陈旧区间查询存储（iOS 26 实测 attributedSubstring 越界；
+    // 非空缓冲与 paste: 路径无此问题），改走直接存储写，记账管线不变。
     override func insertText(_ text: String) {
         guard isEditable, !isReplaying, !isApplyingEdit else {
             super.insertText(text)
             return
         }
+        if textStorage.length == 0 {
+            insertByDirectWrite(text)
+            return
+        }
         recordNativeEdit(UndoUnit(isTyping: true)) { super.insertText(text) }
+    }
+
+    // 空缓冲插入：直接写存储（与剪切/退格同一机制）并同步插入点，
+    // 撤销/收组件仍经 recordNativeEdit 同一管线。
+    private func insertByDirectWrite(_ text: String) {
+        let attr = NSAttributedString(string: text, attributes: typingAttributes)
+        recordNativeEdit(UndoUnit(isTyping: true)) { [weak self] in
+            guard let self else { return }
+            self.textStorage.replaceCharacters(in: NSRange(location: 0, length: 0), with: attr)
+            self.syncCaretAfterDirectWrite(at: (text as NSString).length)
+        }
     }
 
     override func deleteBackward() {
