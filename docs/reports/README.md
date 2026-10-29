@@ -5,6 +5,8 @@
 
 | 报告 | 说明 |
 |---|---|
+| [2026-10-29-m2-editor-verification.md](2026-10-29-m2-editor-verification.md) | 移动端 M2 编辑器：子票 PR 对照、两次数据丢失级回归、126 条 XCTest 与性能预算 |
+| [2026-10-28-m1-scaffold-verification.md](2026-10-28-m1-scaffold-verification.md) | 移动端 M1 iOS 脚手架：工程结构、导入管道与模拟器实测 |
 | [2026-10-28-review-remediation-verification.md](2026-10-28-review-remediation-verification.md) | 评审整改的实现范围、自动化验证与原生复测结果 |
 | [2026-10-28-reminders-mobile-review.md](2026-10-28-reminders-mobile-review.md) | 桌面提醒、共享内核 core、移动端规划与测试覆盖的全面审查发现 |
 | [2026-10-22-review-remediation.md](2026-10-22-review-remediation.md) | 本轮 19 项代码审查问题的修复、回归证据与验证范围 |
