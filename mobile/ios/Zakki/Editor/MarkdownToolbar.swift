@@ -121,6 +121,8 @@ enum MarkdownSnippet {
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: now) ?? now
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
+        // 格式化跟随调用方日历（含时区）：否则回落系统时区，跨时区机器输出不一致。
+        formatter.calendar = calendar
         formatter.dateFormat = "'@'yyyy-MM-dd HH:mm"
         return formatter.string(from: tomorrow) + " "
     }
