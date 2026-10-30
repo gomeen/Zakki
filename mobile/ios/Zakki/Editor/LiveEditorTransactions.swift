@@ -54,7 +54,10 @@ extension LiveEditorContainer {
             remountChangedBlocks(oldBlocks, blockList.blocks)
             activate(newIdx, sourceCaret: localCaret)
         }
-        scrollCaretIntoView()
+        // 通知窗口内的强制排版会拿 in-flight 区间（越界崩溃）：推迟到窗口结束。
+        view.performWhenTextKitSettled { [weak self] in
+            self?.scrollCaretIntoView()
+        }
         onRawChange?(newDoc)
     }
 

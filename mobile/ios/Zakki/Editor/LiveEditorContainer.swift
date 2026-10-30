@@ -87,6 +87,9 @@ final class LiveEditorContainer: UIView {
         contentView.subviews.map { String(describing: type(of: $0)) }
     }
 
+    // 测试探针：焦点编辑器（组字推迟重载回归测试用）。
+    var activeEditorForTesting: BlockEditorView? { activeEditor }
+
 
     init(raw: String, writable: Bool) {
         self.raw = raw
@@ -445,6 +448,10 @@ final class LiveEditorContainer: UIView {
         view.onSelectionChanged = { [weak self] in
             self?.activeSelectionChanged()
         }
+        // 组字结束后补跑被推迟的整幅重载（performBufferLoad 的组字守卫）。
+        view.onCompositionEnd = { [weak self] in
+            self?.scheduleBufferLoad()
+        }
         view.shouldDelegateEnter = { [weak self] in
             self?.handleEnter() ?? false
         }
@@ -571,6 +578,13 @@ final class LiveEditorContainer: UIView {
 
     private func performBufferLoad(block: LiveBlock, projection: LiveProjection, selection: NSRange?) {
         guard let view = activeEditor else { return }
+        // 存储通知窗口内禁止整幅重载（嵌套写会让 TextKit 2 内容存储脱 sync）；
+        // 组字期间会撕掉 RTI 输入会话的缓存区间。两种情况都推迟到窗口结束。
+        if view.isInStorageNotification || view.markedTextRange != nil {
+            pendingBufferLoad = (block, projection, selection)
+            scheduleBufferLoad()
+            return
+        }
         suppressSelectionReports = true
         view.load(projection: projection, block: block, selection: selection)
         suppressSelectionReports = false

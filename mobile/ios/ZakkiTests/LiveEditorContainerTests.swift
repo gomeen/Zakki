@@ -333,9 +333,13 @@ final class LiveEditorContainerTests: XCTestCase {
         XCTAssertEqual(container.raw, rawBefore, "样式不改 raw")
         XCTAssertFalse(wroteBack, "样式不触发写回")
         XCTAssertEqual(container.activeEditor?.text, editor.text, "样式不改缓冲文字")
-        // 标题块可见文字带标题字体（块级基底样式仍生效）。
+        // 标题块可见文字带标题字体（块级基底样式仍生效）。TextKit 1 对 CJK
+        // 文本做字体解析回退（SFUI → PingFang Display），按渲染等价断言
+        // （字号 + 粗体 trait），不做 UIFont 对象同一比较。
         let font = editor.textStorage.attribute(.font, at: 0, effectiveRange: nil) as? UIFont
-        XCTAssertEqual(font, Theme.Typography.headingFont(level: 1))
+        let expectedHeading = Theme.Typography.headingFont(level: 1)
+        XCTAssertEqual(font?.pointSize, expectedHeading.pointSize, "标题字号")
+        XCTAssertTrue(font?.fontDescriptor.symbolicTraits.contains(.traitBold) ?? false, "标题粗体")
     }
 
     // MARK: 性能预算
@@ -431,4 +435,5 @@ final class LiveEditorContainerTests: XCTestCase {
         }
         XCTAssertGreaterThan(checked, 4)
     }
+
 }
