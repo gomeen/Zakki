@@ -73,6 +73,11 @@ final class EditorViewController: UIViewController {
             textView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             textView.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
         ])
+        // 模式切换重新装配文本视图（addSubview 追加到最顶层）会把模式浮动钮压在
+        // 下面：首次切换后钮即消失且点按落在新视图上，必须随装配重新置顶。
+        if let modeFab {
+            view.bringSubviewToFront(modeFab)
+        }
     }
 
     private func activeTextView() -> UITextView? {
