@@ -1,96 +1,51 @@
 import XCTest
 @testable import Zakki
 
-// M2-2 Markdown 快捷栏测试：动作经 MarkdownSnippet 作用于 EditorTextView（走
-// insertText 原生记账路径，收组件/撤销语义复用）与纯文本 UITextView（源码模式
-// 共用语义）；时间入口只生成展示文本并按既有规则收组件，全程无弹层。
+// M2-6 Markdown 快捷栏测试：源码模式动作经 MarkdownSnippet 作用于纯文本
+// UITextView（M2-2 语义原样）；实时模式动作经容器落源码级语义（见
+// LiveEditorContainerTests）；时间入口只生成展示文本，全程无弹层。
 final class MarkdownToolbarTests: XCTestCase {
     private let cluster = "@2026-01-01 10:00"
     private let fffc = "\u{FFFC}"
 
-    @MainActor
-    private func makeEditor(raw: String) -> EditorTextView {
-        EditorTextView(raw: raw, writable: true)
-    }
-
-    // MARK: 前缀类
+    // MARK: 源码模式（纯文本 UITextView，M2-2 语义不变）
 
     // 光标在行中间：前缀插入所在行行首，光标平移到原位。
     @MainActor
     func testHeadingPrefixInsertsAtLineStart() {
-        let editor = makeEditor(raw: "first\nsecond")
-        editor.selectedRange = NSRange(location: 9, length: 0)
-        MarkdownSnippet.apply(.heading1, to: editor)
-        XCTAssertEqual(editor.text, "first\n# second")
-        XCTAssertEqual(editor.selectedRange.location, 11, "光标平移到插入后的原位")
+        let source = UITextView()
+        source.text = "first\nsecond"
+        source.selectedRange = NSRange(location: 9, length: 0)
+        MarkdownSnippet.apply(.heading1, to: source)
+        XCTAssertEqual(source.text, "first\n# second")
+        XCTAssertEqual(source.selectedRange.location, 11, "光标平移到插入后的原位")
     }
 
     // 单行文档：前缀落在文档首。
     @MainActor
     func testTaskPrefixAtDocumentStart() {
-        let editor = makeEditor(raw: "todo")
-        editor.selectedRange = NSRange(location: 2, length: 0)
-        MarkdownSnippet.apply(.task, to: editor)
-        XCTAssertEqual(editor.text, "- [ ] todo")
-        XCTAssertEqual(editor.selectedRange.location, 8)
-    }
-
-    // 前缀作用于含组件的行：既有组件不重复收簇，行内容不丢（坐标映射回归）。
-    @MainActor
-    func testQuotePrefixOnLineWithTokenKeepsTokenAndTail() {
-        let editor = makeEditor(raw: "hi \(cluster) tail")
-        editor.selectedRange = NSRange(location: 2, length: 0)
-        MarkdownSnippet.apply(.quote, to: editor)
-        XCTAssertEqual(editor.document.rawText, "> hi \(cluster) tail")
-        XCTAssertEqual(editor.text, "> hi \(fffc) tail")
-        XCTAssertTrue(editor.textStorage.attribute(.attachment, at: 5, effectiveRange: nil) is TimeTokenAttachment)
-    }
-
-    // MARK: 包裹类
-
-    // 有选区：包裹并重新选中内容。
-    @MainActor
-    func testBoldWrapsSelection() {
-        let editor = makeEditor(raw: "hello world")
-        editor.selectedRange = NSRange(location: 6, length: 5)
-        MarkdownSnippet.apply(.bold, to: editor)
-        XCTAssertEqual(editor.text, "hello **world**")
-        XCTAssertEqual(editor.selectedRange, NSRange(location: 8, length: 5), "包裹后重新选中内容")
-    }
-
-    // 无选区：插占位对、光标落在对中间。
-    @MainActor
-    func testCodeWithoutSelectionInsertsPlaceholderPair() {
-        let editor = makeEditor(raw: "a")
-        editor.selectedRange = NSRange(location: 1, length: 0)
-        MarkdownSnippet.apply(.code, to: editor)
-        XCTAssertEqual(editor.text, "a``")
-        XCTAssertEqual(editor.selectedRange.location, 2, "光标落在占位对中间")
-    }
-
-    // 包裹选区含组件字符：组件不动，标记包在投影两侧，raw 往返一致。
-    @MainActor
-    func testBoldWrapKeepsTokenInsideSelection() {
-        let editor = makeEditor(raw: "x \(cluster) y")
-        editor.selectedRange = NSRange(location: 1, length: 3) // " " + 组件 + " "
-        MarkdownSnippet.apply(.bold, to: editor)
-        XCTAssertEqual(editor.text, "x** \(fffc) **y")
-        XCTAssertEqual(editor.document.rawText, "x** \(cluster) **y")
-        XCTAssertTrue(editor.textStorage.attribute(.attachment, at: 4, effectiveRange: nil) is TimeTokenAttachment)
+        let source = UITextView()
+        source.text = "todo"
+        source.selectedRange = NSRange(location: 2, length: 0)
+        MarkdownSnippet.apply(.task, to: source)
+        XCTAssertEqual(source.text, "- [ ] todo")
+        XCTAssertEqual(source.selectedRange.location, 8)
     }
 
     // MARK: 插入时间
 
-    // 插入时间：产生合法令牌文本并按既有规则自动收为组件（无弹层——动作只落文本）。
+    // 插入时间：产生合法令牌文本；经实时缓冲管线自动收为组件（无弹层）。
     @MainActor
     func testInsertTimeProducesTokenTextAndCollapses() {
-        let editor = makeEditor(raw: "")
-        MarkdownSnippet.apply(.insertTime, to: editor)
-        let raw = editor.document.rawText
+        let view = BlockEditorView(writable: true)
+        let list = LiveBlocks.split("")
+        view.load(projection: LiveProjection.project(list.blocks[0]), block: list.blocks[0], selection: nil)
+        MarkdownSnippet.apply(.insertTime, to: view)
+        let raw = view.document.rawText
         // 显示层格式：@yyyy-MM-dd HH:mm 加尾随空格（生成待插入文本，不是令牌解析）。
         XCTAssertNotNil(raw.range(of: "^@\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2} $", options: .regularExpression), "raw=\(raw)")
-        XCTAssertEqual(editor.text, fffc + " ", "合法令牌自动收为组件，尾随空格留在组件后")
-        XCTAssertNotNil(editor.textStorage.attribute(.attachment, at: 0, effectiveRange: nil) as? TimeTokenAttachment)
+        XCTAssertEqual(view.text, fffc + " ", "合法令牌自动收为组件，尾随空格留在组件后")
+        XCTAssertNotNil(view.textStorage.attribute(.attachment, at: 0, effectiveRange: nil) as? TimeTokenAttachment)
     }
 
     // 时间文本确定性：固定时刻与日历下输出次日的墙上时刻。
@@ -126,13 +81,16 @@ final class MarkdownToolbarTests: XCTestCase {
         XCTAssertEqual(actions[1], .insertTime)
     }
 
-    // 编辑器装配后两种模式的文本视图都挂上快捷栏。
+    // 编辑器装配后两种模式的文本视图都挂上快捷栏（实时为焦点块编辑器）。
     @MainActor
     func testToolbarAttachedInBothModes() {
         let vc = EditorViewController(raw: "abc", writable: true, reason: "")
         _ = vc.view
-        XCTAssertNotNil(vc.editorView?.inputAccessoryView)
+        vc.liveView?.frame = CGRect(x: 0, y: 0, width: 390, height: 800)
+        vc.liveView?.layoutIfNeeded()
+        vc.liveView?.rawSelection = NSRange(location: 0, length: 0)
+        XCTAssertNotNil(vc.liveView?.activeEditor?.inputAccessoryView, "实时焦点块编辑器挂快捷栏")
         vc.toggleMode()
-        XCTAssertNotNil(vc.sourceView?.inputAccessoryView)
+        XCTAssertNotNil(vc.sourceView?.inputAccessoryView, "源码视图挂快捷栏")
     }
 }
