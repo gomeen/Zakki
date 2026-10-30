@@ -89,6 +89,8 @@ final class BlockEditorView: UITextView, UITextViewDelegate {
             queue: .main
         ) { [weak self] note in
             guard let self, !self.isReconciling, let storage = note.object as? NSTextStorage else { return }
+            isInStorageNotification = true
+            defer { isInStorageNotification = false }
             self.reconcile(storage: storage, editedRange: storage.editedRange)
         }
         // 点组件只吞 tap（时间弹层属 M3，此处仅为钩子）。
@@ -132,6 +134,9 @@ final class BlockEditorView: UITextView, UITextViewDelegate {
         }
         refreshPillAppearances()
     }
+
+    // 组字结束钩子：容器借它补跑被推迟的整幅重载（见 unmarkText）。
+    var onCompositionEnd: (() -> Void)?
 
     // 属性-only 编辑入口（样式重上）：对账静默、通知不重入。
     func performAttributeOnly(_ work: () -> Void) {
@@ -268,6 +273,7 @@ final class BlockEditorView: UITextView, UITextViewDelegate {
 
     override func unmarkText() {
         super.unmarkText()
+        onCompositionEnd?()
         guard !isReconciling else { return }
         reconcile(storage: textStorage, editedRange: selectedRange)
     }
@@ -312,6 +318,23 @@ final class BlockEditorView: UITextView, UITextViewDelegate {
     }
 
     // MARK: 存储对账（M2-1/M2-5 同一管线：diff 同步文档 + 收组件决策）
+
+    // TextKit 2 的 NSTextContentStorage 在 processEditing 期间不允许嵌套存储写：
+    // 收簇/不变式修正在该窗口内直接写字会让元素树脱 sync，后续
+    // ensureLayoutForRange 拿过期区间抛 NSRangeException（闪退，崩溃报告
+    // 53F9A2E4）。通知窗口内的写推迟到下一轮主循环（TextKit 2 状态结算后）。
+    var isInStorageNotification = false
+
+    // 通知窗口内（TextKit 2 processEditing 中）触发的排版/存储写推迟到窗口
+    // 结束后：in-flight 区间上的强制排版会越界（NSRangeException，崩溃报告
+    // 53F9A2E4）。窗口外原样同步执行。
+    func performWhenTextKitSettled(_ work: @escaping () -> Void) {
+        if isInStorageNotification {
+            DispatchQueue.main.async(execute: work)
+        } else {
+            work()
+        }
+    }
 
     private func reconcile(storage: NSTextStorage, editedRange: NSRange) {
         guard deferredCollapses.isEmpty else { return }

@@ -6,6 +6,15 @@ struct ZakkiApp: App {
     @StateObject private var model = NotesModel()
 
     init() {
+        // DEBUG 诊断：未捕获 NSException 的名字/原因/调用栈进统一日志（崩溃报告缺
+        // 应用帧时，log show 按 ZAKKIEXC 检索可拿 reason）。只写日志不吞异常。
+        #if DEBUG
+        NSSetUncaughtExceptionHandler { ex in
+            let text = "ZAKKIEXC \(ex.name.rawValue): \(ex.reason ?? "-")\n" + ex.callStackSymbols.joined(separator: "\n")
+            NSLog("%@", text)
+            try? text.write(to: URL(fileURLWithPath: "/tmp/zakki-exc-stack.txt"), atomically: true, encoding: .utf8)
+        }
+        #endif
         TimeZoneSync.start()
     }
 
