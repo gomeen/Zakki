@@ -1040,6 +1040,28 @@ struct LiveProjection: Equatable {
         return p
     }
 
+    // 缓冲装载用：把可见文字中的时间占位按其源码区间展开为令牌原文
+    //（U+FFFC 不外流；展开串经 EditorDocument 重扫会重新收簇）。
+    func expandedBufferText() -> String {
+        guard !objects.isEmpty else { return text }
+        let textUnits = Array(text.utf16)
+        let rawUnits = Array(raw.utf16)
+        var out: [unichar] = []
+        var cursor = 0
+        for at in objects {
+            guard units.indices.contains(at) else { continue }
+            out.append(contentsOf: textUnits[cursor..<at])
+            let unit = units[at]
+            guard unit.start >= 0, unit.end <= rawUnits.count, unit.start <= unit.end else { continue }
+            out.append(contentsOf: rawUnits[unit.start..<unit.end])
+            cursor = at + 1
+        }
+        if cursor < textUnits.count {
+            out.append(contentsOf: textUnits[cursor...])
+        }
+        return String(decoding: out, as: UTF16.self)
+    }
+
     // 块 → 投影（对齐桌面 projectBlock：剥离块级标记得到可编辑区）。
     static func project(_ block: LiveBlock) -> LiveProjection {
         let rs = Array(block.raw.utf16)
