@@ -15,6 +15,7 @@
 | [#28](https://github.com/gomeen/Zakki/issues/28) | [#33](https://github.com/gomeen/Zakki/pull/33) | M2-2 源码模式与 Markdown 快捷栏 | +24 条 → 64 |
 | [#30](https://github.com/gomeen/Zakki/issues/30) | [#34](https://github.com/gomeen/Zakki/pull/34) | M2-4 标签管理与导出：`AddNoteTab`/`DeleteNoteTab`/`ReorderNoteTabs` 绑定扩展、系统分享导出 | Go 契约 +13 用例，Swift +14 → 91 |
 | [#35](https://github.com/gomeen/Zakki/issues/35) | [#37](https://github.com/gomeen/Zakki/pull/37) | M2-5 实时 Markdown 样式渲染：块级六类 + 行内四类 + 标记调淡，只加属性不改字符 | +35 条 → **126 全绿** |
+| [#39](https://github.com/gomeen/Zakki/issues/39) | 本 PR | M2-6 实时预览与桌面一致（Typora 式标记隐藏，取代 M2-5 形态） | 126 → **177 全绿** |
 
 ## 自动化验证
 
@@ -47,13 +48,78 @@
 无未知字段时输出与旧 `json.MarshalIndent` 逐字节相同。移动端 M2 导出 → 桌面打开 →
 桌面再保存**未知字段不丢**的全链路自此成立（人工回读步骤见 #26 验收指引）。
 
-## 截图（M2-5 实时样式）
+## 截图（M2-5 实时样式；形态已被 M2-6 取代，历史保留）
 
 浅色 / 深色 / 横屏（release 资产 `m2-5-pr-assets`）：
 
 - [m2-5-light.png](https://github.com/gomeen/Zakki/releases/download/m2-5-pr-assets/m2-5-light.png)
 - [m2-5-dark.png](https://github.com/gomeen/Zakki/releases/download/m2-5-pr-assets/m2-5-dark.png)
 - [m2-5-landscape.png](https://github.com/gomeen/Zakki/releases/download/m2-5-pr-assets/m2-5-landscape.png)
+
+## M2-6 实时预览与桌面一致（Typora 式标记隐藏）
+
+实施票 [#39](https://github.com/gomeen/Zakki/issues/39)（用户裁决：与 PC 完全一致，
+M2 内补票，#26 验收前置）。**M2-5 的「标记调淡」形态被本票取代**：标记不再以
+textMuted 灰显示，而是全程不可见——非焦点块按桌面 livePane 渲染，焦点块只编辑
+可见文字（本节替换上节截图作为实时样式验收基线；M2-5 记录保留作历史）。
+
+### 桌面行为 → 移动端实现对照（要点）
+
+| 桌面（internal/app） | 移动端（mobile/ios/Zakki/Editor） |
+|---|---|
+| `liveBlocks`/`parseLines`：围栏成块、空行独立、标题/引用/分隔线/列表/待办单行块、连续普通行并为段落 | `LiveBlocks.split` 逐条移植（UTF-16 坐标）；表格行不特判并入段落（移动端无表格块，M2-5 同） |
+| `liveProjection`：块级/行内标记剥离，可见↔源偏移映射；不完整语法保持字面，补全后重投影即成型 | `LiveProjection`（units/styles + `replacing`/`fragment`），「输入中即时成型」有专项测试 |
+| `live_edit`/`live_input`：块尾回车拆块（段落 `
+
+`、列表续行前缀、空列表退出）、块首退格并块（空行段收敛、裸标记退出、代码块不并）、越界方向键跨块 | `LiveDocEditing` 纯函数 + 容器触发，桌面 `TestLiveBackspaceBoundary` 等边界用例全量对齐 |
+| `live_timeprojection`：时间令牌在可见文字中收成单 U+FFFC，选区压上扩到整组件，组件后输入自动补空格 | `withTimeObject` 移植；令牌识别只走 core 绑定（FindTimeToken + MarkdownProtection），剪贴板 copy/cut/paste 展开整簇 |
+| `live_history`：文档级撤销（连续键入合并、粘贴/IME/命令独立、围栏逐键与补闭栏合并） | 容器级区间片段事务栈（容量 200），块视图撤销路由到容器；undo/redo 焦点与光标随事务恢复 |
+| `livePane`/`live_preview_cache`：虚拟化渲染非焦点块，焦点块保留排版结构 | UIScrollView + 块高表（离线排版测量缓存 + `listGapAfter` 尾距），只挂载视口附近块；焦点块 = BlockEditorView（标题字号/引用竖条次要色/列表悬挂/任务 ☐☑ 前缀不可点/代码卡片/围栏行隐藏） |
+
+### 关键取舍（与桌面的已知差异）
+
+- **表格**：移动端无表格块，表格行并入段落按普通文本处理（M2-5 同；桌面表格网格编辑不随本票）。
+- **任务勾选框**：仅展示 ☐/☑，不可点（勾选交互属 M3）。
+- **代码块**：无语法高亮着色（mono + 灰底卡片）；围栏开闭行隐藏（同桌面卡片化呈现）；键入 ``` 即字面，回车自动补闭栏（桌面 fenceDraft 同款）。
+- **词中下划线/链接内标记**：按桌面 `inlineSpans` 口径（无 CommonMark 词边界规则），M2-5 的词边界规则只属源码高亮口径，不随 live 投影。
+- **撤销粒度**：键入 + 紧随回车拆块按桌面连续性规则合并为一个事务（一次撤销整体回退）；块视图不再各自持撤销栈。
+- **簇内 raw 偏移钳制**：切换到组件后（桌面口径），M2-5 曾钳组件首。
+
+### 测试迁移（126 → 177）
+
+- 新增 `LiveBlockModelTests`（38）：分块规则、投影/映射往返、不完整语法字面与成型时机、
+  replace/fragment 包裹保留、时间令牌占位与自动补空格、代理对边界、桌面边界用例（并块/拆块/空行）。
+- 新增 `LiveEditorContainerTests`（27）：焦点迁移、raw 逐字保真、容器级撤销/重做（含焦点移动、
+  键入-拆块合并、粘贴独立事务）、raw 选区映射、快捷栏源码级动作、围栏草稿、跨块方向键、
+  样式不改 raw/撤销栈、2000 行性能预算。
+- 新增 `BlockEditorViewTests`（14）：可见缓冲收簇、剪贴板 raw 投影、组字门控、容器协商钩子。
+- 迁移 `MarkdownStylerTests`（18）：标记调淤断言改「标记不在可见文字」；非标记样式断言
+  等价保留；`SourceModeTests`（10）/`MarkdownToolbarTests`（7）迁到容器/纯文本双路径；
+  `EditorDocument` 等无标记语义测试零改动零回归。
+
+### 性能实测（Debug，iPhone 17 Pro 模拟器，iOS 26.5）
+
+- 2000 行混合 Markdown 全量分块 + 逐块投影：**76ms**（预算 250ms）。
+- 2000 行装配 + 激活末块 + 首键入：**2.07s**（预算 2.5s；含 1600 块首次测量）。
+- 稳态键入结算（写回 + 全量重切 + 重投影，5 次取最差）：**83ms**——与 M2-5 整篇热重上
+  190ms 同量级；视口外不布局，滚动与首帧成本只与可见块数相关。
+
+### 截图（M2-6，浅/深/横屏，release 资产 `m2-6-pr-assets`）
+
+- [zakki-m2-6-light.png](https://github.com/gomeen/Zakki/releases/download/m2-6-pr-assets/zakki-m2-6-light.png)
+- [zakki-m2-6-dark.png](https://github.com/gomeen/Zakki/releases/download/m2-6-pr-assets/zakki-m2-6-dark.png)
+- [zakki-m2-6-landscape.png](https://github.com/gomeen/Zakki/releases/download/m2-6-pr-assets/zakki-m2-6-landscape.png)
+
+内容覆盖标题/粗斜体/行内代码/链接/任务/引用/代码卡片/分隔线/时间令牌胶囊混排；
+三张图均无任何 Markdown 标记（重点验收项）。演示 zakki.json 放临时目录，不入库。
+
+### 过程记录
+
+- 用户模拟器实测触发 SIGILL 崩溃（DiagnosticReports 五份，09:05–09:18）：4 份同一栈
+  （`handleEnter → applyStructural → recordOp` fencePair 合并对纯插入旧片段按 delta 切片越界，
+  两个测试入口同根因），1 份 SIGSEGV 为旧版 `performBatchUpdates` 路径；均已修复并有对应回归。
+- 布局层曾用 UICollectionView self-sizing，实测块叠印后改为显式块高表 + 视口挂载
+  （桌面 livePane 同构），离线排版测量与实际渲染共用 TextKit 1 管线保证一致。
 
 ## 尚未完成的人工验收项
 
