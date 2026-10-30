@@ -184,6 +184,24 @@ final class SourceModeTests: XCTestCase {
         XCTAssertEqual(vc.liveView?.raw, "hello", "编辑内容不因切换丢失")
     }
 
+    // MARK: 浮动钮层级
+
+    // 模式切换重新装配文本视图后，模式浮动钮必须仍在最顶层（否则首次切换即被盖住）。
+    @MainActor
+    func testModeFabStaysFrontmostAcrossToggles() {
+        let vc = makeViewController(raw: "hello")
+        guard let fab = vc.view.subviews.compactMap({ $0 as? UIVisualEffectView }).first else {
+            return XCTFail("缺少模式浮动钮")
+        }
+        for round in 1...2 {
+            vc.toggleMode()
+            vc.toggleMode()
+            XCTAssertEqual(vc.view.subviews.last, fab, "第 \(round) 轮往返后浮动钮被新文本视图覆盖")
+        }
+        vc.toggleMode()
+        XCTAssertEqual(vc.view.subviews.last, fab, "进入源码模式后浮动钮被覆盖")
+    }
+
     // MARK: 只读
 
     // 只读文件不提供模式切换与实时编辑（保持 M2-1 现状）。
