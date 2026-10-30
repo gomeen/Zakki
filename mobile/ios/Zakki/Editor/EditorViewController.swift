@@ -1,20 +1,21 @@
 import UIKit
 
 // 编辑器视图控制器：承载实时/源码双模式编辑、右上模式切换浮动钮与底部
-// Markdown 快捷栏，桥接 SwiftUI 宿主回调。时间弹层属 M3；点组件只吞 tap
-// 的行为在 EditorTextView 内实现。
+// Markdown 快捷栏，桥接 SwiftUI 宿主回调。实时模式为块容器（M2-6：Typora 式
+// 渲染，标记不可见，焦点块可编辑）；源码模式仍是 raw 直编 UITextView。
+// 时间弹层属 M3；点组件只吞 tap 的行为在 BlockEditorView 内实现。
 final class EditorViewController: UIViewController {
     var onTextChange: ((String) -> Void)?
     var onEditingSessionEnd: (() -> Void)?
 
-    // 编辑模式：live 为组件渲染的编辑缓冲；source 为原始 Markdown 纯文本直编
-    //（不扫描不收簇，组件位置显示原始令牌文本）。
+    // 编辑模式：live 为块容器渲染 + 焦点块编辑；source 为原始 Markdown 纯文本
+    // 直编（不扫描不收簇，组件位置显示原始令牌文本）。
     enum Mode { case live, source }
     private(set) var mode: Mode = .live
 
-    // live 视图：切回实时时用当前源码文本整体重建（init 全量首扫），撤销双栈
-    // 随实例丢弃——模式切换清空撤销栈是既定语义（视图各自重建）。
-    private(set) var editorView: EditorTextView?
+    // live 视图：切回实时时用当前源码文本整体重建（块全量重切），文档级撤销
+    // 栈随实例丢弃——模式切换清空撤销栈是既定语义（视图各自重建）。
+    private(set) var liveView: LiveEditorContainer?
     // source 视图：进入源码模式时创建，离开时丢弃（撤销栈同样清空）。
     private(set) var sourceView: UITextView?
     private let writable: Bool
@@ -23,16 +24,15 @@ final class EditorViewController: UIViewController {
     private var modeFab: UIVisualEffectView?
     private var modeIcon: UIImageView?
 
-    // 底部 Markdown 快捷栏（inputAccessoryView）：两种模式的文本视图共用同一实例。
+    // 底部 Markdown 快捷栏（inputAccessoryView）：焦点块编辑器与源码视图共用。
     private let toolbar = MarkdownToolbar()
 
     init(raw: String, writable: Bool, reason: String) {
         self.writable = writable
-        editorView = EditorTextView(raw: raw, writable: writable)
+        liveView = LiveEditorContainer(raw: raw, writable: writable)
         super.init(nibName: nil, bundle: nil)
         title = nil // 由 SwiftUI 导航栏提供
         if !writable {
-            editorView?.isEditable = false
             configureReadOnlyBanner(reason: reason)
         }
     }
@@ -45,33 +45,30 @@ final class EditorViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = Theme.Semantic.background
-        if let editorView {
-            install(editorView)
-            editorView.onContentChanged = { [weak self] raw in
+        if let liveView {
+            install(liveView)
+            liveView.inputAccessoryViewForEditor = writable ? toolbar : nil
+            liveView.onRawChange = { [weak self] raw in
                 self?.onTextChange?(raw)
             }
         }
         if writable {
             toolbar.onAction = { [weak self] action in
-                guard let self, let active = self.activeTextView() else { return }
-                MarkdownSnippet.apply(action, to: active)
+                self?.applyToolbarAction(action)
             }
             setupModeFab()
         }
     }
 
-    // 文本视图装配：顶到 view 顶部、底部随键盘（keyboardLayoutGuide，横竖屏通用）。
-    private func install(_ textView: UITextView) {
-        textView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(textView)
-        if writable {
-            textView.inputAccessoryView = toolbar
-        }
+    // 视图装配：顶到 view 顶部、底部随键盘（keyboardLayoutGuide，横竖屏通用）。
+    private func install(_ subview: UIView) {
+        subview.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(subview)
         NSLayoutConstraint.activate([
-            textView.topAnchor.constraint(equalTo: view.topAnchor),
-            textView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            textView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            textView.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
+            subview.topAnchor.constraint(equalTo: view.topAnchor),
+            subview.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            subview.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            subview.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
         ])
         // 模式切换重新装配文本视图（addSubview 追加到最顶层）会把模式浮动钮压在
         // 下面：首次切换后钮即消失且点按落在新视图上，必须随装配重新置顶。
@@ -80,24 +77,15 @@ final class EditorViewController: UIViewController {
         }
     }
 
-    private func activeTextView() -> UITextView? {
-        switch mode {
-        case .live: return editorView
-        case .source: return sourceView
-        }
-    }
-
     // MARK: 模式切换
 
-    // 切换语义（PR 已注明）：
-    // - live→source：展示 document 的 raw 投影（组件位置即原始令牌文本）；
-    // - source→live：用当前源码文本重建 EditorDocument（init 全量首扫重新收簇），
-    //   外来无主 U+FFFC 先行净化；
-    // - 撤销栈随视图重建清空（可接受，两种模式各自的栈不复用）；
-    // - 源码模式编辑经 delegate 以 textView.text 为 raw 上报写回（此时没有文档，
-    //   不走 document.rawText）；
-    // - 光标/选区经缓冲↔raw 坐标映射保留；映射点落在组件内部时钳到组件边界，
-    //   越界钳到文档尾。
+    // 切换语义（M2-6）：
+    // - live→source：源码展示容器 raw（令牌位置即原始令牌文本）；光标经
+    //   容器 rawSelection（焦点块投影换算）映射到 raw 坐标；
+    // - source→live：用当前源码文本重建容器（块全量重扫收簇），外来无主
+    //   U+FFFC 先行净化；光标经 rawSelection 反向映射回焦点块可见文字；
+    // - 文档级撤销栈随容器重建清空（可接受，两种模式各自的栈不复用）；
+    // - 源码模式编辑经 delegate 以 textView.text 为 raw 上报写回。
     func toggleMode() {
         guard writable else { return }
         switch mode {
@@ -107,15 +95,12 @@ final class EditorViewController: UIViewController {
     }
 
     private func enterSourceMode() {
-        guard let editor = editorView else { return }
-        let doc = editor.document
-        let selection = editor.selectedRange
-        let rawStart = doc.rawOffset(ofBufferOffset: selection.location)
-        let rawEnd = doc.rawOffset(ofBufferOffset: selection.location + selection.length)
-        let raw = doc.rawText
-        let wasFirstResponder = editor.isFirstResponder
-        editor.removeFromSuperview()
-        editorView = nil
+        guard let live = liveView else { return }
+        let rawSelection = live.rawSelection
+        let raw = live.raw
+        let wasFirstResponder = live.activeEditor?.isFirstResponder ?? false
+        live.removeFromSuperview()
+        liveView = nil
 
         let source = UITextView()
         source.backgroundColor = Theme.Semantic.background
@@ -131,7 +116,10 @@ final class EditorViewController: UIViewController {
             .foregroundColor: UIColor.label,
         ]
         install(source)
-        clampSelection(into: source, start: rawStart, end: rawEnd)
+        if writable {
+            source.inputAccessoryView = toolbar
+        }
+        clampSelection(into: source, start: rawSelection.location, end: rawSelection.location + rawSelection.length)
         sourceView = source
         mode = .source
         updateModeFab()
@@ -148,21 +136,20 @@ final class EditorViewController: UIViewController {
         source.removeFromSuperview()
         sourceView = nil
 
-        // 用当前源码文本整体重建：init 全量首扫收簇；外来无主 U+FFFC 净化。
-        let editor = EditorTextView(raw: EditorDocument.sanitizingPasted(raw), writable: writable)
-        install(editor)
-        editor.onContentChanged = { [weak self] raw in
+        // 用当前源码文本整体重建：块全量重切收簇；外来无主 U+FFFC 净化。
+        let live = LiveEditorContainer(raw: EditorDocument.sanitizingPasted(raw), writable: writable)
+        install(live)
+        live.inputAccessoryViewForEditor = toolbar
+        live.onRawChange = { [weak self] raw in
             self?.onTextChange?(raw)
         }
-        let doc = editor.document
-        let bufferStart = doc.bufferOffset(ofRawOffset: selection.location)
-        let bufferEnd = doc.bufferOffset(ofRawOffset: selection.location + selection.length)
-        editor.selectedRange = NSRange(location: min(bufferStart, bufferEnd), length: abs(bufferEnd - bufferStart))
-        editorView = editor
+        liveView = live
         mode = .live
         updateModeFab()
+        // 光标/选区经 raw 坐标映射回焦点块（映射点落在组件内部钳到组件边界）。
+        live.rawSelection = NSRange(location: selection.location, length: selection.length)
         if wasFirstResponder {
-            editor.becomeFirstResponder()
+            live.activeEditor?.becomeFirstResponder()
         }
     }
 
@@ -172,6 +159,20 @@ final class EditorViewController: UIViewController {
         let location = min(max(min(start, end), 0), length)
         let selEnd = min(max(max(start, end), location), length)
         textView.selectedRange = NSRange(location: location, length: selEnd - location)
+    }
+
+    // MARK: 快捷栏
+
+    // live 模式经容器落源码级语义（前缀作用于块行首、包裹作用于可见选区、
+    // 插时间走缓冲收簇）；源码模式保持 M2-2 的文本视图语义。
+    private func applyToolbarAction(_ action: MarkdownSnippetAction) {
+        switch mode {
+        case .live:
+            liveView?.applyToolbarAction(action)
+        case .source:
+            guard let source = sourceView else { return }
+            MarkdownSnippet.apply(action, to: source)
+        }
     }
 
     // MARK: 浮动切换钮
@@ -243,8 +244,8 @@ final class EditorViewController: UIViewController {
     }
 }
 
-// 源码模式的文本变化上报：textView.text 即磁盘 raw（源码模式没有文档实例，
-// 不经 document.rawText），写回防抖管道与实时模式共用。
+// 源码模式的文本变化上报：textView.text 即磁盘 raw（源码模式没有容器实例，
+// 不经 raw 投影），写回防抖管道与实时模式共用。
 extension EditorViewController: UITextViewDelegate {
     func textViewDidChange(_ textView: UITextView) {
         guard mode == .source, textView === sourceView else { return }
