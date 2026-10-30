@@ -486,6 +486,22 @@ final class BlockEditorView: UITextView, UITextViewDelegate {
 
     // MARK: 工具
 
+    // 光标矩形（容器滚动锚定用）；越界钳到文档长度。
+    func caretRect(for offset: Int) -> CGRect {
+        let length = textStorage.length
+        let location = min(max(offset, 0), length)
+        guard let start = position(from: beginningOfDocument, offset: location),
+              let end = position(from: start, offset: 0),
+              let range = textRange(from: start, to: end) else {
+            return CGRect(x: 0, y: 0, width: 1, height: font?.lineHeight ?? 20)
+        }
+        let rect = firstRect(for: range)
+        if rect.width == 0, rect.height == 0 {
+            return CGRect(x: 0, y: 0, width: 1, height: font?.lineHeight ?? 20)
+        }
+        return rect
+    }
+
     private func syncCaretAfterDirectWrite(at offset: Int) {
         selectedRange = NSRange(location: offset, length: 0)
         if let start = position(from: beginningOfDocument, offset: offset),

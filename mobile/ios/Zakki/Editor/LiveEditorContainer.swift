@@ -2,11 +2,11 @@ import UIKit
 
 // MARK: - 实时预览块容器（M2-6，同构桌面 livePane + live_edit）
 
-// 文档按块虚拟化渲染：非焦点块为不可编辑渲染单元格（Typora 渲染态），焦点块
-// 为单个 BlockEditorView（只承载可见文字）。容器持有文档 raw（磁盘逐字投影的
-// 唯一事实源）、块列表、焦点块与文档级撤销双栈（对齐桌面 live_history）。
-// 键入经块投影写回 raw（replace 保留包裹），回车/块首退格/越界方向键走
-// LiveDocEditing 的跨块语义；剪贴板与令牌收簇由 BlockEditorView 承接。
+// 文档按块虚拟化渲染（显式方案，同桌面 livePane：只布局视口附近块）：
+// 块高表 = 离线排版测量（NSLayoutManager，按块身份+宽度缓存）+ 尾距（桌面
+// listGapAfter）；非焦点块为不可编辑渲染视图，焦点块为 BlockEditorView（可见
+// 文字，高度取编辑器实测并随输入更新）。容器持有文档 raw（磁盘逐字投影的
+// 唯一事实源）、块列表与文档级撤销双栈（桌面 live_history 同构）。
 final class LiveEditorContainer: UIView {
     // raw 实际变化后回调（宿主接防抖保存）。
     var onRawChange: ((String) -> Void)?
@@ -16,12 +16,30 @@ final class LiveEditorContainer: UIView {
     private(set) var activeIndex: Int?
     private let writable: Bool
 
-    private var collectionView: UICollectionView!
+    private let scrollView = UIScrollView()
+    private let contentView = UIView()
+
+    // 块高表：y/height（height 含尾距）。
+    private struct BlockLayout {
+        var y: CGFloat
+        var height: CGFloat
+    }
+    private var layouts: [BlockLayout] = []
+    private var contentHeightConstraint: NSLayoutConstraint?
+
+    // 已挂载的块视图（index → view + 块身份）；身份变化即重建。
+    private struct MountedView {
+        var view: LiveBaseCell
+        var identity: String
+    }
+    private var mounted: [Int: MountedView] = [:]
 
     // 焦点块状态。
     private(set) var activeEditor: BlockEditorView?
     private(set) var activeProjection: LiveProjection?
+    private var activeCell: LiveActiveCell?
     private var pendingSourceCaret: Int?
+    private var pendingVisibleSelection: NSRange?
     private var lastReportedSel = NSRange(location: 0, length: 0)
     private var selectionHint: NSRange? // 编辑前可见选区（replace 消歧）
     private var suppressSelectionReports = false
@@ -41,11 +59,9 @@ final class LiveEditorContainer: UIView {
 
     let styler = MarkdownStyler()
     private let editorUndoManager = EditorUndoManager()
+    private let metrics = LiveBlockMetrics()
 
     var canUndo: Bool { !undoStack.isEmpty }
-
-    // 测试探针：容器级撤销事务数。
-    var undoStackDepthForTesting: Int { undoStack.count }
     var canRedo: Bool { !redoStack.isEmpty }
 
     // 测试探针：焦点块是否处于围栏草稿态（键入 ``` 后的字面投影）。
@@ -55,13 +71,18 @@ final class LiveEditorContainer: UIView {
         return block.kind == .code && LiveSyntax.isFenceDraftLine(block.raw)
     }
 
+    // 测试探针：容器级撤销事务数。
+    var undoStackDepthForTesting: Int { undoStack.count }
+
+
     init(raw: String, writable: Bool) {
         self.raw = raw
         self.blockList = LiveBlocks.split(raw)
         self.writable = writable
         super.init(frame: .zero)
         backgroundColor = Theme.Semantic.background
-        setupCollectionView()
+        setupScrollView()
+        rebuildLayout()
         editorUndoManager.canUndoRoute = { [weak self] in self?.canUndo ?? false }
         editorUndoManager.canRedoRoute = { [weak self] in self?.canRedo ?? false }
         editorUndoManager.undoRoute = { [weak self] in self?.undo() }
@@ -73,61 +94,232 @@ final class LiveEditorContainer: UIView {
         fatalError("容器不走 IB")
     }
 
-    private func setupCollectionView() {
-        let layout = UICollectionViewFlowLayout()
-        layout.minimumInteritemSpacing = 0
-        layout.minimumLineSpacing = 0
-        layout.estimatedItemSize = CGSize(width: 300, height: 40) // 宽度随视口在 layoutSubviews 校正
-        collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
-        collectionView.backgroundColor = .clear
-        collectionView.translatesAutoresizingMaskIntoConstraints = false
-        collectionView.showsVerticalScrollIndicator = true
-        collectionView.keyboardDismissMode = .interactive
-        collectionView.contentInset = UIEdgeInsets(
+    private func setupScrollView() {
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.backgroundColor = .clear
+        scrollView.showsVerticalScrollIndicator = true
+        scrollView.keyboardDismissMode = .interactive
+        scrollView.contentInset = UIEdgeInsets(
             top: Theme.Typography.padY,
             left: Theme.Typography.padX,
             bottom: Theme.Typography.padY,
             right: Theme.Typography.padX
         )
-        collectionView.delegate = self
-        collectionView.register(LiveBlankCell.self, forCellWithReuseIdentifier: LiveBlankCell.reuseIdentifier)
-        collectionView.register(LiveRuleCell.self, forCellWithReuseIdentifier: LiveRuleCell.reuseIdentifier)
-        collectionView.register(LiveTextCell.self, forCellWithReuseIdentifier: LiveTextCell.reuseIdentifier)
-        collectionView.register(LiveCodeCell.self, forCellWithReuseIdentifier: LiveCodeCell.reuseIdentifier)
-        collectionView.register(LiveActiveCell.self, forCellWithReuseIdentifier: LiveActiveCell.reuseIdentifier)
-        collectionView.dataSource = self
-        addSubview(collectionView)
+        scrollView.delegate = self
+        addSubview(scrollView)
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.addSubview(contentView)
+        contentHeightConstraint = contentView.heightAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([
-            collectionView.topAnchor.constraint(equalTo: topAnchor),
-            collectionView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            collectionView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            collectionView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            scrollView.topAnchor.constraint(equalTo: topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            contentView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
+            contentView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
+            contentView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
+            contentView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
+            contentHeightConstraint!,
         ])
     }
 
     // 键盘工具栏挂到焦点编辑器上（两种模式的文本视图共用同一实例）。
     var inputAccessoryViewForEditor: UIView?
 
-    // 自适应单元格的精确宽度：估算宽度必须与视口内宽一致，换行高度才正确。
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        guard let layout = collectionView.collectionViewLayout as? UICollectionViewFlowLayout else { return }
-        let inset = collectionView.contentInset
-        let width = max(1, collectionView.bounds.width - inset.left - inset.right)
-        if abs(layout.estimatedItemSize.width - width) > 0.5 {
-            layout.estimatedItemSize = CGSize(width: width, height: 40)
-            layout.invalidateLayout()
+    var contentViewportWidth: CGFloat {
+        max(1, scrollView.contentInset.left + scrollView.contentInset.right == 0
+            ? bounds.width
+            : bounds.width - scrollView.contentInset.left - scrollView.contentInset.right)
+    }
+
+    // MARK: 块高表（离线排版测量 + 尾距）
+
+    private func blockContentHeight(_ block: LiveBlock, width: CGFloat) -> CGFloat {
+        if let idx = activeIndex, blockList.blocks.indices.contains(idx), blockList.blocks[idx].startLine == block.startLine {
+            // 焦点块：编辑器实测（随输入换行更新）。
+            if let editor = activeEditor {
+                return editor.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
+            }
+        }
+        let projection = LiveProjection.project(block)
+        let attributed = LiveBlockRender.attributedString(for: block, projection: projection, traits: traitCollection)
+        return metrics.height(for: block, attributed: attributed, width: width)
+    }
+
+    private func rebuildLayout() {
+        let width = contentViewportWidth
+        layouts.removeAll(keepingCapacity: true)
+        var y: CGFloat = 0
+        for (i, block) in blockList.blocks.enumerated() {
+            let gap = LiveCellSpacing.gap(after: i, blocks: blockList.blocks)
+            let content: CGFloat
+            if block.kind == .blank {
+                content = (block.raw.isEmpty && LiveBlocks.isLiveSeparator(blockList.blocks, i)) ? 0 : 20
+            } else if block.kind == .rule {
+                content = 1
+            } else {
+                content = blockContentHeight(block, width: width)
+            }
+            let height = content + gap
+            layouts.append(BlockLayout(y: y, height: height))
+            y += height
+        }
+        contentHeightConstraint?.constant = y
+        invalidateIntrinsicContentSize()
+    }
+
+    // 从 index 起重算（前缀块的 y/高度不变，测量缓存命中便宜）。
+    private func relayoutFrom(_ index: Int) {
+        let width = contentViewportWidth
+        var y = index == 0 ? 0 : layouts[index - 1].y + layouts[index - 1].height
+        for i in index..<blockList.blocks.count {
+            let block = blockList.blocks[i]
+            let gap = LiveCellSpacing.gap(after: i, blocks: blockList.blocks)
+            let content: CGFloat
+            if block.kind == .blank {
+                content = (block.raw.isEmpty && LiveBlocks.isLiveSeparator(blockList.blocks, i)) ? 0 : 20
+            } else if block.kind == .rule {
+                content = 1
+            } else {
+                content = blockContentHeight(block, width: width)
+            }
+            let height = content + gap
+            if i < layouts.count {
+                layouts[i] = BlockLayout(y: y, height: height)
+            } else {
+                layouts.append(BlockLayout(y: y, height: height))
+            }
+            y += height
+        }
+        contentHeightConstraint?.constant = y
+        layoutVisibleBlocks()
+    }
+
+    // MARK: 视口挂载（attach/detach）
+
+    private func layoutVisibleBlocks() {
+        guard bounds.width > 0 else { return }
+        let visible = CGRect(origin: scrollView.contentOffset, size: bounds.size)
+            .insetBy(dx: 0, dy: -120) // 上下缓冲，滚动不闪
+        var needed = Set<Int>()
+        for (i, layout) in layouts.enumerated() {
+            let frame = CGRect(x: 0, y: layout.y, width: contentViewportWidth, height: layout.height)
+            if frame.intersects(visible) {
+                needed.insert(i)
+                if mounted[i] == nil {
+                    mount(index: i)
+                }
+            }
+        }
+        for (i, entry) in mounted where !needed.contains(i) {
+            if i == activeIndex { continue } // 焦点编辑器常驻（正在输入，可能短暂离屏）
+            entry.view.removeFromSuperview()
+            mounted[i] = nil
         }
     }
 
-    // MARK: 块数与视图同步
+    private func mount(index: Int) {
+        guard blockList.blocks.indices.contains(index) else { return }
+        let block = blockList.blocks[index]
+        let identity = block.visualIdentity
+        let gap = LiveCellSpacing.gap(after: index, blocks: blockList.blocks)
+        let view: LiveBaseCell
+        if index == activeIndex, let cell = activeCell {
+            view = cell
+        } else if index == activeIndex {
+            let cell = LiveActiveCell(frame: .zero)
+            activeCell = cell
+            let editor = activeEditor ?? makeActiveEditor(index: index)
+            activeEditor = editor
+            cell.embed(editor, block: block, traits: traitCollection, gap: gap)
+            view = cell
+        } else {
+            view = makeContentCell(index: index, block: block, gap: gap)
+        }
+        view.blockIndex = index
+        let y = layouts.indices.contains(index) ? layouts[index].y : 0
+        let height = layouts.indices.contains(index) ? layouts[index].height : 0
+        view.frame = CGRect(x: 0, y: y, width: contentViewportWidth, height: height)
+        contentView.addSubview(view)
+        mounted[index] = MountedView(view: view, identity: identity)
+    }
+
+    private func makeContentCell(index: Int, block: LiveBlock, gap: CGFloat) -> LiveBaseCell {
+        switch block.kind {
+        case .blank:
+            let cell = LiveBlankCell(frame: .zero)
+            cell.configure(index: index, isSeparator: LiveBlocks.isLiveSeparator(blockList.blocks, index), gap: gap)
+            cell.onTap = { [weak self] i, caret in self?.liveBlockCellTapped(i, visibleCaret: caret) }
+            return cell
+        case .rule:
+            let cell = LiveRuleCell(frame: .zero)
+            cell.configure(index: index, gap: gap)
+            cell.onTap = { [weak self] i, caret in self?.liveBlockCellTapped(i, visibleCaret: caret) }
+            return cell
+        case .code:
+            let cell = LiveCodeCell(frame: .zero)
+            let proj = LiveProjection.project(block)
+            cell.configure(block: block, attributed: LiveBlockRender.attributedString(for: block, projection: proj, traits: traitCollection),
+                           index: index, gap: gap, traits: traitCollection)
+            cell.onTap = { [weak self] i, caret in self?.liveBlockCellTapped(i, visibleCaret: caret) }
+            return cell
+        default:
+            let cell = LiveTextCell(frame: .zero)
+            let proj = LiveProjection.project(block)
+            cell.configure(block: block, attributed: LiveBlockRender.attributedString(for: block, projection: proj, traits: traitCollection),
+                           index: index, gap: gap)
+            cell.onTap = { [weak self] i, caret in self?.liveBlockCellTapped(i, visibleCaret: caret) }
+            return cell
+        }
+    }
+
+    // 内容变化的块重挂（身份变化 → 重建视图）；焦点块由 syncActiveBuffer 更新。
+    private func remountChangedBlocks(_ old: [LiveBlock], _ new: [LiveBlock]) {
+        guard old.count == new.count else {
+            remountAll()
+            return
+        }
+        for (i, block) in new.enumerated() {
+            guard i != activeIndex else { continue }
+            if let entry = mounted[i], entry.identity != block.visualIdentity {
+                entry.view.removeFromSuperview()
+                mounted[i] = nil
+                if layouts.indices.contains(i), mounted[i] == nil {
+                    mount(index: i)
+                }
+            }
+        }
+    }
+
+    private func remountAll() {
+        for (i, entry) in mounted {
+            if i != activeIndex { entry.view.removeFromSuperview() }
+            if i != activeIndex { mounted[i] = nil }
+        }
+        layoutVisibleBlocks()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // 宽度变化（旋转/分屏）：块高表整体重算。
+        if abs(lastLayoutWidth - contentViewportWidth) > 0.5 {
+            lastLayoutWidth = contentViewportWidth
+            metrics.removeAll()
+            rebuildLayout()
+            remountAll()
+        } else {
+            layoutVisibleBlocks()
+        }
+    }
+    private var lastLayoutWidth: CGFloat = 0
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
         guard let previousTraitCollection,
               previousTraitCollection.hasDifferentColorAppearance(comparedTo: traitCollection) else { return }
         // 胶囊位图与卡片描边按新 traits 重画（不动文本、不进撤销栈）。
-        collectionView.reloadData()
+        metrics.removeAll()
+        remountAll()
         if let view = activeEditor, let idx = activeIndex, blockList.blocks.indices.contains(idx) {
             view.refreshPillAppearances()
             applyStyles(to: view, block: blockList.blocks[idx], projection: activeProjection)
@@ -136,16 +328,13 @@ final class LiveEditorContainer: UIView {
 
     // MARK: 焦点迁移与激活
 
-    // 点击渲染块进入编辑（桌面 live_click）。时间行首次点击光标落块末
-    //（桌面 focusPreviewBlock 对 hasTime 块的默认落点）。
+    // 点击渲染块进入编辑（桌面 live_click）。时间行首次点击光标落块末。
     func activate(_ index: Int, sourceCaret: Int? = nil, visibleSelection: NSRange? = nil) {
         guard writable, blockList.blocks.indices.contains(index) else { return }
         let old = activeIndex
         activeIndex = index
         pendingSourceCaret = sourceCaret
         pendingVisibleSelection = visibleSelection
-        // 容器自跟踪光标：显式源偏移直接用；可见选区经该块投影换算回源偏移
-        //（选区落点在组件内时 sourceOffset 钳到组件边界）。
         let block = blockList.blocks[index]
         let mappedSource: Int
         if let sourceCaret {
@@ -159,19 +348,25 @@ final class LiveEditorContainer: UIView {
         trackedDocCaret = blockList.startOffset(of: index)
             + min(max(mappedSource, 0), LiveSyntax.length(block.raw))
         if old != index {
-            // 焦点迁移：旧编辑器随单元格重用丢弃，新焦点块重新装配。
-            // 编辑器急切创建：目标块可能在视口外（集合视图只为可见项建 cell），
-            // 滚动到位后由 cellForItem 嵌入这份就绪的编辑器。
+            // 焦点迁移：旧/新 index 上的挂载全部失效（旧焦点块回渲染视图、
+            // 新 index 上的内容视图让位给焦点编辑器），再急切装配编辑器
+            //（目标块可能离屏，块高表需要它的实测高度）。
+            activeEditor = nil
+            activeCell = nil
+            for stale in [old, index].compactMap({ $0 }) where mounted[stale] != nil {
+                mounted[stale]?.view.removeFromSuperview()
+                mounted[stale] = nil
+            }
             activeEditor = makeActiveEditor(index: index)
-            reloadCells(paths: changedPaths(oldActive: old, newActive: index))
+            rebuildLayout()
+            layoutVisibleBlocks()
+            scrollToActive()
+            syncActiveBuffer()
         } else {
             // 同块重激活（rawSelection/再次点击）：消费 pending 选区重同步。
             syncActiveBuffer()
         }
-        scrollToActive()
     }
-
-    private var pendingVisibleSelection: NSRange?
 
     // 桌面 focusBlockEnd：最后一个非文末空块的末尾。
     func focusBlockEnd() {
@@ -185,51 +380,31 @@ final class LiveEditorContainer: UIView {
         activate(idx, sourceCaret: end)
     }
 
-    // MARK: 数据源与差异重载
-
-    private func reloadCells(paths: Set<Int>) {
-        let items = paths.sorted().map { IndexPath(item: $0, section: 0) }
-        guard !items.isEmpty else { return }
-        // reloadItems 触发重入 cellForItem（单元格类型可能变化）；焦点迁移不改块数。
-        collectionView.reloadItems(at: items)
-    }
-
-    // 需要重建的路径：焦点迁移时旧/新焦点路径；键入后身份变化的中间块。
-    private func changedPaths(oldActive: Int?, newActive: Int) -> Set<Int> {
-        guard let old = oldActive else { return [newActive] }
-        guard old != newActive else { return [] }
-        return [old, newActive]
-    }
-
-    private func reloadAll() {
-        collectionView.reloadData()
-    }
-
-    // 键入/结构编辑后的块列表差异（视觉身份：行号平移不算变化）。
-    // 块数不变时只重载身份变化的非焦点路径（焦点块缓冲由 syncActiveBuffer 负责）；
-    // 块数变化（拆块/并块）走 reloadData：结构编辑低频，可见块才重建。
-    private func applyBlockDiff(_ old: [LiveBlock], _ new: [LiveBlock]) {
-        guard old.count == new.count else {
-            collectionView.reloadData()
-            return
-        }
-        var reload: [IndexPath] = []
-        for (i, block) in new.enumerated() where i != activeIndex && old[i].visualIdentity != block.visualIdentity {
-            reload.append(IndexPath(item: i, section: 0))
-        }
-        guard !reload.isEmpty else { return }
-        collectionView.reloadItems(at: reload)
-    }
-
     private func scrollToActive() {
-        guard let idx = activeIndex else { return }
-        let path = IndexPath(item: idx, section: 0)
-        collectionView.layoutIfNeeded()
-        guard let attrs = collectionView.layoutAttributesForItem(at: path) else { return }
-        let frame = collectionView.convert(attrs.frame, to: self)
-        let visible = bounds
+        guard let idx = activeIndex, layouts.indices.contains(idx) else { return }
+        let frame = CGRect(x: 0, y: layouts[idx].y, width: contentViewportWidth, height: layouts[idx].height)
+        let visible = CGRect(origin: scrollView.contentOffset, size: bounds.size)
         guard !visible.contains(frame) else { return }
-        collectionView.scrollToItem(at: path, at: .centeredVertically, animated: false)
+        let target: CGRect
+        if frame.height <= visible.height {
+            target = frame
+        } else {
+            target = CGRect(x: 0, y: frame.minY, width: 1, height: min(frame.height, visible.height * 0.8))
+        }
+        scrollView.scrollRectToVisible(target.offsetBy(dx: 0, dy: scrollView.contentInset.top), animated: false)
+    }
+
+    // 光标滚入视口（键入换行/长块内移动）。
+    private func scrollCaretIntoView() {
+        guard let view = activeEditor, let idx = activeIndex, layouts.indices.contains(idx) else { return }
+        layoutIfNeeded()
+        let caretRect = view.caretRect(for: view.selectedRange.location)
+        let local = CGRect(x: caretRect.minX,
+                           y: layouts[idx].y + min(caretRect.minY, max(0, layouts[idx].height - 2)),
+                           width: max(caretRect.width, 1), height: max(caretRect.height, 1))
+        let visible = CGRect(origin: scrollView.contentOffset, size: bounds.size)
+        guard !visible.contains(local) else { return }
+        scrollView.scrollRectToVisible(local.insetBy(dx: 0, dy: -24), animated: false)
     }
 
     // MARK: 焦点块编辑器装配
@@ -272,7 +447,7 @@ final class LiveEditorContainer: UIView {
             selection = visible
         } else {
             // 无显式落点（如明暗切换重装配）：钳回上次上报的选区。
-            let length = (textStorageLength(of: proj) as NSString).length
+            let length = (proj.text as NSString).length
             let location = min(max(lastReportedSel.location, 0), length)
             let end = min(max(lastReportedSel.location + lastReportedSel.length, location), length)
             selection = NSRange(location: location, length: end - location)
@@ -289,8 +464,6 @@ final class LiveEditorContainer: UIView {
         }
         return view
     }
-
-    private func textStorageLength(of projection: LiveProjection) -> String { projection.text }
 
     private func applyStyles(to view: BlockEditorView, block: LiveBlock, projection: LiveProjection?) {
         guard let projection else { return }
@@ -312,6 +485,16 @@ final class LiveEditorContainer: UIView {
         guard !suppressSelectionReports else { return }
         lastReportedSel = view.selectedRange
         updateTypingAttributes()
+        // 焦点块高度可能随换行变化：重排其后的块并保持光标可见。
+        if let idx = activeIndex, layouts.indices.contains(idx) {
+            let width = contentViewportWidth
+            let height = view.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
+                + LiveCellSpacing.gap(after: idx, blocks: blockList.blocks)
+            if abs(layouts[idx].height - height) > 0.5 {
+                relayoutFrom(idx)
+            }
+        }
+        scrollCaretIntoView()
     }
 
     // 缓冲重同步。投影文字与缓冲一致时不动缓冲（保持原生光标），仅补样式；
@@ -365,7 +548,7 @@ final class LiveEditorContainer: UIView {
             guard let load = pendingBufferLoad else { return }
             pendingBufferLoad = nil
             // 推迟期间焦点可能已迁移：只对仍在位的编辑器重载。
-            guard let view = activeEditor, view === self.activeEditor else { return }
+            guard activeEditor != nil else { return }
             performBufferLoad(block: load.block, projection: load.projection, selection: load.selection)
         }
     }
@@ -379,13 +562,16 @@ final class LiveEditorContainer: UIView {
         activeProjection = projection
         applyStyles(to: view, block: block, projection: projection)
         updateTypingAttributes()
+        if let idx = activeIndex, layouts.indices.contains(idx) {
+            relayoutFrom(idx)
+        }
     }
 
     // MARK: 键入写回（可见文字 → 块源码 → 文档 raw）
 
     private func blockEditorDidChange(bufferRaw: String, kind: LiveEditKind, caretEstimate: Int) {
         guard let view = activeEditor, let idx = activeIndex, blockList.blocks.indices.contains(idx),
-              let proj = activeProjection, view === activeEditor else { return }
+              let proj = activeProjection else { return }
         let block = blockList.blocks[idx]
         let bufferCaret = max(caretEstimate, 0)
         let hint = selectionHint
@@ -407,8 +593,7 @@ final class LiveEditorContainer: UIView {
         let beforeCaret = trackedDocCaret
         let newDoc = LiveDocEditing.spliceLines(beforeDoc, block.startLine, block.endLine, newBlockRaw).joined(separator: "\n")
         // 结算光标：直接存储写路径的选区同步发生在存储通知之后，回调期读到的
-        // selectedRange 可能滞后；输入类事务按「前光标 + 全文增量」托底
-        //（编辑发生在光标/选区处，插入必把光标前推，删除不越前光标减量）。
+        // selectedRange 可能滞后；输入类事务按「前光标 + 全文增量」托底。
         let growth = (newDoc as NSString).length - (beforeDoc as NSString).length
         let settledCaret = kind == .command || kind == .ime
             ? blockStart + sourceCaret
@@ -420,17 +605,17 @@ final class LiveEditorContainer: UIView {
         recordOp(before: beforeDoc, after: newDoc, beforeCaret: beforeCaret, afterCaret: docCaret,
                  kind: kind, fencePair: false)
         trackedDocCaret = docCaret
-        let (newIdx, newBlockStart) = blockList.blockOf(min(max(docCaret, 0), (newDoc as NSString).length))
+        let (newIdx, newBlockStart) = blockList.blockOf(docCaret)
         let localCaret = max(0, docCaret - newBlockStart)
         if newIdx == idx {
             pendingSourceCaret = localCaret
-            applyBlockDiff(oldBlocks, blockList.blocks)
+            remountChangedBlocks(oldBlocks, blockList.blocks)
             syncActiveBuffer(deferred: true)
         } else {
-            applyBlockDiff(oldBlocks, blockList.blocks)
+            remountChangedBlocks(oldBlocks, blockList.blocks)
             activate(newIdx, sourceCaret: localCaret)
         }
-        scrollToActive()
+        scrollCaretIntoView()
         onRawChange?(newDoc)
     }
 
@@ -480,28 +665,19 @@ final class LiveEditorContainer: UIView {
         trackedDocCaret = edit.caret
         let (idx, blockStart) = blockList.blockOf(min(max(edit.caret, 0), (edit.doc as NSString).length))
         let localCaret = max(0, edit.caret - blockStart)
-        applyBlockDiff(oldBlocks, blockList.blocks)
+        remountChangedBlocks(oldBlocks, blockList.blocks)
         if idx == activeIndex {
             pendingSourceCaret = localCaret
             syncActiveBuffer()
         } else {
             activate(idx, sourceCaret: localCaret)
         }
-        scrollToActive()
+        scrollCaretIntoView()
         onRawChange?(edit.doc)
     }
 
-    // 当前文档级光标（op 记账用）。
-    private func currentDocCaret() -> Int {
-        guard let idx = activeIndex, blockList.blocks.indices.contains(idx) else {
-            return (raw as NSString).length
-        }
-        let blockStart = blockList.startOffset(of: idx)
-        if let view = activeEditor, let proj = activeProjection {
-            return blockStart + proj.sourceOffset(view.selectedRange.location)
-        }
-        return blockStart
-    }
+    // 当前文档级光标（无焦点块的兜底）。
+    private var currentDocCaretFallback: Int { (raw as NSString).length }
 
     // MARK: 撤销/重做（文档级事务，块视图只路由）
 
@@ -532,7 +708,7 @@ final class LiveEditorContainer: UIView {
         let oldBlocks = blockList.blocks
         blockList = LiveBlocks.split(doc)
         trackedDocCaret = caret
-        applyBlockDiff(oldBlocks, blockList.blocks)
+        remountChangedBlocks(oldBlocks, blockList.blocks)
         let (idx, blockStart) = blockList.blockOf(min(max(caret, 0), units.count))
         let localCaret = max(0, caret - blockStart)
         if idx == activeIndex {
@@ -541,7 +717,7 @@ final class LiveEditorContainer: UIView {
         } else {
             activate(idx, sourceCaret: localCaret)
         }
-        scrollToActive()
+        scrollCaretIntoView()
         onRawChange?(doc)
     }
 
@@ -612,22 +788,6 @@ final class LiveEditorContainer: UIView {
             undoStack.removeFirst()
         }
         redoStack.removeAll()
-    }
-
-    // MARK: 测试钩子（生产路径与测试同一套样式/结构入口）
-
-    func handleArrowCrossForTesting(_ direction: Int) {
-        handleArrowCross(direction)
-    }
-
-    // 明暗切换等场景的整块样式重上（属性-only，不改字符不进撤销栈）。
-    func applyMarkdownThemeRefreshForTesting() {
-        guard let view = activeEditor, let idx = activeIndex, blockList.blocks.indices.contains(idx),
-              let proj = activeProjection else { return }
-        view.performAttributeOnly { [styler] in
-            styler.apply(view.textStorage, block: blockList.blocks[idx], projection: proj)
-        }
-        updateTypingAttributes()
     }
 
     // MARK: raw 选区映射（模式切换）
@@ -715,7 +875,7 @@ final class LiveEditorContainer: UIView {
 
     // 焦点块源码直改（快捷栏等结构化命令）：记账 + 重切 + 重同步。
     private func applyActiveBlockRaw(_ newBlockRaw: String, at idx: Int, sourceCaret: Int, visibleSelection: NSRange?) {
-        guard let view = activeEditor, blockList.blocks.indices.contains(idx) else { return }
+        guard activeEditor != nil, blockList.blocks.indices.contains(idx) else { return }
         let block = blockList.blocks[idx]
         let beforeDoc = raw
         guard newBlockRaw != block.raw else { return }
@@ -729,7 +889,7 @@ final class LiveEditorContainer: UIView {
                  kind: .command, fencePair: false)
         trackedDocCaret = docCaret
         let (newIdx, newBlockStart) = blockList.blockOf(min(max(docCaret, 0), (newDoc as NSString).length))
-        applyBlockDiff(oldBlocks, blockList.blocks)
+        remountChangedBlocks(oldBlocks, blockList.blocks)
         let localCaret = max(0, docCaret - newBlockStart)
         if newIdx == idx {
             pendingSourceCaret = localCaret
@@ -741,64 +901,31 @@ final class LiveEditorContainer: UIView {
         } else {
             activate(newIdx, sourceCaret: localCaret)
         }
-        scrollToActive()
         onRawChange?(newDoc)
+    }
+
+    // MARK: 测试钩子（生产路径与测试同一套样式/结构入口）
+
+    func handleArrowCrossForTesting(_ direction: Int) {
+        handleArrowCross(direction)
+    }
+
+    // 明暗切换等场景的整块样式重上（属性-only，不改字符不进撤销栈）。
+    func applyMarkdownThemeRefreshForTesting() {
+        guard let view = activeEditor, let idx = activeIndex, blockList.blocks.indices.contains(idx),
+              let proj = activeProjection else { return }
+        view.performAttributeOnly { [styler] in
+            styler.apply(view.textStorage, block: blockList.blocks[idx], projection: proj)
+        }
+        updateTypingAttributes()
     }
 }
 
-// MARK: - UICollectionViewDataSource / Delegate
+// MARK: - 滚动驱动挂载
 
-extension LiveEditorContainer: UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
-    func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-        blockList.count
-    }
-
-    func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
-        let index = indexPath.item
-        let blocks = blockList.blocks
-        let block = blocks[index]
-        let gap = LiveCellSpacing.gap(after: index, blocks: blocks)
-        if index == activeIndex, writable {
-            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: LiveActiveCell.reuseIdentifier, for: indexPath) as! LiveActiveCell
-            cell.blockIndex = index
-            cell.delegate = self
-            cell.tailGap = gap
-            let editor = activeEditor ?? makeActiveEditor(index: index)
-            activeEditor = editor
-            cell.embed(editor, block: block, traits: traitCollection, gap: gap)
-            cell.setNeedsLayout()
-            return cell
-        }
-        switch block.kind {
-        case .blank:
-            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: LiveBlankCell.reuseIdentifier, for: indexPath) as! LiveBlankCell
-            cell.configure(index: index, isSeparator: LiveBlocks.isLiveSeparator(blocks, index), gap: gap)
-            cell.delegate = self
-            return cell
-        case .rule:
-            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: LiveRuleCell.reuseIdentifier, for: indexPath) as! LiveRuleCell
-            cell.configure(index: index, gap: gap)
-            cell.delegate = self
-            return cell
-        case .code:
-            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: LiveCodeCell.reuseIdentifier, for: indexPath) as! LiveCodeCell
-            let proj = LiveProjection.project(block)
-            cell.configure(block: block, attributed: LiveBlockRender.attributedString(for: block, projection: proj, traits: traitCollection),
-                           index: index, gap: gap, traits: traitCollection)
-            cell.delegate = self
-            return cell
-        default:
-            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: LiveTextCell.reuseIdentifier, for: indexPath) as! LiveTextCell
-            let proj = LiveProjection.project(block)
-            cell.configure(block: block, attributed: LiveBlockRender.attributedString(for: block, projection: proj, traits: traitCollection),
-                           index: index, gap: gap)
-            cell.delegate = self
-            return cell
-        }
-    }
-
-    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        // 空白区点击不迁移焦点（单元格手势负责光标定位）。
+extension LiveEditorContainer: UIScrollViewDelegate {
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        layoutVisibleBlocks()
     }
 }
 

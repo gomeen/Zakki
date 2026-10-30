@@ -80,25 +80,29 @@ enum LiveCellSpacing {
     }
 }
 
-// 单元格公共基类：尾距约束（content 底到单元格底）+ 点击上报。
-class LiveBaseCell: UICollectionViewCell {
+// 块视图公共基类：容器手动布局（y/高度由 LiveEditorContainer 的块高表给出），
+// 视图自身只负责内容与点击上报。
+class LiveBaseCell: UIView {
     var blockIndex = 0
-    weak var delegate: LiveBlockCellDelegate?
-    // gapConstraint：contentView.bottom == 内容.bottom - tailGap（子类建线后赋值）。
-    var gapConstraint: NSLayoutConstraint? {
-        didSet { gapConstraint?.constant = -tailGap }
-    }
-    var tailGap: CGFloat = 0 {
-        didSet { gapConstraint?.constant = -tailGap }
-    }
+    // 点击回调（容器据此迁移焦点）；onTap(viewIndex, visibleCaret)。
+    var onTap: ((Int, Int) -> Void)?
+    private(set) var tailGap: CGFloat = 0
 
+    // 块视图由容器手动布置 frame（y/高来自块高表），保持 translates = true；
+    // 子视图仍用约束锚定到 self 边缘。false + 无约束会让 Auto Layout 按
+    // intrinsic 尺寸重排，破坏虚拟化布局（叠印）。
     override init(frame: CGRect) {
         super.init(frame: frame)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
-        fatalError("单元格不走 IB")
+        fatalError("块视图不走 IB")
+    }
+
+    // 尾距由容器计算进块高，视图自身不再约束底部空隙。
+    func setTailGap(_ gap: CGFloat) {
+        tailGap = gap
     }
 
     func addTapRecognizer(to view: UIView, action: Selector) {
@@ -106,34 +110,25 @@ class LiveBaseCell: UICollectionViewCell {
     }
 
     func reportTap(visibleCaret: Int) {
-        delegate?.liveBlockCellTapped(blockIndex, visibleCaret: visibleCaret)
+        onTap?(blockIndex, visibleCaret)
     }
 }
 
 // MARK: 空行单元格：非分隔空段高 20 可点（桌面 Height(20)）；分隔行 0 高不可点。
 
 final class LiveBlankCell: LiveBaseCell {
-    static let reuseIdentifier = "live-blank"
-    private var heightConstraint: NSLayoutConstraint?
+    private(set) var isSeparator = true
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        let constraint = contentView.heightAnchor.constraint(equalToConstant: 0)
-        heightConstraint = constraint
-        NSLayoutConstraint.activate([constraint])
-        addTapRecognizer(to: contentView, action: #selector(tapped(_:)))
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("单元格不走 IB")
+        addTapRecognizer(to: self, action: #selector(tapped(_:)))
     }
 
     func configure(index: Int, isSeparator: Bool, gap: CGFloat) {
         blockIndex = index
+        self.isSeparator = isSeparator
         isUserInteractionEnabled = !isSeparator
-        heightConstraint?.constant = isSeparator ? 0 : 20
-        tailGap = isSeparator ? 0 : gap
+        setTailGap(isSeparator ? 0 : gap)
     }
 
     @objc private func tapped(_ recognizer: UITapGestureRecognizer) {
@@ -144,7 +139,6 @@ final class LiveBlankCell: LiveBaseCell {
 // MARK: 分隔线单元格（桌面 ruleLine：1pt rule 色）。
 
 final class LiveRuleCell: LiveBaseCell {
-    static let reuseIdentifier = "live-rule"
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -152,16 +146,15 @@ final class LiveRuleCell: LiveBaseCell {
         rule.translatesAutoresizingMaskIntoConstraints = false
         rule.backgroundColor = Theme.Semantic.rule
         rule.layer.cornerRadius = 0.5
-        contentView.addSubview(rule)
+        addSubview(rule)
         NSLayoutConstraint.activate([
-            rule.topAnchor.constraint(equalTo: contentView.topAnchor),
-            rule.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            rule.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            rule.topAnchor.constraint(equalTo: topAnchor),
+            rule.leadingAnchor.constraint(equalTo: leadingAnchor),
+            rule.trailingAnchor.constraint(equalTo: trailingAnchor),
             rule.heightAnchor.constraint(equalToConstant: 1),
+            bottomAnchor.constraint(equalTo: rule.bottomAnchor),
         ])
-        gapConstraint = contentView.bottomAnchor.constraint(equalTo: rule.bottomAnchor)
-        gapConstraint?.isActive = true
-        addTapRecognizer(to: contentView, action: #selector(tapped(_:)))
+        addTapRecognizer(to: self, action: #selector(tapped(_:)))
     }
 
     @available(*, unavailable)
@@ -171,7 +164,7 @@ final class LiveRuleCell: LiveBaseCell {
 
     func configure(index: Int, gap: CGFloat) {
         blockIndex = index
-        tailGap = gap
+        setTailGap(gap)
     }
 
     @objc private func tapped(_ recognizer: UITapGestureRecognizer) {
@@ -182,7 +175,6 @@ final class LiveRuleCell: LiveBaseCell {
 // MARK: 文本单元格（段落/标题/引用/列表/任务）：[饰件][渲染文本]。
 
 final class LiveTextCell: LiveBaseCell {
-    static let reuseIdentifier = "live-text"
     let textView = PlainRenderTextView()
     private let ornamentLabel = UILabel()
     private let quoteBar = UIView()
@@ -193,32 +185,30 @@ final class LiveTextCell: LiveBaseCell {
         super.init(frame: frame)
         for view in [quoteBar, ornamentLabel, textView] {
             view.translatesAutoresizingMaskIntoConstraints = false
-            contentView.addSubview(view)
+            addSubview(view)
         }
         quoteBar.backgroundColor = Theme.Semantic.quoteBorder
         quoteBar.layer.cornerRadius = Theme.Typography.quoteBar / 2
         quoteBar.isHidden = true
         ornamentLabel.isHidden = true
-        let top = ornamentLabel.topAnchor.constraint(equalTo: contentView.topAnchor)
+        let top = ornamentLabel.topAnchor.constraint(equalTo: topAnchor)
         ornamentTopConstraint = top
-        let leading = textView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor)
+        let leading = textView.leadingAnchor.constraint(equalTo: leadingAnchor)
         textLeadingConstraint = leading
-        let gap = contentView.bottomAnchor.constraint(equalTo: textView.bottomAnchor)
-        gapConstraint = gap
         NSLayoutConstraint.activate([
-            quoteBar.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 2),
-            quoteBar.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            quoteBar.topAnchor.constraint(equalTo: topAnchor, constant: 2),
+            quoteBar.leadingAnchor.constraint(equalTo: leadingAnchor),
             quoteBar.widthAnchor.constraint(equalToConstant: Theme.Typography.quoteBar),
-            quoteBar.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -2),
-            textView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            quoteBar.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
+            textView.topAnchor.constraint(equalTo: topAnchor),
             leading,
-            textView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            gap,
-            ornamentLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            textView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            bottomAnchor.constraint(equalTo: textView.bottomAnchor),
+            ornamentLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
             top,
         ])
         addTapRecognizer(to: textView, action: #selector(textTapped(_:)))
-        addTapRecognizer(to: contentView, action: #selector(chromeTapped(_:)))
+        addTapRecognizer(to: self, action: #selector(chromeTapped(_:)))
     }
 
     @available(*, unavailable)
@@ -229,7 +219,7 @@ final class LiveTextCell: LiveBaseCell {
     // 配置：attributed 为投影渲染串；列表/任务/引用块带饰件并让出悬挂缩进。
     func configure(block: LiveBlock, attributed: NSAttributedString, index: Int, gap: CGFloat) {
         blockIndex = index
-        tailGap = gap
+        setTailGap(gap)
         textView.attributedText = attributed
         quoteBar.isHidden = block.kind != .quote
         if block.kind == .quote {
@@ -289,27 +279,25 @@ final class LiveTextCell: LiveBaseCell {
 // MARK: 代码单元格（桌面 codeCard：surface 底 + rule 描边 + 圆角 + 内边距）。
 
 final class LiveCodeCell: LiveBaseCell {
-    static let reuseIdentifier = "live-code"
     private let card = UIView()
     let textView = PlainRenderTextView()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         card.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(card)
+        addSubview(card)
         textView.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(textView)
         NSLayoutConstraint.activate([
-            card.topAnchor.constraint(equalTo: contentView.topAnchor),
-            card.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            card.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            card.topAnchor.constraint(equalTo: topAnchor),
+            card.leadingAnchor.constraint(equalTo: leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: trailingAnchor),
+            bottomAnchor.constraint(equalTo: card.bottomAnchor),
             textView.topAnchor.constraint(equalTo: card.topAnchor, constant: Theme.Typography.codePadY),
             textView.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Theme.Typography.codePadX),
             textView.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Theme.Typography.codePadX),
             card.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: Theme.Typography.codePadY),
         ])
-        gapConstraint = contentView.bottomAnchor.constraint(equalTo: card.bottomAnchor)
-        gapConstraint?.isActive = true
         addTapRecognizer(to: card, action: #selector(tapped(_:)))
     }
 
@@ -320,7 +308,7 @@ final class LiveCodeCell: LiveBaseCell {
 
     func configure(block: LiveBlock, attributed: NSAttributedString, index: Int, gap: CGFloat, traits: UITraitCollection) {
         blockIndex = index
-        tailGap = gap
+        setTailGap(gap)
         textView.attributedText = attributed
         applyChrome(traits: traits)
     }
@@ -344,7 +332,6 @@ final class LiveCodeCell: LiveBaseCell {
 // 编辑器视图由容器创建并持有，单元格只负责摆放；重用时先摘下旧编辑器。
 
 final class LiveActiveCell: LiveBaseCell {
-    static let reuseIdentifier = "live-active"
     private let quoteBar = UIView()
     private let ornamentLabel = UILabel()
     private let card = UIView()
@@ -357,7 +344,7 @@ final class LiveActiveCell: LiveBaseCell {
         super.init(frame: frame)
         for view in [quoteBar, ornamentLabel, card] {
             view.translatesAutoresizingMaskIntoConstraints = false
-            contentView.addSubview(view)
+            addSubview(view)
         }
         quoteBar.backgroundColor = Theme.Semantic.quoteBorder
         quoteBar.layer.cornerRadius = Theme.Typography.quoteBar / 2
@@ -367,17 +354,17 @@ final class LiveActiveCell: LiveBaseCell {
         quoteBar.isHidden = true
         ornamentLabel.isHidden = true
         card.isHidden = true
-        let top = ornamentLabel.topAnchor.constraint(equalTo: contentView.topAnchor)
+        let top = ornamentLabel.topAnchor.constraint(equalTo: topAnchor)
         ornamentTopConstraint = top
         NSLayoutConstraint.activate([
-            quoteBar.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 2),
-            quoteBar.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            quoteBar.topAnchor.constraint(equalTo: topAnchor, constant: 2),
+            quoteBar.leadingAnchor.constraint(equalTo: leadingAnchor),
             quoteBar.widthAnchor.constraint(equalToConstant: Theme.Typography.quoteBar),
-            quoteBar.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -2),
-            ornamentLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            quoteBar.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
+            ornamentLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
             top,
-            card.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            card.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            card.leadingAnchor.constraint(equalTo: leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: trailingAnchor),
         ])
     }
 
@@ -386,9 +373,8 @@ final class LiveActiveCell: LiveBaseCell {
         fatalError("单元格不走 IB")
     }
 
-    override func prepareForReuse() {
-        super.prepareForReuse()
-        embed(nil, block: LiveBlock(kind: .para, startLine: 0, endLine: 0, raw: ""), traits: traitCollection, gap: 0)
+    func detachEditor() {
+        embed(nil, block: LiveBlock(kind: .para, startLine: 0, endLine: 0, raw: ""), traits: UITraitCollection.current, gap: 0)
     }
 
     func embed(_ editor: BlockEditorView?, block: LiveBlock, traits: UITraitCollection, gap: CGFloat) {
@@ -423,20 +409,19 @@ final class LiveActiveCell: LiveBaseCell {
             // 代码块：编辑器放进卡片（卡片负责 surface 底与描边）。
             card.addSubview(editor)
             editorConstraints.append(contentsOf: [
-                contentView.topAnchor.constraint(equalTo: card.topAnchor),
+                topAnchor.constraint(equalTo: card.topAnchor),
                 editor.topAnchor.constraint(equalTo: card.topAnchor, constant: Theme.Typography.codePadY),
                 editor.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Theme.Typography.codePadX),
                 editor.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Theme.Typography.codePadX),
-                card.bottomAnchor.constraint(equalTo: editor.bottomAnchor, constant: Theme.Typography.codePadY),
-                contentView.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -gap),
+                bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -gap),
             ])
         } else {
-            contentView.addSubview(editor)
+            addSubview(editor)
             editorConstraints.append(contentsOf: [
-                editor.topAnchor.constraint(equalTo: contentView.topAnchor),
-                editor.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: markerWidth),
-                editor.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-                contentView.bottomAnchor.constraint(equalTo: editor.bottomAnchor, constant: -gap),
+                editor.topAnchor.constraint(equalTo: topAnchor),
+                editor.leadingAnchor.constraint(equalTo: leadingAnchor, constant: markerWidth),
+                editor.trailingAnchor.constraint(equalTo: trailingAnchor),
+                bottomAnchor.constraint(equalTo: editor.bottomAnchor, constant: -gap),
             ])
         }
         NSLayoutConstraint.activate(editorConstraints)
@@ -447,5 +432,44 @@ final class LiveActiveCell: LiveBaseCell {
         let resolved = UITraitCollection(userInterfaceStyle: traits.userInterfaceStyle)
         card.backgroundColor = Theme.Semantic.surface.resolvedColor(with: resolved)
         card.layer.borderColor = Theme.Semantic.rule.resolvedColor(with: resolved).cgColor
+    }
+}
+
+// MARK: - 块高测量（离线排版）
+
+// NSLayoutManager 离线排版测高：与 PlainRenderTextView 同一 TextKit 1 管线，
+// 结果与实际渲染一致；按块身份 + 宽度缓存（虚拟化下滚动只测一次）。
+final class LiveBlockMetrics {
+    private struct Entry {
+        var height: CGFloat
+    }
+    private var cache: [String: Entry] = [:]
+    private let storage = NSTextStorage()
+    private let layoutManager = NSLayoutManager()
+    private let container = NSTextContainer(size: CGSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+
+    init() {
+        storage.addLayoutManager(layoutManager)
+        layoutManager.addTextContainer(container)
+        container.lineFragmentPadding = 0
+    }
+
+    func removeAll() {
+        cache.removeAll()
+    }
+
+    func height(for block: LiveBlock, attributed: NSAttributedString, width: CGFloat) -> CGFloat {
+        let key = "\(block.visualIdentity)|\(Int(width))|\(block.kind == .code ? 1 : 0)"
+        if let cached = cache[key] { return cached.height }
+        container.size = CGSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+        storage.setAttributedString(attributed)
+        layoutManager.ensureLayout(for: container)
+        var height = layoutManager.usedRect(for: container).height
+        if height <= 0 {
+            // 空内容块以一个行高兜底（对齐桌面空段落行高）。
+            height = ceil(Theme.Typography.bodyFont.lineHeight * Theme.Typography.lineHeight)
+        }
+        cache[key] = Entry(height: height)
+        return height
     }
 }
