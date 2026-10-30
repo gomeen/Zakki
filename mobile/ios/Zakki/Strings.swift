@@ -15,8 +15,9 @@ enum Strings {
     static var importButton: String { t("Import zakki.json", "导入 zakki.json") }
     static var importFailedTitle: String { t("Import Failed", "导入失败") }
     static var ok: String { t("OK", "确定") }
-    static var welcomeTitle: String { t("No notes yet", "还没有笔记") }
-    static var welcomeMessage: String { t("Import a zakki.json file to view your notes. M1 is read-only.", "导入一个 zakki.json 即可查看笔记。M1 为只读。") }
+    // 空态产品标语（#41）：泛化定位一句话作主行，功能说明 welcomeMessage 为副行。
+    static var tagline: String { t("Every thought has a home.", "每个念头，都有归处。") }
+    static var welcomeMessage: String { t("Import a zakki.json to get started.", "导入一个 zakki.json 即可开始。") }
     static var noTabsTitle: String { t("Empty file", "空文件") }
     static var noTabsYet: String { t("This file has no tabs.", "这个文件没有标签。") }
     static var untitledTab: String { t("Untitled", "未命名") }

@@ -117,7 +117,7 @@ struct ContentView: View {
             }
         } else {
             ContentUnavailableView(
-                Strings.welcomeTitle,
+                Strings.tagline,
                 systemImage: "square.and.arrow.down",
                 description: Text(Strings.welcomeMessage)
             )
