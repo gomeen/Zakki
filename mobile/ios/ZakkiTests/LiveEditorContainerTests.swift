@@ -386,4 +386,49 @@ final class LiveEditorContainerTests: XCTestCase {
         print("PERF keystroke-settle2000lines(worst of 5): \(Int(settle * 1000))ms")
         XCTAssertEqual(container.raw, raw + "X" + "YYYYY", "长文键入 raw 逐字保真")
     }
+
+    // MARK: 渲染块命中回归
+
+    // 点击坐标必须命中渲染 cell（回归：命中落空时点击无法进入编辑，
+    // 用户表现为「预览不能编辑和选中」）。容器挂进真实窗口后对每个
+    // 块中心做 hitTest，断言命中视图位于某个 LiveBaseCell 内。
+    @MainActor
+    func testHitTestFallsIntoRenderedCell() throws {
+        let raw = "# 标题一\n\n段落文字，若干内容用来占据实际块高。\n\n> 引用行\n\n- 列表项\n\n```swift\nprint(1)\n```\n\n尾段文字。"
+        let container = makeContainer(raw)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 354, height: 800))
+        window.addSubview(container)
+        window.makeKeyAndVisible()
+        container.frame = window.bounds
+        container.setNeedsLayout()
+        container.layoutIfNeeded()
+
+        let frames = container.blockLayoutFramesForTesting
+        XCTAssertGreaterThan(frames.count, 4, "演示文档应有多个块")
+        func inCell(_ v: UIView?) -> Bool {
+            var cur: UIView? = v
+            while let c = cur {
+                if c is LiveBaseCell { return true }
+                cur = c.superview
+            }
+            return false
+        }
+        var checked = 0
+        let types = container.mountedCellTypesForTesting
+        for (index, frame) in frames.enumerated() where frame.height > 8 {
+            // 空白分隔 cell（块间距）设计上不可点（桌面分隔行同语义），跳过。
+            guard types.indices.contains(index), types[index] != "LiveBlankCell" else { continue }
+            let point = CGPoint(x: Theme.Typography.padX + frame.midX,
+                                y: Theme.Typography.padY + frame.minY + min(8, frame.height / 2))
+            let hit = container.hitTest(point, with: nil)
+            if !inCell(hit) {
+                let hitKind = String(describing: Swift.type(of: hit))
+                let subs = container.contentView.subviews.map { "\(Swift.type(of: $0)) \($0.frame)" }
+                XCTFail("块 \(index) 中心 hitTest 落空：hit=\(hitKind) point=\(point) mounted=\(container.mountedCellTypesForTesting) subs=\(subs)")
+                return
+            }
+            checked += 1
+        }
+        XCTAssertGreaterThan(checked, 4)
+    }
 }

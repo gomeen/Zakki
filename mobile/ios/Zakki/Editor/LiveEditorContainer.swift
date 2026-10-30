@@ -18,8 +18,9 @@ final class LiveEditorContainer: UIView {
     private(set) var activeIndex: Int?
     private let writable: Bool
 
-    private let scrollView = UIScrollView()
-    private let contentView = UIView()
+    // 模块内可见（@testable 命中回归测试需要读 guide/约束状态）。
+    let scrollView = UIScrollView()
+    let contentView = UIView()
 
     // 块高表：y/height（height 含尾距）。
     private struct BlockLayout {
@@ -76,6 +77,16 @@ final class LiveEditorContainer: UIView {
     // 测试探针：容器级撤销事务数。
     var undoStackDepthForTesting: Int { undoStack.count }
 
+    // 测试探针：块布局 frame（hitTest 回归测试用块坐标定位命中点）。
+    var blockLayoutFramesForTesting: [CGRect] {
+        layouts.map { CGRect(x: 0, y: $0.y, width: contentViewportWidth, height: $0.height) }
+    }
+
+    // 测试探针：当前挂载的块视图（hitTest 回归测试断言命中 cell 类型）。
+    var mountedCellTypesForTesting: [String] {
+        contentView.subviews.map { String(describing: type(of: $0)) }
+    }
+
 
     init(raw: String, writable: Bool) {
         self.raw = raw
@@ -118,8 +129,11 @@ final class LiveEditorContainer: UIView {
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
             contentView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
+            // 宽度必须显式钉到可见宽：块 cell 用 translates frame（无宽度约束贡献），
+            // 四边都钉 contentLayoutGuide 时 guide 宽度会塌缩为 0，cell 溢出渲染
+            // 看得见但 hitTest 全部落空（点击无法进入编辑）。
             contentView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
-            contentView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
+            contentView.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor),
             contentView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
             contentHeightConstraint!,
         ])
