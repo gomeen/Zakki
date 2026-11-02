@@ -112,6 +112,15 @@ enum MarkdownSnippet {
         .quote: "> ",
     ]
 
+    static var prefixesLongestFirst: [String] {
+        prefixes.values.sorted { $0.count > $1.count }
+    }
+
+    // 前缀类动作对应的 raw 前缀；包裹/插时间返回 nil（走缓冲空间）。
+    static func blockActionPrefix(_ action: MarkdownSnippetAction) -> String? {
+        prefixes[action]
+    }
+
     // 包裹类：有选区包裹选区，无选区插占位对、光标落在对中。
     static let wraps: [MarkdownSnippetAction: String] = [
         .bold: "**",

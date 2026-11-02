@@ -42,6 +42,73 @@ enum LiveDocEditing {
         return enterRaw(doc, list: list, index: index, sourceCaret: projection.sourceOffset(visibleCaret))
     }
 
+    // 快捷栏前缀类动作（raw 空间，对齐桌面快捷工具栏）：定位光标所在行，
+    // 行首已有同前缀 → 移除（切换关）；已有其他块前缀 → 剥旧插新；无 → 插入。
+    // 光标按「距行尾距离」保持原视觉位。仅处理前缀类；包裹/时间返回 nil 走缓冲。
+    static func blockPrefixAction(_ action: MarkdownSnippetAction, doc: String, list: LiveBlockList,
+                                  index: Int, visibleCaret: Int, projection: LiveProjection) -> LiveDocEdit? {
+        guard let prefix = MarkdownSnippet.blockActionPrefix(action) else { return nil }
+        let blocks = list.blocks
+        guard blocks.indices.contains(index) else { return nil }
+        let block = blocks[index]
+        guard block.kind != .code else { return nil }
+        let blockStart = list.startOffset(of: index)
+        let sourceCaret = min(max(projection.sourceOffset(visibleCaret), blockStart),
+                              blockStart + LiveSyntax.length(block.raw))
+        let lines = block.raw.components(separatedBy: "\n")
+        // 光标所在行（块内行）：块起始偏移逐行消耗定位。
+        var consumed = blockStart
+        var lineIdx = 0
+        for (i, line) in lines.enumerated() {
+            let span = LiveSyntax.length(line) + 1
+            if sourceCaret < consumed + span {
+                lineIdx = i
+                break
+            }
+            consumed += span
+            lineIdx = i
+        }
+        let lineStartOffset = consumed
+        let line = lines[lineIdx]
+        let lineLength = LiveSyntax.length(line)
+        let caretInLine = sourceCaret - lineStartOffset
+
+        // 已有块前缀（最长优先，保证 "- [ ] " 优先于 "- "）；"- [x] " 仅参与
+        // 匹配剥离（已勾选行按任务键 = 反勾），不会被插回。
+        let known = (MarkdownSnippet.prefixesLongestFirst + ["- [x] "]).sorted { $0.count > $1.count }
+        var existing: (prefix: String, range: NSRange)?
+        for p in known {
+            let pr = (p as NSString).length
+            if line.hasPrefix(p) {
+                existing = (p, NSRange(location: lineStartOffset, length: pr))
+                break
+            }
+        }
+
+        func caretAfter(_ newLine: String) -> Int {
+            // 光标距行尾距离不变（前缀操作不动行尾内容）。
+            let newLineLength = LiveSyntax.length(newLine)
+            return lineStartOffset + max(0, newLineLength - (lineLength - caretInLine))
+        }
+
+        if let (old, removeRange) = existing {
+            if old == prefix {
+                var lines2 = lines
+                lines2[lineIdx] = String(line.dropFirst(old.count))
+                let newDoc = lines2.joined(separator: "\n")
+                return LiveDocEdit(doc: newDoc, caret: caretAfter(lines2[lineIdx]))
+            }
+            var lines2 = lines
+            lines2[lineIdx] = prefix + String(line.dropFirst(old.count))
+            let newDoc = lines2.joined(separator: "\n")
+            return LiveDocEdit(doc: newDoc, caret: caretAfter(lines2[lineIdx]))
+        }
+        var lines2 = lines
+        lines2[lineIdx] = prefix + line
+        let newDoc = lines2.joined(separator: "\n")
+        return LiveDocEdit(doc: newDoc, caret: caretAfter(lines2[lineIdx]))
+    }
+
     enum Result {
         case edited(LiveDocEdit)
         case native

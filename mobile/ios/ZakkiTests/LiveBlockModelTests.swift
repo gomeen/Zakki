@@ -467,4 +467,46 @@ final class LiveBlockModelTests: XCTestCase {
         XCTAssertFalse(LiveSyntax.isFenceDraftLine("`` `"))
         XCTAssertFalse(LiveSyntax.isFenceDraftLine("    ```"))
     }
+
+    // MARK: 快捷栏前缀（raw 空间切换语义）
+
+    func testBlockPrefixH1InsertsAndTogglesOff() {
+        let list = LiveBlocks.split("普通行")
+        let proj = LiveProjection.project(list.blocks[0])
+        let edit = LiveDocEditing.blockPrefixAction(.heading1, doc: "普通行", list: list,
+                                                    index: 0, visibleCaret: 2, projection: proj)
+        XCTAssertEqual(edit?.doc, "# 普通行")
+
+        let list2 = LiveBlocks.split("# 普通行")
+        let proj2 = LiveProjection.project(list2.blocks[0])
+        let edit2 = LiveDocEditing.blockPrefixAction(.heading1, doc: "# 普通行", list: list2,
+                                                     index: 0, visibleCaret: 4, projection: proj2)
+        XCTAssertEqual(edit2?.doc, "普通行", "再按一次 = 切换关")
+    }
+
+    func testBlockPrefixReplacesDifferentLevelAndKeepsCaretFromLineEnd() {
+        // H2 行按 H1：剥 "## " 插 "# "；光标距行尾距离保持（视觉位不动）。
+        let list = LiveBlocks.split("## 标题行")
+        let proj = LiveProjection.project(list.blocks[0])
+        let edit = LiveDocEditing.blockPrefixAction(.heading1, doc: "## 标题行", list: list,
+                                                    index: 0, visibleCaret: 4, projection: proj)
+        XCTAssertEqual(edit?.doc, "# 标题行")
+        // 光标距行尾距离保持：旧光标在行尾（距尾 0）→ 新光标仍在新行尾（5）。
+        XCTAssertEqual(edit?.caret, 5, "光标按距行尾距离映射")
+    }
+
+    func testBlockPrefixTaskOnPlainAndUncheck() {
+        let list = LiveBlocks.split("待办内容")
+        let proj = LiveProjection.project(list.blocks[0])
+        let edit = LiveDocEditing.blockPrefixAction(.task, doc: "待办内容", list: list,
+                                                    index: 0, visibleCaret: 2, projection: proj)
+        XCTAssertEqual(edit?.doc, "- [ ] 待办内容")
+
+        let list2 = LiveBlocks.split("- [x] 待办内容")
+        let proj2 = LiveProjection.project(list2.blocks[0])
+        let edit2 = LiveDocEditing.blockPrefixAction(.task, doc: "- [x] 待办内容", list: list2,
+                                                     index: 0, visibleCaret: 5, projection: proj2)
+        XCTAssertEqual(edit2?.doc, "- [ ] 待办内容", "已勾选行按任务键 = 反勾")
+    }
+
 }
