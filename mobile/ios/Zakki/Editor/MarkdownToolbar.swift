@@ -143,10 +143,44 @@ enum MarkdownSnippet {
         return formatter.string(from: tomorrow) + " "
     }
 
-    // 前缀插入：记住原光标/选区 → 移到行首插入 → 平移回原位（前缀只加在光标之前）。
+    // 前缀插入（切换语义）：行首已有同前缀 → 移除（再按一次=取消）；已有其他块
+    // 前缀 → 剥旧插新（标题升降级）；无前缀 → 插入。重复点击不再叠加前缀。
     private static func insertPrefix(_ prefix: String, into textView: UITextView) {
         let selection = textView.selectedRange
-        let lineStart = lineStart(ofCaret: selection.location, in: textView.text ?? "")
+        let text = textView.text ?? ""
+        let ns = text as NSString
+        let lineStart = lineStart(ofCaret: selection.location, in: text)
+        var lineEnd = ns.length
+        let nl = ns.rangeOfCharacter(from: .newlines, options: [], range: NSRange(location: lineStart, length: ns.length - lineStart))
+        if nl.location != NSNotFound { lineEnd = nl.location }
+        let line = ns.substring(with: NSRange(location: lineStart, length: lineEnd - lineStart))
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+        // 已有块前缀（最长优先匹配，保证 "- [ ] " 优先于 "- "）。
+        let known = prefixes.values.sorted { $0.count > $1.count }
+        var existing: (String, NSRange)?
+        for p in known where trimmed.hasPrefix(p) {
+            existing = (p, NSRange(location: lineStart, length: (p as NSString).length))
+            break
+        }
+
+        if let (old, removeRange) = existing {
+            if old == prefix {
+                // 切换关：移除同前缀，光标平移回移除后的原位。
+                textView.selectedRange = removeRange
+                textView.insertText("")
+                let shift = -(old as NSString).length
+                textView.selectedRange = NSRange(location: max(lineStart, selection.location + shift), length: selection.length)
+                return
+            }
+            // 剥旧插新（升降级）：净位移 = 新旧长度差。
+            textView.selectedRange = removeRange
+            textView.insertText(prefix)
+            let shift = (prefix as NSString).length - (old as NSString).length
+            textView.selectedRange = NSRange(location: max(lineStart, selection.location + shift), length: selection.length)
+            return
+        }
+
         textView.selectedRange = NSRange(location: lineStart, length: 0)
         textView.insertText(prefix)
         let shift = (prefix as NSString).length
