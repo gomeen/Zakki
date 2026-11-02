@@ -55,8 +55,9 @@ enum NotesCore {
         var err: NSError?
         _ = ZakkicoreSetLocation(name, &err)
         if let err {
-            // 时区名来自系统（IANA 标识），理论不会失败；防御性忽略并留调试断言。
-            assertionFailure("SetLocation 失败: \(err)")
+            // 失败按规格保留旧时区（tzdata 已随 core 内嵌，正常不会失败）；
+            // 记日志便于诊断，绝不崩溃。
+            NSLog("SetLocation 失败（保留旧时区）: \(err)")
         }
     }
 }

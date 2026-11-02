@@ -31,15 +31,39 @@ final class NotesModel: ObservableObject {
         loadOnLaunch()
     }
 
-    // 启动加载顺序：有启动参数先走导入管道（覆盖沙盒副本），否则沙盒已有文件直接加载。
+    // 启动加载顺序：有启动参数先走导入管道（覆盖沙盒副本），否则沙盒已有文件
+    // 直接加载；全新用户（无文件）播种桌面同构的首启数据，打开即用不设门槛。
     private func loadOnLaunch() {
         let args = ProcessInfo.processInfo.arguments
         if let i = args.firstIndex(of: "-\(Self.launchArgImportPath)"), i + 1 < args.count {
             importFile(at: URL(fileURLWithPath: args[i + 1]))
             return
         }
-        guard FileManager.default.fileExists(atPath: sandboxURL.path) else { return }
+        guard FileManager.default.fileExists(atPath: sandboxURL.path) else {
+            seedFirstRunData()
+            return
+        }
         loadSandbox(at: sandboxURL)
+    }
+
+    // 首启种子（桌面 initDefaults 同构）：7 个默认标签（原 7 色、id 1..7），
+    // 标签 1 欢迎文本、标签 2「时间与提醒」。文件立即落盘——导出/分享即刻可用；
+    // 已有文件的老用户不受影响。构造失败不阻塞启动，回落导入欢迎页并如实上报。
+    private func seedFirstRunData() {
+        let colors = Array(ThemeTagPalette.colors.prefix(7))
+        var tabs = colors.enumerated().map { index, color in
+            NotesTab(id: UInt64(index + 1), name: "", text: "", color: color)
+        }
+        tabs[0].text = Strings.seedWelcomeText
+        tabs[1].name = Strings.seedTimeGuideTabName
+        tabs[1].text = Strings.seedTimeGuideText
+        do {
+            // 经绑定 Encode 产出：结构与字段顺序和桌面写盘同源。
+            let out = try NotesCore.encode("{\"version\":3}", tabs: tabs)
+            install(Data(out.utf8))
+        } catch {
+            importError = (error as? NotesCoreError)?.code ?? error.localizedDescription
+        }
     }
 
     // 导入管道：读字节 → 原子复制到沙盒 Application Support/zakki.json → DecodeNotes。
