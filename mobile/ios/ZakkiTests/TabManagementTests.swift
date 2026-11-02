@@ -303,4 +303,25 @@ final class TabManagementTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: sandbox, encoding: .utf8), onDisk)
         XCTAssertEqual(try readSandbox(sandbox).tabs?.count, 2)
     }
+
+    // MARK: 未命名标签显示（主行=正文首行预览）
+
+    // 未命名：主行取首个非空行剥前缀，副行取次行；已命名保持原状。
+    @MainActor
+    func testDisplayTitleUsesFirstLineForUnnamedTabs() {
+        let unnamed = NotesTab(id: 1, name: "", text: "# 会议纪要\n\n正文第二段", color: "#d4253a")
+        XCTAssertEqual(unnamed.displayTitle, "会议纪要", "未命名标签主行=首行剥前缀")
+        XCTAssertEqual(unnamed.displaySubtitle, "正文第二段", "副行=次行预览")
+
+        let taskFirst = NotesTab(id: 2, name: "", text: "- [ ] 给项目写周报", color: "#65c802")
+        XCTAssertEqual(taskFirst.displayTitle, "给项目写周报", "任务行剥任务前缀")
+
+        let empty = NotesTab(id: 3, name: "", text: "", color: "#ffd01c")
+        XCTAssertEqual(empty.displayTitle, Strings.untitledTab, "全空回落未命名")
+        XCTAssertEqual(empty.displaySubtitle, Strings.emptyPreview)
+
+        let named = NotesTab(id: 4, name: "Inbox", text: "first", color: "#0f75e9")
+        XCTAssertEqual(named.displayTitle, "Inbox", "已命名仍用名称")
+        XCTAssertEqual(named.displaySubtitle, "first", "已命名副行=首行预览")
+    }
 }

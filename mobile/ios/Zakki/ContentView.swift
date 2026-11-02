@@ -92,9 +92,16 @@ struct ContentView: View {
                 .accessibilityLabel(Strings.addTab)
                 .disabled((snapshot.tabs?.count ?? 0) >= 9)
             }
-            Button(Strings.importButton) {
-                showingPicker = true
+            // 导入是低频迁移动作，收进 ⋯ 菜单（常驻顶栏是 M1 只读查看器遗产）；
+            // 无数据态（播种失败等）导入仍是唯一入口，保持显性按钮。
+            Menu {
+                Button(Strings.importButton) {
+                    showingPicker = true
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
             }
+            .accessibilityLabel(Strings.importButton)
         }
         ToolbarItem(placement: .navigationBarLeading) {
             if let snapshot = model.snapshot, snapshot.writable,
@@ -216,9 +223,9 @@ struct TabRow: View {
                 .fill(tab.displayColor(fallbackSlot: slot))
                 .frame(width: 12, height: 12)
             VStack(alignment: .leading, spacing: 2) {
-                Text(tab.name.isEmpty ? Strings.untitledTab : tab.name)
+                Text(tab.displayTitle)
                     .font(.headline)
-                Text(tab.firstLine.isEmpty ? Strings.emptyPreview : tab.firstLine)
+                Text(tab.displaySubtitle)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -314,6 +321,42 @@ extension NotesTab {
     // 正文首行：截掉换行后的第一行（可能为空，展示层给占位文案）。
     var firstLine: String {
         text.split(separator: "\n", omittingEmptySubsequences: false).first.map(String.init) ?? ""
+    }
+
+    // 剥行首 Markdown 前缀（标题/引用/列表/任务/有序），供未命名标签标题预览。
+    private func strippedPreview(_ line: String) -> String {
+        var s = line.trimmingCharacters(in: .whitespaces)
+        for prefix in ["### ", "## ", "# ", "- [ ] ", "- [x] ", "- ", "* ", "+ ", "> "] {
+            if s.hasPrefix(prefix) {
+                s = String(s.dropFirst(prefix.count))
+                break
+            }
+        }
+        if let r = s.range(of: #"^\d+[.)] "#, options: .regularExpression) {
+            s = s.replacingCharacters(in: r, with: "")
+        }
+        return s.trimmingCharacters(in: .whitespaces)
+    }
+
+    // 列表主行：已命名用名称；未命名用正文首个非空行（剥前缀），Tot/备忘录惯例
+    //——否则 7 个空标签全是「未命名」无法区分。全空回落「未命名」。
+    var displayTitle: String {
+        if !name.isEmpty { return name }
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { strippedPreview(String($0)) }
+            .filter { !$0.isEmpty }
+        return lines.first ?? Strings.untitledTab
+    }
+
+    // 列表副行：已命名给首行预览；未命名给次行预览，无内容显示（空）。
+    var displaySubtitle: String {
+        if !name.isEmpty {
+            return firstLine.isEmpty ? Strings.emptyPreview : firstLine
+        }
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { strippedPreview(String($0)) }
+            .filter { !$0.isEmpty }
+        return lines.count > 1 ? lines[1] : Strings.emptyPreview
     }
 
     // 桌面 tabColor：记录颜色优先（#rrggbb），无效/缺失按槽位回退内置调色板。
