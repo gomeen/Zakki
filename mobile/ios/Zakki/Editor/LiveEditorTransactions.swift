@@ -63,6 +63,31 @@ extension LiveEditorContainer {
 
     // MARK: 跨块结构编辑
 
+    // 任务勾选（M2 最小语义）：翻转首行 ☐/☑ 标记，记账可撤销、写回照常；
+    // 不激活块、不移动键盘焦点（桌面：勾选框点击不冒泡到行）。重复提醒的
+    // 推进（Advance）属 M3。
+    func toggleTask(at index: Int) {
+        guard blockList.blocks.indices.contains(index), activeEditor != nil else { return }
+        let block = blockList.blocks[index]
+        guard block.kind == .task else { return }
+        let flip: [(String, String)] = [("- [ ] ", "- [x] "), ("- [x] ", "- [ ] "),
+                                        ("- [ ]", "- [x]"), ("- [x]", "- [ ]")]
+        guard let (old, new) = flip.first(where: { block.raw.hasPrefix($0.0) }) else { return }
+        let newRaw = new + block.raw.dropFirst(old.count)
+        let beforeDoc = raw
+        var lines = beforeDoc.components(separatedBy: "\n")
+        guard block.startLine < lines.count else { return }
+        lines[block.startLine] = newRaw
+        let newDoc = lines.joined(separator: "\n")
+        raw = newDoc
+        let oldBlocks = blockList.blocks
+        blockList = LiveBlocks.split(newDoc)
+        recordOp(before: beforeDoc, after: newDoc, beforeCaret: trackedDocCaret, afterCaret: trackedDocCaret,
+                 kind: .command, fencePair: false)
+        remountChangedBlocks(oldBlocks, blockList.blocks)
+        onRawChange?(newDoc)
+    }
+
     func handleEnter() -> Bool {
         guard let view = activeEditor, let idx = activeIndex, blockList.blocks.indices.contains(idx),
               let proj = activeProjection else { return false }

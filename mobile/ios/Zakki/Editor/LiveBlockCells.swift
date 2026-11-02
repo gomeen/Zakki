@@ -180,6 +180,9 @@ final class LiveTextCell: LiveBaseCell {
     private let quoteBar = UIView()
     private var ornamentTopConstraint: NSLayoutConstraint?
     private var textLeadingConstraint: NSLayoutConstraint?
+    private var kind: LiveBlockKind = .para
+    // 点 ☐/☑ 饰件翻转勾选（不落光标、不激活行——桌面：勾选框点击不冒泡）。
+    var onToggleTask: (() -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -219,6 +222,7 @@ final class LiveTextCell: LiveBaseCell {
     // 配置：attributed 为投影渲染串；列表/任务/引用块带饰件并让出悬挂缩进。
     func configure(block: LiveBlock, attributed: NSAttributedString, index: Int, gap: CGFloat) {
         blockIndex = index
+        kind = block.kind
         setTailGap(gap)
         textView.attributedText = attributed
         quoteBar.isHidden = block.kind != .quote
@@ -265,14 +269,35 @@ final class LiveTextCell: LiveBaseCell {
         marker(kind: block.kind, checked: block.checked, number: block.number)
     }
 
+    // 任务饰件（☐/☑）命中判定（textView 坐标系，外扩 4pt 好点）。
+    private func taskOrnamentHit(_ pointInTextView: CGPoint) -> Bool {
+        guard kind == .task, !ornamentLabel.isHidden else { return false }
+        let frame = convert(ornamentLabel.bounds, from: ornamentLabel).insetBy(dx: -4, dy: -4)
+        let p = convert(pointInTextView, from: textView)
+        return frame.contains(p)
+    }
+
     @objc private func textTapped(_ recognizer: UITapGestureRecognizer) {
         let point = recognizer.location(in: textView)
+        if taskOrnamentHit(point) {
+            onToggleTask?()
+            return
+        }
         reportTap(visibleCaret: textView.caretOffset(at: point))
     }
 
     @objc private func chromeTapped(_ recognizer: UITapGestureRecognizer) {
-        // 点在饰件/留白：光标落块末（桌面点行内空白光标停在最近文字）。
-        reportTap(visibleCaret: (textView.text as NSString?)?.length ?? 0)
+        let inCell = recognizer.location(in: self)
+        if taskOrnamentHit(convert(inCell, to: textView)) {
+            onToggleTask?()
+            return
+        }
+        // 点在饰件/行内留白：换算到最近行的光标（桌面：点行内留白停在最近文字）。
+        // 原实现一律落块末，真机反馈点字符间空隙会跳到行尾。
+        let inTextView = convert(inCell, to: textView)
+        let clamped = CGPoint(x: max(0, min(inTextView.x, textView.bounds.width - 1)),
+                              y: max(0, min(inTextView.y, textView.bounds.height - 1)))
+        reportTap(visibleCaret: textView.caretOffset(at: clamped))
     }
 }
 

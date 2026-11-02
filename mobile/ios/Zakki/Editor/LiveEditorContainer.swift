@@ -288,6 +288,9 @@ final class LiveEditorContainer: UIView {
             cell.configure(block: block, attributed: LiveBlockRender.attributedString(for: block, projection: proj, traits: traitCollection),
                            index: index, gap: gap)
             cell.onTap = { [weak self] i, caret in self?.liveBlockCellTapped(i, visibleCaret: caret) }
+            if block.kind == .task {
+                cell.onToggleTask = { [weak self] in self?.toggleTask(at: index) }
+            }
             return cell
         }
     }
