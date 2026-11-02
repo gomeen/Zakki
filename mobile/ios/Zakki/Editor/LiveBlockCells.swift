@@ -194,6 +194,7 @@ final class LiveTextCell: LiveBaseCell {
         quoteBar.layer.cornerRadius = Theme.Typography.quoteBar / 2
         quoteBar.isHidden = true
         ornamentLabel.isHidden = true
+        ornamentLabel.isUserInteractionEnabled = false
         let top = ornamentLabel.topAnchor.constraint(equalTo: topAnchor)
         ornamentTopConstraint = top
         let leading = textView.leadingAnchor.constraint(equalTo: leadingAnchor)
@@ -231,7 +232,10 @@ final class LiveTextCell: LiveBaseCell {
             textLeadingConstraint?.constant = Theme.Typography.quoteBar + 8
         } else if let marker = Self.marker(for: block) {
             ornamentLabel.text = marker.text
-            ornamentLabel.font = Theme.Typography.bodyFont
+            // 任务方框字形偏小（用户反馈）：比正文大 2pt 提升可点性与可见性。
+            ornamentLabel.font = block.kind == .task
+                ? .systemFont(ofSize: Theme.Typography.bodySize + 2)
+                : Theme.Typography.bodyFont
             ornamentLabel.textColor = marker.color
             ornamentLabel.isHidden = false
             let markerWidth = (marker.text as NSString).size(withAttributes: [.font: Theme.Typography.bodyFont]).width
