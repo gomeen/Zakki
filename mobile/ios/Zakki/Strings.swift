@@ -88,6 +88,54 @@ enum Strings {
         t("Could not update tabs (\(code)).", "标签更新未能保存（\(code)）。")
     }
 
+    // MARK: 首启种子内容（桌面 initDefaults 同构；文案按移动端交互改写）
+
+    static var seedWelcomeText: String { t("""
+        # Zakki
+
+        7 colorful tabs for quick notes. Tap any text to edit — Markdown markers stay hidden.
+
+        - [ ] Try checking me
+        **Bold**, *italic*, `inline code`, [links](https://github.com/egoist/mygo) and quotes are supported
+        Type @2026-11-06 10:00 anywhere and it becomes a reminder pill
+
+        Use the top-right button to export a backup or import zakki.json from desktop.
+        """, """
+        # Zakki
+
+        7 个彩色标签，随手记。点击任意文字即可编辑，标记会自动隐藏。
+
+        - [ ] 试试勾选我
+        支持**加粗**、*斜体*、`行内代码`、[链接](https://github.com/egoist/mygo) 与引用
+        在文字里写下 @2026-11-06 10:00 会变成提醒胶囊
+
+        右上角可以导出备份，或导入桌面端的 zakki.json。
+        """) }
+
+    static var seedTimeGuideTabName: String { t("Time & Reminders", "时间与提醒") }
+
+    static var seedTimeGuideText: String { t("""
+        ## Time & Reminders
+
+        Write a time anywhere and a reminder pill appears:
+
+        - @2026-11-06 10:00 — reminds on time
+        - @2026-11-06 10:00 ~30m — 30 minutes early
+        - @2026-11-06 10:00 ^1d — repeats daily
+
+        Example: Friday @2026-11-06 10:00 ~30m sync the notes
+        """, """
+        ## 时间与提醒
+
+        在任意行写下时间，就会出现提醒胶囊：
+
+        - @2026-11-06 10:00 —— 到点提醒
+        - @2026-11-06 10:00 ~30m —— 提前 30 分钟
+        - @2026-11-06 10:00 ^1d —— 每天重复
+
+        示例：周五 @2026-11-06 10:00 ~30m 记得同步进展
+        """) }
+
     // MARK: M2-4 标签管理与导出
 
     static var edit: String { t("Edit", "编辑") }
