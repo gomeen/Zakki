@@ -46,23 +46,27 @@ final class NotesModel: ObservableObject {
         loadSandbox(at: sandboxURL)
     }
 
-    // 首启种子（桌面 initDefaults 同构）：7 个默认标签（原 7 色、id 1..7），
-    // 标签 1 欢迎文本、标签 2「时间与提醒」。文件立即落盘——导出/分享即刻可用；
+    // 首启种子：2 个标签——标签 1 欢迎文本、标签 2「时间与提醒」（桌面首启的
+    // 内容结构；桌面 7 空标签是桌面列表形态的产物，手机列表下 5 个「未命名」
+    // 空行观感差，用户用 ＋ 随时加）。文件立即落盘——导出/分享即刻可用；
     // 已有文件的老用户不受影响。构造失败不阻塞启动，回落导入欢迎页并如实上报。
     private func seedFirstRunData() {
-        let colors = Array(ThemeTagPalette.colors.prefix(7))
-        var tabs = colors.enumerated().map { index, color in
-            NotesTab(id: UInt64(index + 1), name: "", text: "", color: color)
-        }
-        tabs[0].text = Strings.seedWelcomeText
-        tabs[1].name = Strings.seedTimeGuideTabName
-        tabs[1].text = Strings.seedTimeGuideText
+        // 不走 EncodeNotes：对无 tabs 的裸文件，model.Decode 会补齐 7 个默认
+        // 标签（Tot 的 7 点语义）。直接按 v3 结构构造，install 后即经 Decode
+        // 验证（测试覆盖），字段与桌面 schema 同源。
+        let payload: [String: Any] = [
+            "version": 3,
+            "active": 0,
+            "tabs": [
+                ["id": 1, "name": "", "text": Strings.seedWelcomeText, "color": ThemeTagPalette.hex(at: 0)],
+                ["id": 2, "name": Strings.seedTimeGuideTabName, "text": Strings.seedTimeGuideText, "color": ThemeTagPalette.hex(at: 1)],
+            ],
+        ]
         do {
-            // 经绑定 Encode 产出：结构与字段顺序和桌面写盘同源。
-            let out = try NotesCore.encode("{\"version\":3}", tabs: tabs)
-            install(Data(out.utf8))
+            let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+            install(data)
         } catch {
-            importError = (error as? NotesCoreError)?.code ?? error.localizedDescription
+            importError = error.localizedDescription
         }
     }
 

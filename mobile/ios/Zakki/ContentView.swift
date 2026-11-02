@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var model: NotesModel
     @State private var showingPicker = false
+    @State private var showingShare = false
     // 重排模式：List 进编辑态只为拖拽排序（onMove）；导航与左滑操作在非编辑态。
     @State private var reordering = false
     // 换色面板与重命名弹窗的目标标签。
@@ -13,11 +14,13 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             mainContent
-                .navigationTitle("Zakki")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { toolbarContent }
                 .navigationDestination(for: UInt64.self) { tabID in
                     editorDestination(tabID: tabID)
+                }
+                .sheet(isPresented: $showingShare) {
+                    ActivityView(items: [model.fileURL])
                 }
                 .sheet(isPresented: $showingPicker) {
                     DocumentPicker { url in
@@ -77,12 +80,6 @@ struct ContentView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
-            if model.snapshot != nil {
-                ShareLink(item: model.fileURL) {
-                    Image(systemName: "square.and.arrow.up")
-                }
-                .accessibilityLabel(Strings.exportFile)
-            }
             if let snapshot = model.snapshot, snapshot.writable {
                 Button {
                     model.addTab(name: "", color: NotesModel.unusedTabColor(for: snapshot.tabs ?? []))
@@ -366,4 +363,16 @@ extension NotesTab {
         }
         return Color(uiColor: ThemeTagPalette.color(at: fallbackSlot).uiColor)
     }
+
+}
+
+// 系统分享面板封装：菜单触发的导出走这里（ShareLink 无法从 Menu 按钮直接弹出）。
+struct ActivityView: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

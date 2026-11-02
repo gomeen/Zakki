@@ -272,25 +272,26 @@ final class TabManagementTests: XCTestCase {
 
     // MARK: 首启种子（新用户打开即用）
 
-    // 全新沙盒：自动播种 7 个默认标签（原 7 色、id 1..7），标签 1 欢迎文本、
-    // 标签 2「时间与提醒」，文件立即落盘（桌面 initDefaults 同构）。
+    // 全新沙盒：自动播种 2 个标签（欢迎文本 + 时间与提醒），文件立即落盘
+    //（手机列表形态不照搬桌面 7 空标签，用户用 ＋ 随时加）。
     @MainActor
-    func testFirstLaunchSeedsSevenDefaultTabs() throws {
+    func testFirstLaunchSeedsTwoTabs() throws {
         let (model, sandbox, _) = try makeModel()
         let snap = try XCTUnwrap(model.snapshot)
         XCTAssertEqual(snap.version, 3)
         XCTAssertTrue(snap.writable)
         XCTAssertEqual(snap.active, 0)
         let tabs = try XCTUnwrap(snap.tabs)
-        XCTAssertEqual(tabs.count, 7)
-        XCTAssertEqual(tabs.map(\.id), (1...7).map(UInt64.init))
-        XCTAssertEqual(tabs.map(\.color), Array(ThemeTagPalette.colors.prefix(7)))
+        XCTAssertEqual(tabs.count, 2)
+        XCTAssertEqual(tabs.map(\.id), [1, 2])
+        XCTAssertEqual(tabs[0].color, ThemeTagPalette.hex(at: 0))
+        XCTAssertEqual(tabs[1].color, ThemeTagPalette.hex(at: 1))
         XCTAssertEqual(tabs[0].text, Strings.seedWelcomeText)
         XCTAssertEqual(tabs[1].name, Strings.seedTimeGuideTabName)
         XCTAssertEqual(tabs[1].text, Strings.seedTimeGuideText)
         // 文件已落盘：导出/分享即刻可用，二次启动不再重播种子。
         let onDisk = try NotesCore.decode(try String(contentsOf: sandbox, encoding: .utf8))
-        XCTAssertEqual(onDisk.tabs?.count, 7)
+        XCTAssertEqual(onDisk.tabs?.count, 2)
     }
 
     // 已有文件（含老用户导入件）不受种子影响，逐字节原样保留。
