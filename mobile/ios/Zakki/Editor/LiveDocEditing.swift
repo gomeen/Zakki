@@ -95,17 +95,22 @@ enum LiveDocEditing {
             if old == prefix {
                 var lines2 = lines
                 lines2[lineIdx] = String(line.dropFirst(old.count))
-                let newDoc = lines2.joined(separator: "\n")
+                // 行替换必须落在整篇 doc 的行数组上（lines 只是块内行）；
+                // 直接把块内行当新 doc 会丢掉其余块（数据丢失级）。
+                let newDoc = Self.spliceLines(doc, block.startLine, block.endLine,
+                                              lines2.joined(separator: "\n")).joined(separator: "\n")
                 return LiveDocEdit(doc: newDoc, caret: caretAfter(lines2[lineIdx]))
             }
             var lines2 = lines
             lines2[lineIdx] = prefix + String(line.dropFirst(old.count))
-            let newDoc = lines2.joined(separator: "\n")
+            let newDoc = Self.spliceLines(doc, block.startLine, block.endLine,
+                                          lines2.joined(separator: "\n")).joined(separator: "\n")
             return LiveDocEdit(doc: newDoc, caret: caretAfter(lines2[lineIdx]))
         }
         var lines2 = lines
         lines2[lineIdx] = prefix + line
-        let newDoc = lines2.joined(separator: "\n")
+        let newDoc = Self.spliceLines(doc, block.startLine, block.endLine,
+                                      lines2.joined(separator: "\n")).joined(separator: "\n")
         return LiveDocEdit(doc: newDoc, caret: caretAfter(lines2[lineIdx]))
     }
 

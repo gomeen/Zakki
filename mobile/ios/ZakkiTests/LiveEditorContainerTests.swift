@@ -237,6 +237,86 @@ final class LiveEditorContainerTests: XCTestCase {
         XCTAssertEqual(container.rawSelection.location, 3, "无焦点块映射文末")
     }
 
+    // MARK: 焦点块时间胶囊（真机反馈：聚焦后胶囊消失变空白）
+
+    private func pillAttachmentCount(in editor: UITextView) -> Int {
+        let storage = editor.textStorage
+        var tokens = 0
+        storage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: storage.length)) { value, _, _ in
+            if value is TimeTokenAttachment { tokens += 1 }
+        }
+        return tokens
+    }
+
+    // 裸占位符 = 文本里的 U+FFFC 没带胶囊附件（ styler 跨区间 setAttributes 洗掉旧属性的形态）。
+    private func barePlaceholderCount(in editor: UITextView) -> Int {
+        let storage = editor.textStorage
+        let ns = storage.string as NSString
+        var bare = 0
+        ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length), options: [.byComposedCharacterSequences]) { sub, range, _, _ in
+            guard sub == "\u{FFFC}" else { return }
+            if !(storage.attribute(.attachment, at: range.location, effectiveRange: nil) is TimeTokenAttachment) {
+                bare += 1
+            }
+        }
+        return bare
+    }
+
+    func testActiveBlockKeepsTimePill() {
+        let container = makeContainer("写下 \(cluster) 会提醒")
+        activateAt(container, rawOffset: 2)
+        guard let editor = container.activeEditor else { return XCTFail("激活失败") }
+        XCTAssertEqual(pillAttachmentCount(in: editor), 1, "焦点块缓冲应含时间胶囊附件 storage=\(editor.textStorage)")
+        XCTAssertEqual(barePlaceholderCount(in: editor), 0, "不应有裸 U+FFFC（胶囊被洗掉的形态）")
+    }
+
+    // 逐层定位胶囊丢失：投影收簇 → 展开回原文 → 重扫收簇。
+    func testProjectionExpandsTokenRoundTrip() {
+        let container = makeContainer("写下 \(cluster) 会提醒")
+        let block = container.blockList.blocks[0]
+        let proj = LiveProjection.project(block).withTimeObject()
+        XCTAssertFalse(proj.objects.isEmpty, "投影应把令牌收成占位符")
+        let expanded = proj.expandedBufferText()
+        XCTAssertTrue(expanded.contains(cluster), "展开缓冲应还原令牌原文")
+        XCTAssertFalse(expanded.contains(fffc), "展开缓冲不应含裸占位符")
+        let doc = EditorDocument(raw: expanded)
+        XCTAssertTrue(doc.pieces.contains { if case .token = $0 { return true }; return false },
+                      "重扫应收簇为 token 片段")
+    }
+
+    func testActiveHeadingBlockKeepsTimePill() {
+        let container = makeContainer("# 标题 \(cluster) 提醒")
+        activateAt(container, rawOffset: 5)
+        guard let editor = container.activeEditor else { return XCTFail("激活失败") }
+        XCTAssertEqual(pillAttachmentCount(in: editor), 1, "标题焦点块同样保留胶囊附件")
+        XCTAssertEqual(barePlaceholderCount(in: editor), 0)
+    }
+
+    // 再切一刀：EditorRender 直出附件？BlockEditorView.load 装载后附件还在？
+    func testEditorRenderAttachesPill() {
+        let doc = EditorDocument(raw: "写下 \(cluster) 会提醒")
+        let attr = EditorRender.pieces(doc.pieces)
+        var tokens = 0
+        attr.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attr.length)) { value, _, _ in
+            if value is TimeTokenAttachment { tokens += 1 }
+        }
+        XCTAssertEqual(tokens, 1, "EditorRender 应产出胶囊附件")
+    }
+
+    func testBlockEditorViewLoadAttachesPill() {
+        let container = makeContainer("写下 \(cluster) 会提醒")
+        let block = container.blockList.blocks[0]
+        let proj = LiveProjection.project(block)
+        XCTAssertFalse(proj.objects.isEmpty, "objects=\(proj.objects) text=\(proj.text) timeRaw=\(block.timeTokenRaw ?? "nil")")
+        let expanded = proj.expandedBufferText()
+        XCTAssertFalse(expanded.contains(fffc), "expanded=\(expanded)")
+        let view = BlockEditorView(writable: true)
+        view.frame = CGRect(x: 0, y: 0, width: 300, height: 100)
+        view.load(projection: proj, block: block, selection: nil)
+        XCTAssertEqual(pillAttachmentCount(in: view), 1, "load 后缓冲应含胶囊附件")
+        XCTAssertEqual(barePlaceholderCount(in: view), 0, "load 后不应残留裸占位符 buffer=\(view.text ?? "")")
+    }
+
     // MARK: 快捷栏（容器级源码语义）
 
     func testToolbarPrefixPrependsToActiveBlock() {
@@ -249,6 +329,23 @@ final class LiveEditorContainerTests: XCTestCase {
         // 撤销：结构化命令独立成事务。
         container.undo()
         XCTAssertEqual(container.raw, "正文")
+    }
+
+    // 真机回归：标题行按 H1 应取消标题，而不是叠加第二个 #。
+    func testToolbarH1TogglesOffHeading() {
+        let container = makeContainer("# 标题行\n\n尾段")
+        activateAt(container, rawOffset: 4)
+        container.applyToolbarAction(.heading1)
+        XCTAssertEqual(container.raw, "标题行\n\n尾段", "标题行按 H1 = 取消标题（不叠加 #）")
+        XCTAssertEqual(container.activeEditor?.text, "标题行", "标记随即隐藏")
+    }
+
+    // 已有其他块前缀 → 剥旧插新（升降级）。
+    func testToolbarH2DowngradesH1ToH2() {
+        let container = makeContainer("# 标题行")
+        activateAt(container, rawOffset: 4)
+        container.applyToolbarAction(.heading2)
+        XCTAssertEqual(container.raw, "## 标题行")
     }
 
     func testToolbarWrapKeepsVisibleSelection() {

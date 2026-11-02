@@ -658,8 +658,17 @@ final class LiveEditorContainer: UIView {
             wrapSelection(marker, at: idx)
             return
         }
-        if let prefix = MarkdownSnippet.prefixes[action] {
-            prependPrefix(prefix, at: idx)
+        if MarkdownSnippet.prefixes[action] != nil {
+            // 切换语义与 applySnippet 同源（同前缀移除/剥旧插新）；
+            // prependPrefix 仅作无投影/无编辑器时的兑底盲插。
+            if let view = activeEditor, let proj = activeProjection,
+               let edit = LiveDocEditing.blockPrefixAction(action, doc: raw, list: blockList,
+                                                           index: idx, visibleCaret: view.selectedRange.location,
+                                                           projection: proj) {
+                applyStructural(edit, kind: .command, fencePair: false)
+                return
+            }
+            prependPrefix(MarkdownSnippet.prefixes[action] ?? "", at: idx)
         }
     }
 

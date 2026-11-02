@@ -232,13 +232,15 @@ final class LiveTextCell: LiveBaseCell {
             textLeadingConstraint?.constant = Theme.Typography.quoteBar + 8
         } else if let marker = Self.marker(for: block) {
             ornamentLabel.text = marker.text
-            // 任务方框字形偏小（用户反馈）：比正文大 2pt 提升可点性与可见性。
-            ornamentLabel.font = block.kind == .task
-                ? .systemFont(ofSize: Theme.Typography.bodySize + 2)
+            // 任务方框字形偏小（用户反馈）：比正文大 4pt 提升可点性与可见性；
+            // 缩进宽度用同一字体量，避免字形加大后与正文重叠。
+            let markerFont: UIFont = block.kind == .task
+                ? .systemFont(ofSize: Theme.Typography.bodySize + 4)
                 : Theme.Typography.bodyFont
+            ornamentLabel.font = markerFont
             ornamentLabel.textColor = marker.color
             ornamentLabel.isHidden = false
-            let markerWidth = (marker.text as NSString).size(withAttributes: [.font: Theme.Typography.bodyFont]).width
+            let markerWidth = (marker.text as NSString).size(withAttributes: [.font: markerFont]).width
             textLeadingConstraint?.constant = ceil(markerWidth) + 8
             ornamentTopConstraint?.constant = 0
         } else {
@@ -273,10 +275,11 @@ final class LiveTextCell: LiveBaseCell {
         marker(kind: block.kind, checked: block.checked, number: block.number)
     }
 
-    // 任务饰件（☐/☑）命中判定（textView 坐标系，外扩 4pt 好点）。
+    // 任务饰件（☐/☑）命中判定（textView 坐标系）：手指目标按 HIG 放到约 30pt，
+    // 字形本身只有十来 pt，只按字形框判定会频繁落空（真机反馈勾不中）。
     private func taskOrnamentHit(_ pointInTextView: CGPoint) -> Bool {
         guard kind == .task, !ornamentLabel.isHidden else { return false }
-        let frame = convert(ornamentLabel.bounds, from: ornamentLabel).insetBy(dx: -4, dy: -4)
+        let frame = convert(ornamentLabel.bounds, from: ornamentLabel).insetBy(dx: -9, dy: -9)
         let p = convert(pointInTextView, from: textView)
         return frame.contains(p)
     }

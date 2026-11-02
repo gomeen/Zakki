@@ -76,19 +76,41 @@ final class MarkdownStyler {
         defer { storage.endEditing() }
         var wrote = false
         let base = baseAttributes(for: block)
+        // 附件字符（时间胶囊 U+FFFC）的位置：writeRun 走 setAttributes 语义，
+        // 跨越附件的样式区间会把 .attachment 洗掉（真机反馈：聚焦后胶囊消失），
+        // 写入前按附件位置拆段，附件字符本身不套行内样式（胶囊自渲染）。
+        var tokens: [Int] = []
+        storage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+            guard value is TimeTokenAttachment else { return }
+            tokens.append(range.location)
+        }
+        func writeProtectingTokens(_ attrs: [NSAttributedString.Key: Any], range: NSRange) {
+            guard range.length > 0 else { return }
+            let end = range.location + range.length
+            var seg = range.location
+            for at in tokens where at >= range.location && at < end {
+                if at > seg {
+                    wrote = Self.writeRun(attrs, range: NSRange(location: seg, length: at - seg), on: storage) || wrote
+                }
+                seg = at + 1
+            }
+            if seg < end {
+                wrote = Self.writeRun(attrs, range: NSRange(location: seg, length: end - seg), on: storage) || wrote
+            }
+        }
         var cursor = 0
         for style in projection.styles {
             let start = min(max(style.start, 0), storage.length)
             let end = min(max(style.end, start), storage.length)
             if start > cursor {
-                wrote = Self.writeRun(base, range: NSRange(location: cursor, length: start - cursor), on: storage) || wrote
+                writeProtectingTokens(base, range: NSRange(location: cursor, length: start - cursor))
             }
-            wrote = Self.writeRun(Self.overlayAttributes(for: style, base: base, block: block),
-                                  range: NSRange(location: start, length: end - start), on: storage) || wrote
+            writeProtectingTokens(Self.overlayAttributes(for: style, base: base, block: block),
+                                  range: NSRange(location: start, length: end - start))
             cursor = end
         }
         if cursor < storage.length {
-            wrote = Self.writeRun(base, range: NSRange(location: cursor, length: storage.length - cursor), on: storage) || wrote
+            writeProtectingTokens(base, range: NSRange(location: cursor, length: storage.length - cursor))
         }
         return wrote
     }
