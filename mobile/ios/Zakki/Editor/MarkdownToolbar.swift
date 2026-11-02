@@ -38,6 +38,9 @@ final class MarkdownToolbar: UIView {
     // 测试取按钮触发 onAction 接线。
     private(set) var buttons: [UIButton] = []
 
+    // 按钮行高度；dock 态随安全区抬高（见 safeAreaInsetsDidChange）。
+    private var heightConstraint: NSLayoutConstraint?
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         autoresizingMask = [.flexibleWidth]
@@ -59,22 +62,33 @@ final class MarkdownToolbar: UIView {
             stack.addArrangedSubview(button)
             buttons.append(button)
         }
+        // 高度约束随安全区更新（dock 态 = 44 + Home 条避让 34）。
+        heightConstraint = heightAnchor.constraint(equalToConstant: 44)
         // 顶部发丝线：与正文区分隔。
         let divider = UIView()
         divider.backgroundColor = .separator
         divider.translatesAutoresizingMaskIntoConstraints = false
         addSubview(divider)
+        // 内容锚定安全区：键盘上方时底部安全区为 0；键盘收起 dock 到屏幕底时
+        // 自动避开 Home 指示条（裸 bottomAnchor 会把按钮压进指示条区域）。
+        // 高度经 intrinsicContentSize 提供（自设高度约束与系统给 accessory 的
+        // frame 管理相互打架，会出现按钮半裁切）。
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 44),
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-            stack.topAnchor.constraint(equalTo: topAnchor),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            stack.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor, constant: 4),
+            stack.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -4),
+            stack.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor),
             divider.leadingAnchor.constraint(equalTo: leadingAnchor),
             divider.trailingAnchor.constraint(equalTo: trailingAnchor),
             divider.topAnchor.constraint(equalTo: topAnchor),
             divider.heightAnchor.constraint(equalToConstant: 0.5),
         ])
+    }
+
+    // 输入附件高度 = 按钮行 44 + 底部安全区（dock 态含 Home 指示条避让）。
+    override func safeAreaInsetsDidChange() {
+        super.safeAreaInsetsDidChange()
+        heightConstraint?.constant = 44 + safeAreaInsets.bottom
     }
 
     @available(*, unavailable)

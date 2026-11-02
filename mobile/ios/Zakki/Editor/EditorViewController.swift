@@ -25,7 +25,9 @@ final class EditorViewController: UIViewController {
     private var modeIcon: UIImageView?
 
     // 底部 Markdown 快捷栏（inputAccessoryView）：焦点块编辑器与源码视图共用。
-    private let toolbar = MarkdownToolbar()
+    // frame 给非零初值：UIKeyboardItemContainerView 以 accessory 初始 frame
+    // 定高（约束/intrinsic 不参与求解），零 frame 会被排成 0 高完全裁掉。
+    private let toolbar = MarkdownToolbar(frame: CGRect(x: 0, y: 0, width: 402, height: 44))
 
     init(raw: String, writable: Bool, reason: String) {
         self.writable = writable
