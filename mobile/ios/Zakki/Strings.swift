@@ -101,7 +101,7 @@ enum Strings {
         **Bold**, *italic*, `inline code`, [links](https://github.com/egoist/mygo) and quotes are supported
         Type @2026-11-06 10:00 anywhere and it becomes a reminder pill
 
-        Use the top-right button to export a backup or import zakki.json from desktop.
+        Use the ⋯ menu (top left) to export a backup or import zakki.json from desktop.
         """, """
         # Zakki
 
@@ -111,7 +111,7 @@ enum Strings {
         支持**加粗**、*斜体*、`行内代码`、[链接](https://github.com/egoist/mygo) 与引用
         在文字里写下 @2026-11-06 10:00 会变成提醒胶囊
 
-        右上角可以导出备份，或导入桌面端的 zakki.json。
+        左上角 ⋯ 菜单可以导出备份，或导入桌面端的 zakki.json。
         """) }
 
     static var seedTimeGuideTabName: String { t("Time & Reminders", "时间与提醒") }

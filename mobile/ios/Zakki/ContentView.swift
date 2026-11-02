@@ -75,10 +75,31 @@ struct ContentView: View {
         }
     }
 
-    // 导出=交出沙盒 zakki.json 的 URL（写保护文件也允许备份）；标签管理入口
-    // 只在 writable 时出现（模型层同样拒绝，UI 隐藏是第一道门）。
+    // 用户指定布局：左上角唯一菜单图标（编辑排序/导入/导出全收二级），右上角仅＋。
+    // 导出=交出沙盒 zakki.json 的 URL（写保护文件也允许备份）；排序入口只在
+    // writable 且标签 ≥2 时出现（模型层同样拒绝，UI 隐藏是第一道门）。
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarLeading) {
+            Menu {
+                if let snapshot = model.snapshot, snapshot.writable,
+                   (snapshot.tabs?.count ?? 0) >= 2 {
+                    Button(reordering ? Strings.done : Strings.edit) {
+                        reordering.toggle()
+                    }
+                }
+                Divider()
+                Button(Strings.importButton) {
+                    showingPicker = true
+                }
+                Button(Strings.exportFile) {
+                    showingShare = true
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .accessibilityLabel(Strings.menuAccessibility)
+        }
         ToolbarItemGroup(placement: .primaryAction) {
             if let snapshot = model.snapshot, snapshot.writable {
                 Button {
@@ -88,24 +109,6 @@ struct ContentView: View {
                 }
                 .accessibilityLabel(Strings.addTab)
                 .disabled((snapshot.tabs?.count ?? 0) >= 9)
-            }
-            // 导入是低频迁移动作，收进 ⋯ 菜单（常驻顶栏是 M1 只读查看器遗产）；
-            // 无数据态（播种失败等）导入仍是唯一入口，保持显性按钮。
-            Menu {
-                Button(Strings.importButton) {
-                    showingPicker = true
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-            }
-            .accessibilityLabel(Strings.importButton)
-        }
-        ToolbarItem(placement: .navigationBarLeading) {
-            if let snapshot = model.snapshot, snapshot.writable,
-               (snapshot.tabs?.count ?? 0) >= 2 {
-                Button(reordering ? Strings.done : Strings.edit) {
-                    reordering.toggle()
-                }
             }
         }
     }
