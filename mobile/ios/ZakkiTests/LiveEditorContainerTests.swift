@@ -436,4 +436,19 @@ final class LiveEditorContainerTests: XCTestCase {
         XCTAssertGreaterThan(checked, 4)
     }
 
+
+    // 容器级：勾选翻转记账可撤销、不激活块（桌面：勾选框点击不冒泡到行）。
+    @MainActor
+    func testToggleTaskFlipsMarkerAndIsUndoable() {
+        let container = makeContainer("- [ ] 待办甲")
+        activateAt(container, rawOffset: 5)
+        container.toggleTask(at: 0)
+        XCTAssertEqual(container.raw, "- [x] 待办甲")
+        container.toggleTask(at: 0)
+        XCTAssertEqual(container.raw, "- [ ] 待办甲")
+        // 撤销恢复勾选前状态（undo 走编辑器路由）。
+        XCTAssertTrue(container.canUndo)
+        container.undo()
+        XCTAssertEqual(container.raw, "- [x] 待办甲", "撤销回退第二次翻转（恢复到勾选态）")
+    }
 }

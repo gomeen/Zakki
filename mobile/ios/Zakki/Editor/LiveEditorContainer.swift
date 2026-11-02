@@ -145,6 +145,20 @@ final class LiveEditorContainer: UIView {
     // 键盘工具栏挂到焦点编辑器上（两种模式的文本视图共用同一实例）。
     var inputAccessoryViewForEditor: UIView?
 
+    // 快捷栏动作入口（实时模式）：前缀类走 raw 空间（标记在缓冲中隐藏）；
+    // 包裹/插时间在缓冲空间落字（插入的字面内容即新 raw，走既有收簇管线）。
+    func applySnippet(_ action: MarkdownSnippetAction) {
+        guard let view = activeEditor, let idx = activeIndex,
+              blockList.blocks.indices.contains(idx), let proj = activeProjection else { return }
+        if let edit = LiveDocEditing.blockPrefixAction(action, doc: raw, list: blockList,
+                                                       index: idx, visibleCaret: view.selectedRange.location,
+                                                       projection: proj) {
+            applyStructural(edit, kind: .command, fencePair: false)
+            return
+        }
+        MarkdownSnippet.apply(action, to: view)
+    }
+
     var contentViewportWidth: CGFloat {
         max(1, scrollView.contentInset.left + scrollView.contentInset.right == 0
             ? bounds.width

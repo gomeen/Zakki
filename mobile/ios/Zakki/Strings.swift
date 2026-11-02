@@ -88,6 +88,8 @@ enum Strings {
         t("Could not update tabs (\(code)).", "标签更新未能保存（\(code)）。")
     }
 
+    static var menuAccessibility: String { t("Menu", "菜单") }
+
     // MARK: 首启种子内容（桌面 initDefaults 同构；文案按移动端交互改写）
 
     static var seedWelcomeText: String { t("""
