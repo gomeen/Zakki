@@ -317,6 +317,25 @@ final class BlockEditorView: UITextView, UITextViewDelegate {
         onSelectionChanged?()
     }
 
+    // MARK: 自管 tap 光标定位
+
+    // UIKit 宿主内嵌 + 虚拟列表滚移的组合下，系统 tap 手势的光标落点偶发
+    // 不生效（真机反馈：同行/跨行点击光标不动或回跳）。touchesEnded 后用
+    // closestPosition 自行定位：幂等（系统已挪到同位则跳过），不动已有
+    // 选区（双击选词/长按菜单不受影响），组字期间不干预。
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesEnded(touches, with: event)
+        guard isEditable, markedTextRange == nil, selectedRange.length == 0,
+              let touch = touches.first else { return }
+        let point = touch.location(in: self)
+        guard bounds.insetBy(dx: -8, dy: -8).contains(point),
+              let pos = closestPosition(to: point) else { return }
+        let loc = offset(from: beginningOfDocument, to: pos)
+        if loc != selectedRange.location {
+            selectedRange = NSRange(location: loc, length: 0)
+        }
+    }
+
     // MARK: 存储对账（M2-1/M2-5 同一管线：diff 同步文档 + 收组件决策）
 
     // TextKit 2 的 NSTextContentStorage 在 processEditing 期间不允许嵌套存储写：
