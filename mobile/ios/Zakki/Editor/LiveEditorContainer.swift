@@ -165,6 +165,11 @@ final class LiveEditorContainer: UIView {
             : bounds.width - scrollView.contentInset.left - scrollView.contentInset.right)
     }
 
+    // 测试与调试：已挂载块的当前 frame（nil = 未挂载）。
+    func mountedFrame(_ index: Int) -> CGRect? {
+        mounted[index]?.view.frame
+    }
+
     // MARK: 块高表（离线排版测量 + 尾距）
 
     private func blockContentHeight(_ block: LiveBlock, width: CGFloat) -> CGFloat {
@@ -239,7 +244,11 @@ final class LiveEditorContainer: UIView {
             let frame = CGRect(x: 0, y: layout.y, width: contentViewportWidth, height: layout.height)
             if frame.intersects(visible) {
                 needed.insert(i)
-                if mounted[i] == nil {
+                if let entry = mounted[i] {
+                    // 高度表更新后同步已挂载 cell 的 frame：块变高（H1/换行）时
+                    // 下方 cell 若停留在旧 y 会与新布局重叠（真机反馈，含任务方框）。
+                    entry.view.frame = frame
+                } else {
                     mount(index: i)
                 }
             }

@@ -348,6 +348,25 @@ final class LiveEditorContainerTests: XCTestCase {
         XCTAssertEqual(container.raw, "## 标题行")
     }
 
+    // 真机回归：H1 使块变高后，下方已挂载 cell 的 frame 必须跟随高度表下移，
+    // 否则任务方框等旧视图叠在标题上（layoutVisibleBlocks 只挂新不刷 frame 的形态）。
+    func testPrefixChangeRefreshesMountedFramesBelow() {
+        let container = makeContainer("甲乙丙丁\n\n- [ ] 待办一")
+        activateAt(container, rawOffset: 1)
+        container.layoutIfNeeded()
+        guard let taskIndex = container.blockList.blocks.firstIndex(where: { $0.kind == .task }) else {
+            return XCTFail("缺少任务块")
+        }
+        let before = container.mountedFrame(taskIndex)
+        XCTAssertNotNil(before, "视口内任务块应已挂载")
+        container.applyToolbarAction(.heading1)
+        container.layoutIfNeeded()
+        let after = container.mountedFrame(taskIndex)
+        XCTAssertNotNil(after)
+        XCTAssertGreaterThan(after!.minY, before!.minY,
+                             "标题变高后下方 cell 应下移（不重叠）")
+    }
+
     func testToolbarWrapKeepsVisibleSelection() {
         let container = makeContainer("你好世界")
         activateAt(container, rawOffset: 0)

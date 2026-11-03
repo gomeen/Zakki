@@ -232,17 +232,18 @@ final class LiveTextCell: LiveBaseCell {
             textLeadingConstraint?.constant = Theme.Typography.quoteBar + 8
         } else if let marker = Self.marker(for: block) {
             ornamentLabel.text = marker.text
-            // 任务方框字形偏小（用户反馈）：比正文大 4pt 提升可点性与可见性；
-            // 缩进宽度用同一字体量，避免字形加大后与正文重叠。
+            // 任务方框在手机端仍偏小（用户二次反馈）：用独立大字号 26pt 绘制
+            // ☐/☑（字形约 18pt 见方）；缩进宽度用同一字体量，避免与正文重叠。
             let markerFont: UIFont = block.kind == .task
-                ? .systemFont(ofSize: Theme.Typography.bodySize + 4)
+                ? .systemFont(ofSize: 26)
                 : Theme.Typography.bodyFont
             ornamentLabel.font = markerFont
             ornamentLabel.textColor = marker.color
             ornamentLabel.isHidden = false
             let markerWidth = (marker.text as NSString).size(withAttributes: [.font: markerFont]).width
             textLeadingConstraint?.constant = ceil(markerWidth) + 8
-            ornamentTopConstraint?.constant = 0
+            // 大字形以基线对齐正文字首行：顶部上提半个字号差，视觉与正文居中。
+            ornamentTopConstraint?.constant = -ceil((markerFont.pointSize - Theme.Typography.bodySize) / 4)
         } else {
             ornamentLabel.isHidden = true
             textLeadingConstraint?.constant = 0
