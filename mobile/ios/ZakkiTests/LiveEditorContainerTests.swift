@@ -435,6 +435,35 @@ final class LiveEditorContainerTests: XCTestCase {
                        "时间行点击光标按点击位置落，不强制块末")
     }
 
+    // 尾间隙归属（真机反馈：点下一段首行上沿被上一块吞成块末）。
+    //textView 被约束拉伸覆盖间隙，textTapped 收到间隙点击；
+    // 间隙中点以下应路由到下一块行首，中点以上仍归本块末尾。
+    func testTailGapLowerHalfRoutesToNextBlock() {
+        let cell = LiveTextCell(frame: CGRect(x: 0, y: 0, width: 300, height: 100))
+        cell.configure(block: LiveBlock(kind: .para, startLine: 0, endLine: 0, raw: "甲乙丙丁"),
+                       attributed: NSAttributedString(string: "甲乙丙丁"), index: 3, gap: 24)
+        cell.setTailGap(24)
+        cell.layoutIfNeeded()
+        let used = cell.textView.textUsedBottom()
+        XCTAssertFalse(cell.gapRoutesToNextBlock(at: CGPoint(x: 10, y: used + 12)),
+                       "间隙上半段归本块")
+        XCTAssertTrue(cell.gapRoutesToNextBlock(at: CGPoint(x: 10, y: used + 18)),
+                      "间隙下半段归下一块行首")
+        XCTAssertTrue(cell.gapRoutesToNextBlock(at: CGPoint(x: 10, y: 97)),
+                      "间隙底部同样归下一块")
+    }
+
+    // 点击已聚焦块（间隙路由到本块行首的形态）：光标应移动到指定可见位置。
+    func testTapOnActiveBlockMovesCaret() {
+        let container = makeContainer("甲\n\n乙丙丁")
+        activateAt(container, rawOffset: 4)
+        XCTAssertEqual(container.activeEditor?.text, "乙丙丁")
+        container.liveBlockCellTapped(2, visibleCaret: 0)
+        XCTAssertEqual(container.activeEditor?.selectedRange.location, 0,
+                       "已聚焦块收到间隙路由点击时光标移到指定位置")
+        XCTAssertEqual(container.raw, "甲\n\n乙丙丁", "点击不改 raw")
+    }
+
     // MARK: 只读
 
     func testReadOnlyContainerNeverActivates() {

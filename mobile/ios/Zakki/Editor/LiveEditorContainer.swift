@@ -777,8 +777,8 @@ extension LiveEditorContainer: UIScrollViewDelegate {
 
 extension LiveEditorContainer: LiveBlockCellDelegate {
     func liveBlockCellTapped(_ index: Int, visibleCaret: Int) {
-        guard writable, index != activeIndex, blockList.blocks.indices.contains(index) else { return }
-        // 点哪停哪：时间令牌行同样按点击位置落光标（旧规则落块末已移除）。
+        guard writable, blockList.blocks.indices.contains(index) else { return }
+        // 已聚焦块也响应：点击间隙路由到本块行首时直接移动光标（点哪停哪）。
         activate(index, visibleSelection: NSRange(location: visibleCaret, length: 0))
         // 首次聚焦也做光标级滚动（此前只有块级）：点到视口下缘的块时，
         // 光标行要落在快捷栏上方的舒适区（用户选定）。

@@ -44,7 +44,7 @@ final class PlainRenderTextView: UITextView {
         if point.y > used.maxY {
             return length
         }
-        let index = renderLayoutManager.characterIndex(
+    let index = renderLayoutManager.characterIndex(
             for: point, in: renderTextContainer,
             fractionOfDistanceBetweenInsertionPoints: nil
         )
@@ -56,6 +56,13 @@ final class PlainRenderTextView: UITextView {
             return NSMaxRange(lineRange)
         }
         return index
+    }
+
+    // 已排版文字的底部（textView 坐标系）：文字之下到 view 底部是尾部间隙，
+    // 间隙点击的块归属判定用。
+    func textUsedBottom() -> CGFloat {
+        renderLayoutManager.ensureLayout(for: renderTextContainer)
+        return renderLayoutManager.usedRect(for: renderTextContainer).maxY
     }
 }
 
@@ -291,13 +298,37 @@ final class LiveTextCell: LiveBaseCell {
             onToggleTask?()
             return
         }
+        // 块尾间隙下半段归下一块行首（最近行吸附跨块）：textView 被约束拉伸
+        // 覆盖到间隙区，手指点下一段首行上沿落在间隙里会被本块吞成块末、
+        // 光标跳走（真机反馈：点首行光标不动/回原处）。
+        if gapRoutesToNextBlock(at: convert(point, from: textView)) {
+            onTap?(blockIndex + 1, 0)
+            return
+        }
         reportTap(visibleCaret: textView.caretOffset(at: point))
+    }
+
+    // 点击点是否落在尾间隙的下半段（归下一块）。textView 被拉伸覆盖间隙，
+    // 故入参为 cell 坐标；测试可见以锁定归属语义。
+    func gapRoutesToNextBlock(at pointInCell: CGPoint) -> Bool {
+        // textView 被约束拉伸覆盖整个 cell（间隙在文字排版区之下），
+        // 阈值用已排版文字底而非 frame 底。
+        guard tailGap > 0, !textView.isHidden else { return false }
+        let textBottom = textView.frame.minY + textView.textUsedBottom()
+        return pointInCell.y > textBottom + tailGap / 2
     }
 
     @objc private func chromeTapped(_ recognizer: UITapGestureRecognizer) {
         let inCell = recognizer.location(in: self)
         if taskOrnamentHit(convert(inCell, to: textView)) {
             onToggleTask?()
+            return
+        }
+        // 块尾间隙下半段归下一块行首（最近行吸附跨块）：段落间分隔空行处的
+        // 间隙带高达两倍块距，手指点下一段首行时上沿落在间隙里会被上一块
+        // 吞掉、光标跳走（真机反馈：点首行光标不动）。
+        if gapRoutesToNextBlock(at: inCell) {
+            onTap?(blockIndex + 1, 0)
             return
         }
         // 点在饰件/行内留白：换算到最近行的光标（桌面：点行内留白停在最近文字）。
