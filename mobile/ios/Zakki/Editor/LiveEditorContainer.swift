@@ -447,9 +447,12 @@ final class LiveEditorContainer: UIView {
         let local = CGRect(x: caretRect.minX,
                            y: layouts[idx].y + min(caretRect.minY, max(0, layouts[idx].height - 2)),
                            width: max(caretRect.width, 1), height: max(caretRect.height, 1))
+        // 舒适区（用户选定）：光标上下各留约两行半余量，打字不贴键盘/快捷栏；
+        // 仅当超出舒适区才滚，最小位移。
+        let comfort = max(56, (view.font?.lineHeight ?? 20) * 2.5)
         let visible = CGRect(origin: scrollView.contentOffset, size: bounds.size)
         guard !visible.contains(local) else { return }
-        scrollView.scrollRectToVisible(local.insetBy(dx: 0, dy: -24), animated: false)
+        scrollView.scrollRectToVisible(local.insetBy(dx: 0, dy: -comfort), animated: false)
     }
 
     // MARK: 焦点块编辑器装配
@@ -778,8 +781,12 @@ extension LiveEditorContainer: LiveBlockCellDelegate {
         // 桌面 focusPreviewBlock：时间行首次点击光标默认落块末。
         if block.timeTokenRaw != nil {
             activate(index, sourceCaret: LiveSyntax.length(block.raw))
+            scrollCaretIntoView()
             return
         }
         activate(index, visibleSelection: NSRange(location: visibleCaret, length: 0))
+        // 首次聚焦也做光标级滚动（此前只有块级）：点到视口下缘的块时，
+        // 光标行要落在快捷栏上方的舒适区（用户选定）。
+        scrollCaretIntoView()
     }
 }

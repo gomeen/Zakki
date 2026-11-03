@@ -367,6 +367,26 @@ final class LiveEditorContainerTests: XCTestCase {
                              "标题变高后下方 cell 应下移（不重叠）")
     }
 
+    // 用户选定：首次聚焦视口下缘的块时，光标行要滚进快捷栏上方的舒适区。
+    func testFirstFocusScrollsCaretIntoComfortZone() {
+        let raw = (0..<24).map { "第\($0)段内容" }.joined(separator: "\n\n")
+        let container = LiveEditorContainer(raw: raw, writable: true)
+        container.frame = CGRect(x: 0, y: 0, width: 390, height: 280)
+        container.layoutIfNeeded()
+        let last = container.blockList.blocks.count - 1
+        container.activate(last, sourceCaret: LiveSyntax.length(container.blockList.blocks[last].raw))
+        container.layoutIfNeeded()
+        guard let editor = container.activeEditor else { return XCTFail("激活失败") }
+        // 光标在容器视口内的 y：挂载 cell frame.y + 块内光标 y − contentOffset
+        let caret = editor.caretRect(for: editor.selectedRange.location)
+        let cellY = container.mountedFrame(container.activeIndex!)?.minY ?? 0
+        let y = cellY + caret.minY - container.scrollView.contentOffset.y
+        let viewportBottom = container.bounds.height
+        XCTAssertLessThanOrEqual(y + caret.height + 8, viewportBottom,
+                                 "光标行应完整落在视口内（不贴/不越过快捷栏区）")
+        XCTAssertGreaterThan(y, 0, "光标行距视口顶部也应有余量")
+    }
+
     func testToolbarWrapKeepsVisibleSelection() {
         let container = makeContainer("你好世界")
         activateAt(container, rawOffset: 0)
