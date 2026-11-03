@@ -373,7 +373,8 @@ final class LiveEditorContainer: UIView {
 
     // MARK: 焦点迁移与激活
 
-    // 点击渲染块进入编辑（桌面 live_click）。时间行首次点击光标落块末。
+    // 点击渲染块进入编辑（桌面 live_click）。点哪停哪：时间行不再例外
+    //（旧的「时间行落块末」与移动端点击预期冲突，真机反馈已移除）。
     func activate(_ index: Int, sourceCaret: Int? = nil, visibleSelection: NSRange? = nil) {
         guard writable, blockList.blocks.indices.contains(index) else { return }
         let old = activeIndex
@@ -777,13 +778,7 @@ extension LiveEditorContainer: UIScrollViewDelegate {
 extension LiveEditorContainer: LiveBlockCellDelegate {
     func liveBlockCellTapped(_ index: Int, visibleCaret: Int) {
         guard writable, index != activeIndex, blockList.blocks.indices.contains(index) else { return }
-        let block = blockList.blocks[index]
-        // 桌面 focusPreviewBlock：时间行首次点击光标默认落块末。
-        if block.timeTokenRaw != nil {
-            activate(index, sourceCaret: LiveSyntax.length(block.raw))
-            scrollCaretIntoView()
-            return
-        }
+        // 点哪停哪：时间令牌行同样按点击位置落光标（旧规则落块末已移除）。
         activate(index, visibleSelection: NSRange(location: visibleCaret, length: 0))
         // 首次聚焦也做光标级滚动（此前只有块级）：点到视口下缘的块时，
         // 光标行要落在快捷栏上方的舒适区（用户选定）。

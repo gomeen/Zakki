@@ -427,11 +427,12 @@ final class LiveEditorContainerTests: XCTestCase {
         XCTAssertEqual(container.raw, "甲\n\n乙", "点击不改 raw")
     }
 
-    func testTapOnTimeBlockPutsCaretAtEnd() {
-        let container = makeContainer("甲\n\n任务 \(cluster)")
-        container.liveBlockCellTapped(2, visibleCaret: 0)
-        XCTAssertEqual(container.activeEditor?.selectedRange.location,
-                       container.activeEditor?.text.utf16.count, "时间行首次点击光标落块末（桌面同款）")
+    // 时间行不再例外：点哪停哪（真机反馈：点中间却落块末）。
+    func testTapOnTimeBlockPlacesCaretAtTappedPosition() {
+        let container = makeContainer("甲\n\n任务 \(cluster) 完成后打卡")
+        container.liveBlockCellTapped(2, visibleCaret: 3)
+        XCTAssertEqual(container.activeEditor?.selectedRange.location, 3,
+                       "时间行点击光标按点击位置落，不强制块末")
     }
 
     // MARK: 只读
