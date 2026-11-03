@@ -379,6 +379,26 @@ final class LiveEditorContainer: UIView {
         guard writable, blockList.blocks.indices.contains(index) else { return }
         let old = activeIndex
         activeIndex = index
+        // 同块重激活（间隙路由到已聚焦块的形态）：直接改编辑器选区即达目的，
+        // 不走整幅重载——重载与原生 tap 手势存在光标写入竞态（真机反馈：
+        // 光标跳到目标又跳回原位），还会打断菜单/输入会话。缓冲与投影
+        // 不一致时（外部换 raw）回退到下方重载路径。
+        if old == index, let visibleSelection, let view = activeEditor {
+            let proj = activeProjection ?? LiveProjection.project(blockList.blocks[index])
+            if view.document.bufferText == proj.text {
+                let limit = (view.text as NSString).length
+                let loc = min(max(visibleSelection.location, 0), limit)
+                let end = min(max(visibleSelection.location + visibleSelection.length, loc), limit)
+                let sel = NSRange(location: loc, length: end - loc)
+                if view.selectedRange != sel {
+                    view.selectedRange = sel
+                }
+                trackedDocCaret = blockList.startOffset(of: index)
+                    + min(max(proj.sourceOffset(min(max(loc, 0), proj.units.count)), 0),
+                          LiveSyntax.length(blockList.blocks[index].raw))
+                return
+            }
+        }
         pendingSourceCaret = sourceCaret
         pendingVisibleSelection = visibleSelection
         let block = blockList.blocks[index]
