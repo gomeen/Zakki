@@ -453,6 +453,30 @@ final class LiveEditorContainerTests: XCTestCase {
                       "间隙底部同样归下一块")
     }
 
+    // 聚焦块内点击落点几何：行尾右侧/末行下方 = 文末；行内 = 最近字符。
+    // （真机反馈：光标在行中，点末尾不动——系统 tap 手势落点不可靠，
+    // 自管定位必须覆盖这些分支。）
+    func testCaretTapPlacementTargetsDocumentEnd() {
+        let container = makeContainer("甲\n\n乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉戌")
+        activateAt(container, rawOffset: 4)
+        XCTAssertEqual(container.activeIndex, 2)
+        guard let editor = container.activeEditor else { return XCTFail("激活失败") }
+        let len = (editor.text as NSString).length
+        let endRect = editor.caretRect(for: editor.endOfDocument)
+        // 末行行尾右侧（同行 y、x 超过末字）→ 文末
+        let right = CGPoint(x: endRect.minX + 80, y: (endRect.minY + endRect.maxY) / 2)
+        XCTAssertEqual(editor.tapTargetLocation(at: right), len, "行尾右侧空白点击 = 文末")
+        // 末行下方纸面 → 文末
+        let below = CGPoint(x: endRect.minX + 80, y: endRect.maxY + 12)
+        XCTAssertEqual(editor.tapTargetLocation(at: below), len, "末行下方 = 文末")
+        // 行 1 中部 → 落在行 1 的字符区间（非文末、非块首）
+        let startRect = editor.caretRect(for: editor.beginningOfDocument)
+        let mid = CGPoint(x: startRect.minX + 60, y: startRect.minY + 12)
+        let line1 = editor.tapTargetLocation(at: mid)
+        XCTAssertGreaterThan(line1, 0, "行内点击落最近字符")
+        XCTAssertLessThanOrEqual(line1, 10, "行 1 点击不应跳到文末")
+    }
+
     // 点击已聚焦块（间隙路由到本块行首的形态）：光标应移动到指定可见位置。
     func testTapOnActiveBlockMovesCaret() {
         let container = makeContainer("甲\n\n乙丙丁")
