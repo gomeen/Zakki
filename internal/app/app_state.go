@@ -233,6 +233,7 @@ type app struct {
 	sourceEditorState
 	desktopRefs
 	toasts toastState
+	syncState
 	settingsWindowState
 	prefsRuntimeState
 	onboarding onboardingState

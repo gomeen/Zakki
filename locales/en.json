@@ -640,5 +640,65 @@
   "pinTopOn": "Turn Off Keep on Top",
   "statusPreview": "Preview",
   "timeGuideTabName": "Time & Reminders",
-  "timeGuideBody": "# Time & Reminders\n\nAdd a time to a paragraph, list item, quote, heading or task.\n\n- Type `@` at the end of a line to open the time picker, or use the default shortcut ⌘⇧0.\n- Choose a date and time, optionally add an alert, then click Done. Click the time chip to change or clear it.\n- Focusing a timed entry keeps the same time chip and places the caret at the end. You can move around the chip and type on either side; click the chip to edit its time.\n\n```markdown\nSubmit report @2026-06-01 10:00 ~1h Attach the budget\n```\n\n`@` sets the event time (a deadline for tasks); `~1h` means an alert one hour earlier. Remove `~1h` to keep the time without an alert. The time chip may sit anywhere in the entry. Alerts include the readable text before and after it, not other entries.\n\nAlerts require Zakki to be running. Missed alerts are not replayed after restart, and completed tasks do not alert."
+  "timeGuideBody": "# Time & Reminders\n\nAdd a time to a paragraph, list item, quote, heading or task.\n\n- Type `@` at the end of a line to open the time picker, or use the default shortcut ⌘⇧0.\n- Choose a date and time, optionally add an alert, then click Done. Click the time chip to change or clear it.\n- Focusing a timed entry keeps the same time chip and places the caret at the end. You can move around the chip and type on either side; click the chip to edit its time.\n\n```markdown\nSubmit report @2026-06-01 10:00 ~1h Attach the budget\n```\n\n`@` sets the event time (a deadline for tasks); `~1h` means an alert one hour earlier. Remove `~1h` to keep the time without an alert. The time chip may sit anywhere in the entry. Alerts include the readable text before and after it, not other entries.\n\nAlerts require Zakki to be running. Missed alerts are not replayed after restart, and completed tasks do not alert.",
+  "syncSection": "Cloud Sync",
+  "syncEnable": "Cloud sync",
+  "syncEnableHint": "Syncs zakki.json with GitHub. While sync is on, Git auto commit and push pause; they resume with your saved settings when sync is turned off.",
+  "syncPausedGitHint": "Git automatic commit and push are paused while cloud sync is on. Your original switches are kept and restored when sync is turned off.",
+  "syncRepo": "Repository",
+  "syncRepoHint": "GitHub repository in owner/name form, for example gomeen/notes.",
+  "syncConnect": "Connect GitHub…",
+  "syncDisconnect": "Disconnect",
+  "syncOpenAuthPage": "Open authorization page",
+  "syncNow": "Sync now",
+  "syncIdleStatus": "Sync on, waiting for the first round",
+  "syncRunningStatus": "Syncing…",
+  "syncOffStatus": "Cloud sync is off; Git backup follows your saved settings.",
+  "syncLastSync": "Last sync: {time}",
+  "syncNotConnected": "GitHub not connected",
+  "syncRemoteApplied": "Remote notes applied",
+  "syncConflictTitle": "Sync conflict",
+  "syncConflictMessage": "Your notes changed on this device and on GitHub since the last sync. Keep which version?",
+  "syncConflictDetail": "The losing version is archived in full under conflicts/ next to zakki.json. It never joins tabs, reminders or the tab limit.",
+  "syncKeepLocal": "Keep this device",
+  "syncKeepRemote": "Keep GitHub",
+  "syncConflictPending": "Conflict pending: both sides changed; the losing version will be archived under conflicts/.",
+  "syncConflictsTitle": "Conflict archives",
+  "syncConflictsHint": "Full copies of the losing versions from sync conflicts. They do not join tabs or reminders and are never cleaned automatically.",
+  "syncDeleteArchive": "Delete archive",
+  "syncClientIDMissing": "To connect, set the ZAKKI_GITHUB_CLIENT_ID environment variable to your GitHub App client ID first.",
+  "syncKeyringUnavailable": "System secure storage is unavailable; sync credentials cannot be stored.",
+  "syncConnectTitle": "Connect GitHub",
+  "syncConnectCode": "On github.com/login/device enter this code: {code}",
+  "syncConnectHint": "Or open {url} and enter the code above. Zakki keeps polling until you finish or the code expires.",
+  "syncConnectOpen": "Open GitHub",
+  "syncConnectTimeout": "The device code expired before authorization finished; try connecting again.",
+  "syncConnectedToast": "GitHub connected; sync credentials are stored in the system keychain.",
+  "syncConnectFailed": "Connecting GitHub failed: {err}",
+  "syncDisconnectedToast": "Sync credentials removed.",
+  "syncDisconnectFailed": "Removing sync credentials failed: {err}",
+  "@syncLastSync": {
+    "description": "time is 01-02 15:04"
+  },
+  "@syncConnectCode": {
+    "description": "code is the one-time user code"
+  },
+  "@syncConnectHint": {
+    "description": "url is the verification page"
+  },
+  "@syncConnectFailed": {
+    "description": "err is the failure reason"
+  },
+  "@syncDisconnectFailed": {
+    "description": "err is the failure reason"
+  },
+  "syncDeleteFailed": "Deleting the archive failed: {err}",
+  "@syncDeleteFailed": {
+    "description": "err is the failure reason"
+  },
+  "syncConnectWaiting": "Waiting for authorization…",
+  "syncArchiveMeta": "{size} {unit} · {time}",
+  "@syncArchiveMeta": {
+    "description": "size is a number; unit is B/KB/MB; time is 01-02 15:04"
+  }
 }

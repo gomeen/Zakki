@@ -535,9 +535,69 @@
   "storageUnsaved": "有未保存修改",
   "storageSavedAt": "已保存 {time}",
   "commonChoose": "选择",
-  "prefsPausedForNotes": "\u504f\u597d\u6587\u4ef6\u4e0d\u53ef\u7528\uff0c\u5df2\u6682\u505c\u7b14\u8bb0\u4fdd\u5b58\uff1a{err}",
-  "pinTopOn": "\u53d6\u6d88\u7f6e\u9876",
-  "statusPreview": "\u5b9e\u65f6\u9884\u89c8",
+  "prefsPausedForNotes": "偏好文件不可用，已暂停笔记保存：{err}",
+  "pinTopOn": "取消置顶",
+  "statusPreview": "实时预览",
   "timeGuideTabName": "时间与提醒",
-  "timeGuideBody": "# 时间与提醒\n\n普通段落、列表、引用、标题和任务都可以添加时间。\n\n- 在行尾输入 `@` 打开时间选择器，默认快捷键为 ⌘⇧0。\n- 选择日期和时刻，可选设置提醒，然后点「完成」。点击时间组件可修改或清除时间。\n- 聚焦时保留原来的时间组件，光标默认在整条内容末尾；可在组件前后移动光标并输入，修改时间请点击组件。\n\n```markdown\n交报告 @2026-06-01 10:00 ~1h 记得附上预算表\n```\n\n`@` 表示事情发生的时刻，在任务上表示截止时间；`~1h` 表示提前一小时提醒。删掉 `~1h` 可只保留时间、不提醒。时间组件可以放在内容中间；通知包含组件前后的全部正文，不包含其他条目。\n\n提醒需要 Zakki 保持运行；重启后不补发错过的提醒，已完成的任务不提醒。"
+  "timeGuideBody": "# 时间与提醒\n\n普通段落、列表、引用、标题和任务都可以添加时间。\n\n- 在行尾输入 `@` 打开时间选择器，默认快捷键为 ⌘⇧0。\n- 选择日期和时刻，可选设置提醒，然后点「完成」。点击时间组件可修改或清除时间。\n- 聚焦时保留原来的时间组件，光标默认在整条内容末尾；可在组件前后移动光标并输入，修改时间请点击组件。\n\n```markdown\n交报告 @2026-06-01 10:00 ~1h 记得附上预算表\n```\n\n`@` 表示事情发生的时刻，在任务上表示截止时间；`~1h` 表示提前一小时提醒。删掉 `~1h` 可只保留时间、不提醒。时间组件可以放在内容中间；通知包含组件前后的全部正文，不包含其他条目。\n\n提醒需要 Zakki 保持运行；重启后不补发错过的提醒，已完成的任务不提醒。",
+  "syncSection": "云同步",
+  "syncEnable": "云同步",
+  "syncEnableHint": "通过 GitHub 同步 zakki.json；开启期间暂停 Git 自动提交与推送，关闭后按原设置恢复。",
+  "syncPausedGitHint": "开启云同步期间，「Git 自动提交 / 自动推送」两个旧备份调度器已暂停；你原来的开关保留在设置里，关闭云同步后自动恢复。",
+  "syncRepo": "仓库",
+  "syncRepoHint": "GitHub 仓库，owner/name 形式，例如 gomeen/notes。",
+  "syncConnect": "连接 GitHub…",
+  "syncDisconnect": "断开连接",
+  "syncOpenAuthPage": "打开授权页",
+  "syncNow": "立即同步",
+  "syncIdleStatus": "已开启，等待首轮同步",
+  "syncRunningStatus": "正在同步…",
+  "syncOffStatus": "云同步关闭；Git 备份按原设置运行。",
+  "syncLastSync": "上次同步：{time}",
+  "syncNotConnected": "尚未连接 GitHub",
+  "syncRemoteApplied": "已应用远端笔记",
+  "syncConflictTitle": "同步冲突",
+  "syncConflictMessage": "上次同步后，本机与 GitHub 上的笔记都发生了变化。保留哪个版本？",
+  "syncConflictDetail": "落选的版本会完整留档在 zakki.json 旁的 conflicts/ 目录；不进入标签、不参与提醒调度、不占用标签上限。",
+  "syncKeepLocal": "保留本机",
+  "syncKeepRemote": "保留远端",
+  "syncConflictPending": "存在待处理冲突：两边都有修改；落选版本将完整留档到 conflicts/。",
+  "syncConflictsTitle": "冲突留档",
+  "syncConflictsHint": "同步冲突中落选版本的完整副本；不进入标签与提醒调度，也不会自动清理。",
+  "syncDeleteArchive": "删除留档",
+  "syncClientIDMissing": "连接前请先把环境变量 ZAKKI_GITHUB_CLIENT_ID 设为你的 GitHub App Client ID。",
+  "syncKeyringUnavailable": "系统安全存储不可用，无法保存同步凭据。",
+  "syncConnectTitle": "连接 GitHub",
+  "syncConnectCode": "在 github.com/login/device 输入此代码：{code}",
+  "syncConnectHint": "或打开 {url} 并输入上方代码。Zakki 会持续等待，直到你完成授权或代码过期。",
+  "syncConnectOpen": "打开 GitHub",
+  "syncConnectTimeout": "设备码在授权完成前已过期，请重新连接。",
+  "syncConnectedToast": "已连接 GitHub；同步凭据保存在系统安全存储中。",
+  "syncConnectFailed": "连接 GitHub 失败：{err}",
+  "syncDisconnectedToast": "已清除同步凭据。",
+  "syncDisconnectFailed": "清除同步凭据失败：{err}",
+  "@syncLastSync": {
+    "description": "time is 01-02 15:04"
+  },
+  "@syncConnectCode": {
+    "description": "code is the one-time user code"
+  },
+  "@syncConnectHint": {
+    "description": "url is the verification page"
+  },
+  "@syncConnectFailed": {
+    "description": "err is the failure reason"
+  },
+  "@syncDisconnectFailed": {
+    "description": "err is the failure reason"
+  },
+  "syncDeleteFailed": "删除留档失败：{err}",
+  "@syncDeleteFailed": {
+    "description": "err is the failure reason"
+  },
+  "syncConnectWaiting": "等待授权…",
+  "syncArchiveMeta": "{size} {unit} · {time}",
+  "@syncArchiveMeta": {
+    "description": "size is a number; unit is B/KB/MB; time is 01-02 15:04"
+  }
 }

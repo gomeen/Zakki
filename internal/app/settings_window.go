@@ -6,10 +6,12 @@ package app
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"zakki/internal/notes"
 	"zakki/locales"
 )
 
@@ -76,6 +78,12 @@ type settingsUIState struct {
 	// 保存页：笔记目录是否位于 git 工作区，按目录缓存（避免每帧探测）。
 	gitProbeDir  string
 	gitProbeRepo bool
+
+	// 云同步（保存页）：仓库输入框的工作副本与留档列表缓存（1 秒
+	// TTL，列表扫描不进构建帧）。
+	syncRepoText    string
+	syncConflicts   []notes.ConflictInfo
+	syncConflictsAt time.Time
 
 	// Keymap 页：搜索词、正在录制的命令 ID、冲突/非法提示。keyErrID 非空时
 	// 提示显示在该命令行下方，否则在页面底部（其他页的写入错误也走 keyErr）。
@@ -149,6 +157,7 @@ func (ui *settingsUIState) mergeDraftFromPrefs(p preferences) {
 
 	ui.draft.Storage = next.Storage
 	ui.draft.Git = next.Git
+	ui.draft.Sync = next.Sync
 
 	ui.draft.Version = next.Version
 	ui.draft.Keymap = next.Keymap
@@ -159,6 +168,7 @@ func (ui *settingsUIState) mergeDraftFromPrefs(p preferences) {
 
 func (ui *settingsUIState) syncDraftBindings() {
 	p := ui.draft
+	ui.syncRepoText = p.Sync.Repo
 	ui.appearanceModeSel = appearanceModeDisplay(p.Appearance.AppearanceMode)
 	ui.languageSel = languageDisplay(p.Appearance.Language)
 	ui.markdownThemeSel = markdownThemeDisplay(p.Appearance.MarkdownTheme)

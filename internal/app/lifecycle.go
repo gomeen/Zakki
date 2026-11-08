@@ -81,6 +81,11 @@ func Run() {
 		} else {
 			a.createWindow()
 		}
+		// 启动即拉推一轮云同步（前台聚焦时同步的启动触发点）；开启
+		// 同步时旧 Git 调度器已随偏好应用被暂停。
+		if a.syncEnabledPref() {
+			a.notes.SyncNow()
+		}
 		slog.Info("应用就绪", "data", a.notes.DataPath(), "prefs", a.preferencesPath())
 	})
 

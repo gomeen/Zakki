@@ -105,11 +105,13 @@ func (a *app) showWindow() {
 	}
 	if a.win == nil || !a.winOpen {
 		a.createWindow()
+		a.syncOnActivate()
 		return
 	}
 	a.win.Restore()
 	a.win.Show()
 	a.win.Focus()
+	a.syncOnActivate()
 }
 
 // toggleWindow 全局热键与托盘点击：显示/隐藏窗口。
