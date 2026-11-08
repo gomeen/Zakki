@@ -238,7 +238,9 @@ enum Strings {
     static var syncBackendSection: String { t("Sync Backend", "同步后端") }
     static var syncBackendGitHub: String { t("GitHub", "GitHub") }
     static var syncBackendCloudFolder: String { t("Cloud Folder", "云盘文件夹") }
-    static var syncBackendCloudFolderHint: String { t("Coming later", "后续版本提供") }
+    static var syncBackendCloudFolderHint: String {
+        t("Sync via zakki.json in your iCloud Drive folder", "通过 iCloud Drive 文件夹中的 zakki.json 同步")
+    }
     static var syncGitHubSection: String { t("GitHub Repository", "GitHub 仓库") }
 
     static var syncFieldClientID: String { t("GitHub App Client ID", "GitHub App Client ID") }
@@ -293,6 +295,43 @@ enum Strings {
     static var syncConflictKeepLocal: String { t("Keep This Device", "保留本机") }
     static var syncConflictKeepRemote: String { t("Keep Remote", "保留远端") }
     static var syncConflictLater: String { t("Decide Later", "稍后处理") }
+
+    // 后端 B：云盘文件夹（iCloud Drive 文件选择器授权 + 打开对账，#53）。
+    static var syncCloudSection: String { t("Cloud Folder", "云盘文件夹") }
+    static var cloudPickFolder: String { t("Choose Folder Containing zakki.json", "选择 zakki.json 所在文件夹") }
+    static var cloudPickFile: String { t("Choose zakki.json Only", "仅选择 zakki.json 文件") }
+    static var cloudGuideFooter: String {
+        t("Zakki only accesses the location you explicitly pick. Reconciliation runs when the app opens; access can be revoked anytime in Settings › Privacy › Files & Folders.",
+          "Zakki 仅访问你明确选择的位置；打开应用时对账，可随时在系统设置的「隐私 › 文件与文件夹」中撤销授权。")
+    }
+    static var cloudScopeFolder: String { t("Folder", "文件夹") }
+    static var cloudScopeFile: String { t("File only", "仅文件") }
+    static var cloudReselect: String { t("Reselect Location", "重新选择位置") }
+    static var cloudBookmarkInvalidHint: String {
+        t("The picked location is unavailable. Reselect it below.", "所选位置已不可用，请重新选择。")
+    }
+    static var cloudArchiveLocalHint: String {
+        t("Only the file was granted, so conflict archives stay on this device.", "仅授权了文件本身，冲突留档保留在本机。")
+    }
+
+    // 后端 B：云端冲突副本（双通道枚举；副本与文件版本经同一 D13 对话框采用）。
+    static var cloudCopySection: String { t("Cloud Conflict Copies", "云端冲突副本") }
+    static var cloudCopyEmpty: String { t("No conflict copies", "无冲突副本") }
+    static var cloudCopySourceNamed: String { t("Name copy", "命名副本") }
+    static var cloudCopySourceVersion: String { t("File version", "文件版本") }
+    static var cloudCopyViewerTitle: String { t("Conflict Copy", "冲突副本") }
+    static var cloudCopyAdopt: String { t("Use This Version", "采用此版本") }
+    static var cloudCopyAdoptHint: String {
+        t("Choosing this opens the same conflict dialog; the losing version is archived.",
+          "选择后打开同一个冲突对话框，落选版本会完整留档。")
+    }
+    static func cloudCopiesFailedText(_ code: String) -> String {
+        t("Enumeration failed (\(code))", "枚举失败（\(code)）")
+    }
+
+    static func cloudCopiesOpen(count: Int) -> String {
+        t("View Copies (\(count))", "查看副本（\(count)）")
+    }
 
     // Device Flow 弹层。
     static var deviceFlowUserCodeHint: String {

@@ -7,6 +7,8 @@ import Foundation
 // 仅供模拟器端到端实测与 UI 测试使用；单测走独立 URLProtocol mock。
 enum SyncStubMode {
     static let launchArg = "-ZakkiSyncStub"
+    // 预授权路径启动参数（仅 stub 模式生效）：模拟器端到端实测后端 B，见 SyncEngine.forLaunch。
+    static let cloudGrantArg = "-ZakkiCloudGrant"
     static var isActive: Bool { ProcessInfo.processInfo.arguments.contains(launchArg) }
     static let host = "stub.zakki.local"
     // Device Flow 端点挂在 /github 下，Contents API 挂在 /api 下（单域名拦截）。
@@ -18,6 +20,57 @@ enum SyncStubMode {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [SyncStubURLProtocol.self]
         return URLSession(configuration: config)
+    }
+}
+
+// MARK: - 后端 B 模拟器预授权（-ZakkiCloudGrant；仅 stub 模式，真实授权走文件选择器）
+
+// 书签目标用 App 容器内临时目录（自容器路径无需安全作用域授权，探针 §1 已验证），
+// 机制与真实 provider 一致（书签/会话/读写），模拟器无 iCloud 登录也不碰真实 iCloud。
+// 键名与 SyncEngine.ConfigKey 一致（stub 惯例：字面量 + 注释，不走内部可见性）。
+enum SyncStubCloudSeed {
+    // grant 值：auto-folder（文件夹授权）/ auto-file（仅文件授权）/
+    // missing（建书签后删目标：启动即处于「书签在、位置没了」状态）。
+    static func apply(defaults: UserDefaults, tokens: TokenStoring) {
+        let args = ProcessInfo.processInfo.arguments
+        // 真实 picker 端到端不走本参数：本 App 沙盒 Documents 未暴露给文件
+        // App（不带 LSSupportsOpeningDocumentsInPlace，避免同步目标被外部改写的新故障面），
+        // picker 测试授权 D21 探针遗留的可见容器（见 CloudFolderFlowUITests 场景四）。
+        guard let mode = Self.stringArg(SyncStubMode.cloudGrantArg, in: args) else { return }
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("zakki-cloud-stub", isDirectory: true)
+        // 每次启动重放种子：端到端脚本从确定状态开始。
+        try? fm.removeItem(at: dir)
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let mainURL = dir.appendingPathComponent("zakki.json", isDirectory: false)
+        if let seed = Self.fileArg("-ZakkiCloudSeedPath", in: args) {
+            try? Data(contentsOf: seed).write(to: mainURL)
+        }
+        if let copy = Self.fileArg("-ZakkiCloudCopyPath", in: args) {
+            try? Data(contentsOf: copy).write(to: dir.appendingPathComponent("zakki (1).json", isDirectory: false))
+        }
+        let granted = mode == "auto-file" ? mainURL : dir
+        defaults.set(SyncBackendKind.cloudFolder.rawValue, forKey: "sync.backend")
+        defaults.set(granted.lastPathComponent, forKey: "sync.cloud.name")
+        defaults.set(granted.hasDirectoryPath ? CloudGrantScope.folder.rawValue : CloudGrantScope.file.rawValue,
+                     forKey: "sync.cloud.scope")
+        if let bookmark = try? CloudFolderAccess.makeBookmarkData(for: granted) {
+            tokens.setToken(bookmark.base64EncodedString(), forKey: TokenKey.cloudFolderBookmark)
+        }
+        if mode == "missing" {
+            // 书签先建后删目标：复现真机「目标被删/挪走」的失效入口（探针 §5 解析抛错）。
+            try? fm.removeItem(at: dir)
+        }
+    }
+
+    private static func fileArg(_ name: String, in args: [String]) -> URL? {
+        guard let i = args.firstIndex(of: name), i + 1 < args.count else { return nil }
+        return URL(fileURLWithPath: args[i + 1])
+    }
+
+    private static func stringArg(_ name: String, in args: [String]) -> String? {
+        guard let i = args.firstIndex(of: name), i + 1 < args.count else { return nil }
+        return args[i + 1]
     }
 }
 

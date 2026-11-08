@@ -34,6 +34,9 @@ final class SyncEngine: ObservableObject {
     @Published private(set) var deviceFlow: DeviceFlowPresentation?
     @Published private(set) var isSyncing = false
     @Published private(set) var selectedBackend: SyncBackendKind
+    // 后端 B（#53）：云端冲突副本列表（双通道枚举）与枚举错误码；连接/副本方法在同文件下方。
+    @Published private(set) var cloudCopies: [CloudConflictEnumerator.Copy] = []
+    @Published private(set) var cloudCopiesError: String?
     private var state = SyncPersistedState(baseline: nil)
     private var roundTask: Task<Void, Never>?
     private var foregroundObserver: NSObjectProtocol?
@@ -45,6 +48,9 @@ final class SyncEngine: ObservableObject {
         static let clientID = "sync.github.client-id"
         static let owner = "sync.github.owner"
         static let repo = "sync.github.repo"
+        // 后端 B（#53）：目标展示名与范围（非敏感；书签本体在 Keychain）。
+        static let cloudName = "sync.cloud.name"
+        static let cloudScope = "sync.cloud.scope"
     }
 
     var backendSelection: SyncBackendKind {
@@ -52,11 +58,14 @@ final class SyncEngine: ObservableObject {
         set { selectBackend(newValue) }
     }
 
-    // 后端切换：任一时刻只激活一个（§2.2）；后端 B（#53）实现后接入同一引擎。
+    // 后端切换：任一时刻只激活一个（§2.2）；同时换基线体系——A 的 blob sha 与 B 的
+    // 身份+修改时间不可互比，保留旧基线会让首轮误判。清空后按 D13「无基线」重新加入。
     func selectBackend(_ kind: SyncBackendKind) {
         guard kind != selectedBackend else { return }
         selectedBackend = kind
         defaults.set(kind.rawValue, forKey: ConfigKey.backend)
+        state.baseline = nil
+        saveState()
         objectWillChange.send()
     }
 
@@ -79,9 +88,15 @@ final class SyncEngine: ObservableObject {
         !clientID.isEmpty && !repoOwner.isEmpty && !repoName.isEmpty
     }
 
-    // 连接态：凭据在 Keychain 且配置齐全。撤销/刷新失败后凭据被清，自动回到未连接。
+    // 连接态：按当前后端判定。A=配置齐全且凭据在 Keychain；B=书签已持久化
+    //（书签是否可解析由每轮同步实际验证，失效如实报错并引导重选）。
     var isConnected: Bool {
-        backendSelection == .github && isGitHubConfigured && authService.hasToken
+        switch backendSelection {
+        case .github:
+            return isGitHubConfigured && authService.hasToken
+        case .cloudFolder:
+            return cloudBookmarkData != nil
+        }
     }
 
     // MARK: 初始化（全部依赖可注入；绝不触真实用户目录/真实 Keychain 之外的路径由调用方保证）
@@ -123,8 +138,10 @@ final class SyncEngine: ObservableObject {
         return dir.appendingPathComponent("zakki-sync-state.json", isDirectory: false)
     }
 
-    // App 装配入口：生产接真实 GitHub；-ZakkiSyncStub 启动参数下接进程内 stub
+    // App 装配入口：生产接真实 GitHub/云盘；-ZakkiSyncStub 启动参数下接进程内 stub
     //（内存凭据 + 注入传输 + 独立 suite），端到端实测不碰真实网络与真实 Keychain。
+    // -ZakkiCloudGrant <path>（仅 stub 模式生效）：预授权文件夹/文件，供模拟器端到端
+    // 实测后端 B——真实授权走文件选择器（跨进程 picker 无法自动化，探针 §4）。
     static func forLaunch() -> SyncEngine {
         guard SyncStubMode.isActive else { return SyncEngine() }
         let defaults = UserDefaults(suiteName: SyncStubMode.defaultsSuite) ?? .standard
@@ -138,8 +155,15 @@ final class SyncEngine: ObservableObject {
         try? FileManager.default.removeItem(at: defaultStateURL)
         let conflictsDir = ConflictArchiveStore.directory(forZakkiURL: NotesModel.defaultSandboxURL)
         try? FileManager.default.removeItem(at: conflictsDir)
+        // stub suite 跨启动持久化：后端选择固定重置为 A，云盘场景由 -ZakkiCloudGrant
+        // 种子覆盖（否则上轮云盘 UI 测试的选择会泄漏进 GitHub 场景）。
+        defaults.set(SyncBackendKind.github.rawValue, forKey: "sync.backend")
+        let tokens = InMemoryTokenStore()
+        // 后端 B 预授权（stub 专用）：App 容器内临时目录建书签，机制与真实 provider
+        // 一致（书签/会话/读写），模拟器无 iCloud 登录也不碰真实 iCloud（探针 §1）。
+        SyncStubCloudSeed.apply(defaults: defaults, tokens: tokens)
         return SyncEngine(
-            tokens: InMemoryTokenStore(),
+            tokens: tokens,
             transport: URLSessionTransport(session: SyncStubMode.stubbedSession()),
             defaults: defaults,
             githubBase: SyncStubMode.githubBase,
@@ -264,10 +288,11 @@ final class SyncEngine: ObservableObject {
             return
         }
         if keepLocal {
-            // 远端落选：完整留档远端内容后上传本地（CAS 以候选里的版本号为基准）。
+            // 远端落选：完整留档远端内容后上传本地（CAS 以主文件当前版本为基准；
+            // 后端 B 采用副本候选时同样是主文件版本，不是副本自身的版本号）。
             guard archiveLoser(candidate.remoteContent) else { return }
             do {
-                let newVersion = try await backend.pushMain(content: localRaw, expectedVersion: candidate.remoteVersion)
+                let newVersion = try await backend.pushMain(content: localRaw, expectedVersion: candidate.casBaseVersion)
                 state.baseline = SyncBaseline(backendKind: backend.kind.rawValue,
                                               contentSHA256: SyncHash.sha256Hex(localRaw),
                                               remoteVersion: newVersion)
@@ -282,10 +307,26 @@ final class SyncEngine: ObservableObject {
         } else {
             // 本地落选：完整留档本地内容，再安装远端（active 随远端字节原样往返）。
             guard archiveLoser(localRaw) else { return }
-            installRemote(kind: backend.kind, content: candidate.remoteContent, version: candidate.remoteVersion)
-            publish(.adoptedRemote)
+            var adoptedVersion = candidate.casBaseVersion ?? candidate.remoteVersion
+            do {
+                if candidate.remoteVersion != candidate.casBaseVersion {
+                    // 后端 B 副本候选：候选内容尚不在主文件里，先写回主文件再安装本地
+                    //（后端 A 的候选即主文件内容，版本号相等，跳过这次无意义写回）。
+                    // 若写回 CAS 失败：本地留档已保留、基线未动，下一轮重新判定。
+                    adoptedVersion = try await backend.pushMain(
+                        content: candidate.remoteContent, expectedVersion: candidate.casBaseVersion)
+                }
+                installRemote(kind: backend.kind, content: candidate.remoteContent, version: adoptedVersion)
+                publish(.adoptedRemote)
+            } catch SyncError.casConflict {
+                publish(.failed("cas-contention"))
+            } catch {
+                publish(.failed(Self.errorCode(error)))
+            }
         }
         await uploadPendingArchives(backend: backend)
+        // 后端 B：裁决后尽力清除 NSFileVersion 冲突标记并刷新副本列表。
+        await finishCloudConflictResolution()
     }
 
     // 用户取消对话框：本轮以冲突待决收场，下次前台同步重新判定再弹（远端可能已变）。
@@ -324,6 +365,10 @@ final class SyncEngine: ObservableObject {
             } catch SyncError.casConflict {
                 // 同名文件已存在于远端（秒级碰撞/前轮已传成功但确认丢失）：
                 // 视作已保存，不无限重试。
+                confirmed.append(name)
+            } catch SyncError.archiveNotSupported {
+                // 后端 B 仅文件授权：写不进同目录 conflicts/。留档已完整保存在设备
+                // 本地 conflicts/（设置页可查），不再重试上传。
                 confirmed.append(name)
             } catch {
                 break // 保持 pending，下一轮随同步重试
@@ -406,10 +451,142 @@ final class SyncEngine: ObservableObject {
         deviceFlow = nil
     }
 
-    // 断开连接：清 Keychain 凭据（配置保留，便于重连）。
+    // 断开连接：按当前后端分发——A 清 Keychain 凭据（配置保留，便于重连）；
+    // B 清书签与目标信息（书签失效后无复用价值，重新走选择流程）。
     func disconnect() {
-        authService.disconnect()
+        switch selectedBackend {
+        case .github:
+            authService.disconnect()
+        case .cloudFolder:
+            disconnectCloudFolder()
+        }
         objectWillChange.send()
+    }
+
+    // MARK: 后端 B（云盘文件夹）接入：授权生命周期 + 副本候选接入对话框
+
+    // 书签数据：Keychain（TokenKey.cloudFolderBookmark，base64，不含敏感数据，R7）。
+    var cloudBookmarkData: Data? {
+        guard let b64 = tokens.token(forKey: TokenKey.cloudFolderBookmark), !b64.isEmpty else { return nil }
+        return Data(base64Encoded: b64)
+    }
+
+    var cloudTargetName: String {
+        defaults.string(forKey: ConfigKey.cloudName) ?? ""
+    }
+
+    var cloudScope: CloudGrantScope {
+        CloudGrantScope(rawValue: defaults.string(forKey: ConfigKey.cloudScope) ?? "") ?? .folder
+    }
+
+    var isCloudFolderConnected: Bool {
+        selectedBackend == .cloudFolder && cloudBookmarkData != nil
+    }
+
+    // 文件选择器授权后建立连接：picker 返回的是安全作用域 URL，按探针端到端顺序——
+    // 先 startAccessing 再建书签（真机 provider 下书签创建依赖访问会话），建完立即解析
+    // 验证（失效尽早暴露）→ 持久化。换位置即换文件身份：清空基线，按 D13「无基线」重新
+    // 加入；副本列表随之作废。
+    func connectCloudFolder(at pickedURL: URL) async -> Bool {
+        // 生产顺序是先在设置页选后端再选位置；stub 预授权与直连路径可能跳过选择，
+        // 统一在此确保后端 B 激活（任一时刻只激活一个，§2.2）。
+        if selectedBackend != .cloudFolder {
+            selectBackend(.cloudFolder)
+        }
+        do {
+            var granted = CloudFolderAccess(
+                rootURL: pickedURL,
+                scope: pickedURL.hasDirectoryPath ? .folder : .file)
+            try granted.startAccessing()
+            defer { granted.stopAccessing() }
+            let bookmark = try CloudFolderAccess.makeBookmarkData(for: pickedURL)
+            _ = try CloudFolderAccess.resolve(bookmarkData: bookmark)
+            tokens.setToken(bookmark.base64EncodedString(), forKey: TokenKey.cloudFolderBookmark)
+            defaults.set(pickedURL.lastPathComponent, forKey: ConfigKey.cloudName)
+            defaults.set(pickedURL.hasDirectoryPath ? CloudGrantScope.folder.rawValue : CloudGrantScope.file.rawValue,
+                         forKey: ConfigKey.cloudScope)
+            state.baseline = nil
+            saveState()
+            cloudCopies = []
+            cloudCopiesError = nil
+            publish(.idle)
+            objectWillChange.send()
+            await refreshCloudCopies()
+            return true
+        } catch let error as CloudFolderError {
+            publish(.failed(Self.errorCode(CloudFolderBackend.map(error))))
+            return false
+        } catch {
+            publish(.failed("bookmark-create"))
+            return false
+        }
+    }
+
+    // 断开后端 B：清书签与目标信息（授权失效后无复用价值）。
+    private func disconnectCloudFolder() {
+        tokens.setToken(nil, forKey: TokenKey.cloudFolderBookmark)
+        defaults.removeObject(forKey: ConfigKey.cloudName)
+        defaults.removeObject(forKey: ConfigKey.cloudScope)
+        cloudCopies = []
+        cloudCopiesError = nil
+        state.baseline = nil
+        saveState()
+        publish(.notConnected)
+    }
+
+    // 云端冲突副本双通道枚举（命名扫描 + NSFileVersion）：设置页列表数据源；
+    // 连接后与每轮同步后的 UI 时机调用。失败不清空旧列表，如实报码。
+    func refreshCloudCopies() async {
+        guard selectedBackend == .cloudFolder, let bookmark = cloudBookmarkData else {
+            cloudCopies = []
+            cloudCopiesError = nil
+            return
+        }
+        switch await CloudConflictEnumerator.enumerate(bookmarkData: bookmark) {
+        case .success(let copies):
+            cloudCopies = copies.sorted { $0.modifiedAtMs > $1.modifiedAtMs }
+            cloudCopiesError = nil
+        case .failure(let error):
+            cloudCopiesError = Self.errorCode(error)
+        }
+        objectWillChange.send()
+    }
+
+    // 把副本作为远端候选送进与后端 A 相同的 D13 对话框：casBaseVersion 取主文件
+    // 当前版本（落盘目标是主文件；副本枚举与同步轮之间主文件可能已被其他设备写过）。
+    func adoptCloudCopy(_ copy: CloudConflictEnumerator.Copy) async {
+        guard let model else { return }
+        guard selectedBackend == .cloudFolder, let bookmark = cloudBookmarkData else {
+            publish(.notConnected)
+            return
+        }
+        guard !isSyncing else { return }
+        isSyncing = true
+        defer { isSyncing = false }
+        model.flushPendingSave()
+        guard model.snapshot?.writable == true, let localRaw = model.raw else {
+            publish(.blockedWriteProtected)
+            return
+        }
+        do {
+            let remote = try await CloudFolderBackend(bookmarkData: bookmark).pullMain()
+            pendingConflict = ConflictCandidate(
+                remoteContent: copy.content,
+                remoteVersion: copy.version,
+                localRaw: localRaw,
+                casBaseVersion: remote.exists ? remote.version : nil)
+            publish(.conflictPending)
+        } catch {
+            publish(.failed(Self.errorCode(error)))
+        }
+    }
+
+    // 后端 B 冲突裁决收尾：尽力清除 NSFileVersion 冲突标记（保留版本文件；失败静默，
+    // 残留条目会在下次枚举如实再现）并刷新副本列表。后端 A 直接空转返回。
+    private func finishCloudConflictResolution() async {
+        guard selectedBackend == .cloudFolder, let bookmark = cloudBookmarkData else { return }
+        CloudConflictEnumerator.resolveVersionMarkers(bookmarkData: bookmark)
+        await refreshCloudCopies()
     }
 
     // 留档 pending 徽标的数据源（设置页；不暴露可变内部状态）。
@@ -438,12 +615,18 @@ final class SyncEngine: ObservableObject {
 
     private func makeBackend() -> SyncBackend? {
         if let testBackend { return testBackend }
-        guard isGitHubConfigured else { return nil }
-        return GitHubContentsBackend(
-            transport: transport, auth: authService,
-            apiBase: apiBase,
-            owner: { [weak self] in self?.repoOwner },
-            repo: { [weak self] in self?.repoName })
+        switch selectedBackend {
+        case .github:
+            guard isGitHubConfigured else { return nil }
+            return GitHubContentsBackend(
+                transport: transport, auth: authService,
+                apiBase: apiBase,
+                owner: { [weak self] in self?.repoOwner },
+                repo: { [weak self] in self?.repoName })
+        case .cloudFolder:
+            guard let bookmark = cloudBookmarkData else { return nil }
+            return CloudFolderBackend(bookmarkData: bookmark)
+        }
     }
 
     private func publish(_ outcome: SyncOutcome) {
@@ -477,6 +660,9 @@ final class SyncEngine: ObservableObject {
         case .notConfigured: return "not-configured"
         case .api(let code): return code
         case .deviceFlow(let code): return code
+        case .bookmarkInvalid: return "bookmark-invalid"
+        case .accessDenied: return "access-denied"
+        case .archiveNotSupported: return "archive-local-only"
         case nil: return String(describing: error)
         }
     }
