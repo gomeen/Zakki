@@ -85,6 +85,9 @@ struct SettingsView: View {
                 }
             }
         }
+        // Form 内默认 borderless 按钮样式会把整个标签染成 accent 色（蓝色链接观感）；
+        // plain 保持内容原色，选中态由勾号表达。
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder

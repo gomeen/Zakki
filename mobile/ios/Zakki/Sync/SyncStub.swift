@@ -33,8 +33,10 @@ enum SyncStubCloudSeed {
     // missing（建书签后删目标：启动即处于「书签在、位置没了」状态）。
     static func apply(defaults: UserDefaults, tokens: TokenStoring) {
         let args = ProcessInfo.processInfo.arguments
-        guard let i = args.firstIndex(of: SyncStubMode.cloudGrantArg), i + 1 < args.count else { return }
-        let mode = args[i + 1]
+        // 真实 picker 端到端不走本参数：本 App 沙盒 Documents 未暴露给文件
+        // App（不带 LSSupportsOpeningDocumentsInPlace，避免同步目标被外部改写的新故障面），
+        // picker 测试授权 D21 探针遗留的可见容器（见 CloudFolderFlowUITests 场景四）。
+        guard let mode = Self.stringArg(SyncStubMode.cloudGrantArg, in: args) else { return }
         let fm = FileManager.default
         let dir = fm.temporaryDirectory.appendingPathComponent("zakki-cloud-stub", isDirectory: true)
         // 每次启动重放种子：端到端脚本从确定状态开始。
@@ -59,17 +61,16 @@ enum SyncStubCloudSeed {
             // 书签先建后删目标：复现真机「目标被删/挪走」的失效入口（探针 §5 解析抛错）。
             try? fm.removeItem(at: dir)
         }
-        // 真实 picker 端到端：Documents 根放 demo json（picker「我的 iPhone」可直接看到，
-        // 不进子目录——iOS 26.5 模拟器子目录返回导航不可自动化，探针 §4）。
-        if let demo = Self.fileArg("-ZakkiCloudDemoSeed", in: args) {
-            let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            try? Data(contentsOf: demo).write(to: docs.appendingPathComponent("demo-zakki.json", isDirectory: false))
-        }
     }
 
     private static func fileArg(_ name: String, in args: [String]) -> URL? {
         guard let i = args.firstIndex(of: name), i + 1 < args.count else { return nil }
         return URL(fileURLWithPath: args[i + 1])
+    }
+
+    private static func stringArg(_ name: String, in args: [String]) -> String? {
+        guard let i = args.firstIndex(of: name), i + 1 < args.count else { return nil }
+        return args[i + 1]
     }
 }
 

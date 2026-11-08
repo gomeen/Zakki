@@ -155,6 +155,9 @@ final class SyncEngine: ObservableObject {
         try? FileManager.default.removeItem(at: defaultStateURL)
         let conflictsDir = ConflictArchiveStore.directory(forZakkiURL: NotesModel.defaultSandboxURL)
         try? FileManager.default.removeItem(at: conflictsDir)
+        // stub suite 跨启动持久化：后端选择固定重置为 A，云盘场景由 -ZakkiCloudGrant
+        // 种子覆盖（否则上轮云盘 UI 测试的选择会泄漏进 GitHub 场景）。
+        defaults.set(SyncBackendKind.github.rawValue, forKey: "sync.backend")
         let tokens = InMemoryTokenStore()
         // 后端 B 预授权（stub 专用）：App 容器内临时目录建书签，机制与真实 provider
         // 一致（书签/会话/读写），模拟器无 iCloud 登录也不碰真实 iCloud（探针 §1）。
