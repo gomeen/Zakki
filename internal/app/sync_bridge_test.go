@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
 	"zakki/internal/notes"
@@ -143,6 +144,76 @@ func awaitFor(t *testing.T, cond func() bool) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("等待超时")
+}
+
+// TestSyncRefreshReachesPumpAfterWindowCreation 锁定 #60：偏好预置开启
+// 同步的冷启动里 configureSync（建窗之前）接好回调，窗口创建后回调必须
+// 可达——旧实现在配置时捕获窗口指针，冷启动捕获到 nil，重载、toast 与
+// 冲突对话框全部静默丢失，直到下次偏好变更。
+func TestSyncRefreshReachesPumpAfterWindowCreation(t *testing.T) {
+	a := newTestApp(t)
+	t.Cleanup(a.shutdown)
+	// 投递注入：记录（窗口，回调）但不执行，由测试在测试 goroutine 上
+	// 消化，无窗口环境下确定性验证完整投递链。
+	var delivered []func()
+	var deliveredWin *mygo.Window
+	old := syncDeliver
+	syncDeliver = func(win *mygo.Window, fn func()) {
+		deliveredWin = win
+		delivered = append(delivered, fn)
+	}
+	t.Cleanup(func() { syncDeliver = old })
+
+	// 冷启动顺序：configureSync 先于建窗执行（与真实启动一致）。
+	be := &fakeSyncBackend2{existed: true, version: "r1", remote: encodeFileForTest(t, syncDoc("基线"))}
+	enableSyncPrefs(t, a)
+	attachFakeBackend(t, a, be)
+	if err := a.notes.SaveNow(syncDoc("基线")); err != nil {
+		t.Fatal(err)
+	}
+	a.notes.SyncNow()
+	waitSyncIdleFor(t, a)
+	if st := a.notes.SyncStateSnapshot(); st.Error != "" {
+		t.Fatalf("基线建立失败: %+v", st)
+	}
+	// 建窗前回调无投递目标：静默等窗是设计行为，状态仍挂在 syncHold。
+	if deliveredWin != nil {
+		t.Fatal("建窗前不应有投递目标")
+	}
+	// 模拟建窗（主窗口）：同一回调链在建窗后必须可达。
+	mainWin := &mygo.Window{}
+	a.mainWindow.Store(mainWin)
+	t.Cleanup(func() { a.mainWindow.CompareAndSwap(mainWin, nil) })
+	be.mu.Lock()
+	be.remote, be.version = encodeFileForTest(t, syncDoc("远端新内容")), "r2"
+	be.mu.Unlock()
+	a.notes.SyncNow()
+	waitSyncIdleFor(t, a)
+	if !a.notes.SyncNeedsReload() {
+		t.Fatal("采用远端后应请求重载")
+	}
+	if deliveredWin != mainWin || len(delivered) == 0 {
+		t.Fatal("建窗前的同步回调在建窗后应可达（#60）")
+	}
+	// 消化回调：重载远端内容并解除冻结。
+	delivered[len(delivered)-1]()
+	if a.notes.SyncNeedsReload() {
+		t.Fatal("回调消化后应解除冻结")
+	}
+	if got := a.tabs[0].Text; got != "远端新内容" {
+		t.Fatalf("界面应载入远端内容: %q", got)
+	}
+
+	// 主窗口未开时回退设置窗（托盘驻留 + 设置窗独开的场景）。
+	a.mainWindow.CompareAndSwap(mainWin, nil)
+	settingsWin := &mygo.Window{}
+	a.settingsWindow.Store(settingsWin)
+	t.Cleanup(func() { a.settingsWindow.CompareAndSwap(settingsWin, nil) })
+	a.notes.SyncNow()
+	waitSyncIdleFor(t, a)
+	if deliveredWin != settingsWin {
+		t.Fatal("主窗口未开时回调应经设置窗投递")
+	}
 }
 
 func TestSyncSectionRendersAndValidates(t *testing.T) {
