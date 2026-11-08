@@ -124,6 +124,32 @@ Windows 的对应目录为 `%APPDATA%\Zakki\`，与默认程序安装目录 `%LO
 | Git·自动推送 | 依赖自动提交；推送的是分支历史（可能带上其他提交），建议使用独立笔记仓库，默认关，最小间隔 1 分钟 |
 | Git 状态行 | 仓库根、最近提交/推送时间与最近失败原因；需系统装有 git，macOS 未装命令行工具时静默跳过。应用不提供 `git init`，也不做 pull/rebase/force push |
 
+文件夹位于 git 仓库内时可开启自动提交/推送做备份；云同步是独立的多设备同步通道：
+
+#### 云同步
+
+开启云同步后桌面与移动端经同一后端同步 `zakki.json`；任一时刻只激活一个后端，当前提供
+后端 A：GitHub Contents API（blob sha CAS）。每轮先拉取远端内容与版本号，处理本地待保存
+与冲突，再以最新版本号提交（CAS）；提交被拒（远端已被其他设备更新）则重新拉取重判，
+不盲重试旧版本号。同步前后的本地落盘与上传串行；前台聚焦、应用启动与保存成功后（防抖
+10 秒）自动拉推，也可手动「立即同步」。
+
+| 设置/操作 | 说明 |
+|---|---|
+| 云同步 | 开启时要求后端与仓库合法；开启期间 `Git·自动提交` / `Git·自动推送` 两个旧备份调度器暂停（页内显示暂停说明横幅），用户原开关原样保留在偏好里，关闭云同步后自动恢复；云同步开关不改写 Git 开关的值 |
+| 仓库 | GitHub 仓库 `owner/name`；非法取值就地提示，不落盘 |
+| 连接 GitHub… | Device Flow 授权（GitHub App user token）：弹层展示用户码与授权页地址，授权完成后 token 存系统安全存储（macOS 钥匙串 / Windows DPAPI 用户级加密），绝不写入 `zakki.json`、偏好文件、日志或 Git；断开连接即删除凭据。连接需先注册 GitHub App 并设置环境变量 `ZAKKI_GITHUB_CLIENT_ID`（Client ID 非凭据）；自测/联调可另用 `ZAKKI_GITHUB_BASE_URL` 指向本地假服务（仅环境变量注入，无设置入口，不进偏好） |
+| 立即同步 | 立即拉推一轮；同步中按钮禁用，运行中会排队合并 |
+| 同步状态行 | 当前后端与仓库、最近同步时间、运行中、连接状态与最近错误（授权失败、速率限制、写保护挂起等如实展示） |
+| 冲突 | 本机与远端都相对基线变化且内容不同时，弹原生对话框二选一（保留本机 / 保留远端 / 取消）；落选版本完整写入与 `zakki.json` 同目录的 `conflicts/zakki-YYYYMMDD-HHmmss-<设备名>.json`，不进标签、不参与提醒调度、不占标签上限，也不会自动清理；取消后可从设置页冲突区再次二选一 |
+| 冲突留档 | 设置页列出 conflicts/ 下的留档（名称、大小、时间），可逐条删除 |
+
+基线是设备本地的「上次同步成功」内容 sha256 与后端版本号，存应用数据目录的独立状态文件
+`sync-state.json`（不写进 `zakki.json`、偏好文件或 Git；旧 Git 备份只提交 `zakki.json`
+精确路径，`sync-state.json` 与 `conflicts/` 不会被收录，测试有断言）。远端文件只在磁盘
+校验通过时落盘；写保护（损坏 / 版本超前 / 外部改动）期间同步自动挂起并如实提示，绝不
+覆盖原文件。远端内容成功应用后界面立即重载并重排提醒。
+
 ### 首启初始化向导
 
 仅在**全新安装**（数据文件不存在）时出现，独立窗口（`StateKey: "onboarding-v2"`，640×560），
@@ -233,7 +259,7 @@ Windows 的对应目录为 `%APPDATA%\Zakki\`，与默认程序安装目录 `%LO
 
 ```json
 {
-  "version": 13,
+  "version": 14,
   "appearance": {
     "appearanceMode": "system",
     "language": "",
@@ -253,6 +279,7 @@ Windows 的对应目录为 `%APPDATA%\Zakki\`，与默认程序安装目录 `%LO
   "window": { "alwaysOnTop": false, "hideOnEscape": true, "rememberBounds": true },
   "storage": { "dataFile": "", "saveIntervalMs": 2000 },
   "git": { "autoCommit": false, "autoPush": false, "commitMinutes": 1, "pushMinutes": 10 },
+  "sync": { "enabled": false, "backend": "", "repo": "" },
   "keymap": { "overrides": { "format.bold": "CmdOrCtrl+Alt+U" } },
   "advanced": { "windowColumns": 22, "windowRows": 16 }
 }
@@ -294,5 +321,11 @@ Windows 的对应目录为 `%APPDATA%\Zakki\`，与默认程序安装目录 `%LO
 - 版本 13 新增 `appearance.padX` / `padY`（正文区左右 / 上下内边距覆盖，8–120，
   0 = 跟随排版主题）：旧文件从未写过这两个键，缺键解码即零值 = 跟随，无需迁移；
   同时修正实时预览内边距的上下 / 左右参数序，源码编辑区改用与预览同一套内边距。
+- 版本 14 新增 `sync` 节（云同步开关 `enabled`、后端 `backend`、仓库标识 `repo`，
+  全部为非凭据配置；token / refresh token 只存系统安全存储，绝不写入本节或偏好文件）。
+  旧文件缺键解码即零值（关闭），无需迁移；`enabled` 开启时要求 `backend` 为
+  `github` 且 `repo` 合法（owner/name）。开启期间桌面暂停 `git.autoCommit` /
+  `git.autoPush` 两个旧调度器（用户原开关原样保留），关闭后自动恢复。
+  同步协议与冲突判定见「保存与同步」页的云同步区域说明。
 - 版本 3 起 `backup` 记录外部备份目录；版本 6 起收敛为单一 `backupDir`——这些备份语义
   已随版本 12 移除，历史细节不再维护。

@@ -277,9 +277,12 @@ UI 区分「已排定」「待同步／待续排」「权限受限」，不将�
   mock 传输/Keychain）与模拟器端到端（进程内 GitHub stub：连接→拉推→远端变化→冲突→留档）覆盖
   （[#52](https://github.com/gomeen/Zakki/issues/52)，46 条新 XCTest，记录见
   [2026-11-08-m4-1-sync-verification](reports/2026-11-08-m4-1-sync-verification.md)）。
+- [x] M4（#54 桌面侧）：同步开启暂停两个旧 Git 调度器、关闭恢复、远端更新后能先拉取再提交；
+  §2.2 判定表的四种情况与 conflicts/ 留档文件生成可复现（mock 传输全量单测 + 隔离探针实测，
+  记录见 [2026-11-08-m4-3-desktop-sync-verification](reports/2026-11-08-m4-3-desktop-sync-verification.md)）。
 - [ ] M4：GitHub 蜂窝真机可达性、真实 GitHub App 账号 Device Flow 连接与真实 token 过期／撤销、
-  Keychain 真机安全保存（R7）；同步开启暂停两个旧 Git 调度器、关闭恢复、远端更新后先拉取再提交——
-  桌面侧随 #54 落地后联调复现。
+  Keychain 真机安全保存（R7）；桌面 ↔ iPhone 双向同步联调随总票 M4 出口复现。
+(docs: M4-3 桌面同步验证记录与架构/配置/规格勾选更新)
 - [ ] M4：iCloud 探针（后端 B 开工前置，D21）：Personal Team 下 iCloud capability 核对与
   文件选择器授权 + security-scoped bookmark 路线可用、iCloud Drive 占位文件能触发下载、
   冲突副本（`zakki (1).json`）枚举与 NSFileVersion 恢复可行；三项全部通过后端 B 才开工，
