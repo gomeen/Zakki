@@ -59,6 +59,19 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @loader_path/Frameworks"
+
+  ZakkiUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - ZakkiUITests
+    dependencies:
+      - target: Zakki
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Zakki
+
 schemes:
   Zakki:
     build:
@@ -72,3 +85,16 @@ schemes:
       gatherCoverageData: false
       targets:
         - ZakkiTests
+
+  # UI 端到端验证 scheme（本地/真机实测用，CI 只跑 Zakki 主 scheme 单元测试）。
+  ZakkiUI:
+    build:
+      targets:
+        Zakki: all
+        ZakkiUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - ZakkiUITests
