@@ -2,8 +2,10 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var model: NotesModel
+    @EnvironmentObject private var sync: SyncEngine
     @State private var showingPicker = false
     @State private var showingShare = false
+    @State private var showingSettings = false
     // 重排模式：List 进编辑态只为拖拽排序（onMove）；导航与左滑操作在非编辑态。
     @State private var reordering = false
     // 换色面板与重命名弹窗的目标标签。
@@ -72,9 +74,23 @@ struct ContentView: View {
                 } message: {
                     Text(model.importError ?? "")
                 }
+                // 冲突对话框改由外层 ConflictAlertModifier 承接：与设置 sheet 同点挂载
+                // 会让 alert 挤掉 sheet（SwiftUI 同节点多 presentation 竞争），见 SyncViews。
+                // 冲突出现时收起设置 sheet：冲突卡片挂在主窗口外层，sheet 不收起会盖在卡片上。
+                .onChange(of: sync.pendingConflict) { _, conflict in
+                    if conflict != nil {
+                        showingSettings = false
+                    }
+                }
+                .sheet(isPresented: $showingSettings) {
+                    NavigationStack { SettingsView() }
+                }
                 // 调度引擎接入：打开时对账重排（规格 §3.3 主循环入口）。
+                // 同步引擎接入：回前台拉推；应用远端后复用对账管线（§2.2 串联点）。
                 .onAppear {
                     ReminderScheduler.shared.attach(model: model)
+                    sync.attach(model: model)
+                    sync.onRemoteAdopted = { ReminderScheduler.shared.reconcile() }
                 }
         }
     }
@@ -93,6 +109,9 @@ struct ContentView: View {
                     }
                 }
                 Divider()
+                Button(Strings.settings) {
+                    showingSettings = true
+                }
                 Button(Strings.importButton) {
                     showingPicker = true
                 }

@@ -4,6 +4,8 @@ import SwiftUI
 struct ZakkiApp: App {
     // NotesModel.init 内同步完成启动加载/启动参数导入，首帧前状态就绪。
     @StateObject private var model = NotesModel()
+    // 同步引擎（M4）：stub 模式（-ZakkiSyncStub）下接进程内 GitHub stub。
+    @StateObject private var sync = SyncEngine.forLaunch()
 
     init() {
         // DEBUG 诊断：未捕获 NSException 的名字/原因/调用栈进统一日志（崩溃报告缺
@@ -22,6 +24,9 @@ struct ZakkiApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(model)
+                .environmentObject(sync)
+                // 冲突对话框宿主：外层挂载，避免与设置 sheet 的 presentation 竞争。
+                .modifier(ConflictAlertModifier(sync: sync))
         }
     }
 }

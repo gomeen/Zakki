@@ -227,7 +227,109 @@ enum Strings {
     static var statusNeedsRenewal: String { t("More pending — open app to continue", "有提醒待续排，打开应用继续") }
     static var statusLimited: String { t("Notifications denied", "通知权限受限") }
     static var renewalNoticeBody: String {
-        t("More reminders are waiting. Open Zakki to schedule them.",
+        t("More reminders are waiting. Open Zakki to continue scheduling.",
           "还有提醒未排入系统，打开 Zakki 继续排定。")
+    }
+
+    // MARK: M4 同步（设置节，用语对齐规格 §2.2）
+
+    static var settingsTitle: String { t("Settings", "设置") }
+    static var settings: String { t("Settings", "设置") }
+    static var syncBackendSection: String { t("Sync Backend", "同步后端") }
+    static var syncBackendGitHub: String { t("GitHub", "GitHub") }
+    static var syncBackendCloudFolder: String { t("Cloud Folder", "云盘文件夹") }
+    static var syncBackendCloudFolderHint: String { t("Coming later", "后续版本提供") }
+    static var syncGitHubSection: String { t("GitHub Repository", "GitHub 仓库") }
+
+    static var syncFieldClientID: String { t("GitHub App Client ID", "GitHub App Client ID") }
+    static var syncFieldOwner: String { t("Repository Owner", "仓库所有者") }
+    static var syncFieldRepo: String { t("Repository Name", "仓库名") }
+
+    static var syncConnect: String { t("Connect GitHub", "连接 GitHub") }
+    static var syncDisconnect: String { t("Disconnect", "断开连接") }
+    static var syncStateConnected: String { t("Connected", "已连接") }
+    static var syncSyncNow: String { t("Sync Now", "立即同步") }
+    static var syncSyncing: String { t("Syncing…", "同步中…") }
+    static var syncLastSync: String { t("Last Sync", "上次同步") }
+
+    static var syncConfigIncomplete: String {
+        t("A GitHub App is required: register one, grant it access to the repository, then enter its Client ID here.",
+          "需要一个 GitHub App：注册后将其安装授权到目标仓库，再填入 Client ID。")
+    }
+
+    static var syncHelperText: String {
+        t("Notes sync as zakki.json in the repository. Tokens are stored only in the Keychain.",
+          "笔记以仓库中的 zakki.json 同步。令牌仅保存在钥匙串中。")
+    }
+
+    // 每轮同步结果文案（错误为码 + 括号，与引擎错误码一致）。
+    static func syncOutcomeText(_ outcome: SyncOutcome?) -> String {
+        switch outcome {
+        case nil, .idle:
+            return t("Up to date", "已是最新")
+        case .adoptedRemote:
+            return t("Applied remote content", "已采用远端内容")
+        case .pushedLocal:
+            return t("Uploaded local content", "已上传本地内容")
+        case .baselineUpdated:
+            return t("Contents identical, baseline updated", "内容一致，已更新基线")
+        case .conflictPending:
+            return t("Conflict detected — choose a version", "检测到冲突，待选择版本")
+        case .blockedWriteProtected:
+            return t("File is write-protected, sync paused", "文件为写保护，同步已暂停")
+        case .notConnected:
+            return t("Not connected", "未连接")
+        case .failed(let code):
+            return t("Failed (\(code))", "同步失败（\(code)）")
+        }
+    }
+
+    // 冲突对话框（D13：保留本机或保留远端）。
+    static var syncConflictTitle: String { t("Sync Conflict", "同步冲突") }
+    static var syncConflictMessage: String {
+        t("This device and the remote both changed and differ. Keep one version; the other is archived intact under conflicts/.",
+          "本机与远端都已修改且内容不同，请选择保留哪个版本；落选版本会完整留档到 conflicts/。")
+    }
+    static var syncConflictKeepLocal: String { t("Keep This Device", "保留本机") }
+    static var syncConflictKeepRemote: String { t("Keep Remote", "保留远端") }
+    static var syncConflictLater: String { t("Decide Later", "稍后处理") }
+
+    // Device Flow 弹层。
+    static var deviceFlowUserCodeHint: String {
+        t("Open github.com/login/device and enter this code", "打开 github.com/login/device 并输入以下代码")
+    }
+    static var deviceFlowOpen: String { t("Open Authorization Page", "打开授权页面") }
+    static var deviceFlowWaiting: String { t("Waiting for authorization…", "等待授权…") }
+    static var deviceFlowConnected: String { t("Connected to GitHub", "已连接 GitHub") }
+    static var deviceFlowDone: String { t("Done", "完成") }
+    static func deviceFlowFailed(_ code: String) -> String {
+        t("Connection failed (\(code))", "连接失败（\(code)）")
+    }
+    static var deviceFlowCancel: String { t("Close", "关闭") }
+
+    // 冲突留档管理（D13：可查看、可删除、不自动清理）。
+    static var archiveSectionTitle: String { t("Conflict Archives", "冲突留档") }
+    static var archiveEmpty: String { t("No conflict archives", "暂无冲突留档") }
+    static func archiveOpen(count: Int) -> String {
+        t("View Archives (\(count))", "查看留档（\(count)）")
+    }
+    static var archiveDelete: String { t("Delete", "删除") }
+    static var archivePendingBadge: String { t("Pending Upload", "待上传") }
+    static var archiveViewerTitle: String { t("Archive Content", "留档内容") }
+
+    static func archiveEntryDate(_ entry: ConflictArchiveEntry) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f.string(from: Date(timeIntervalSince1970: TimeInterval(entry.createdAtMs) / 1000))
+    }
+
+    // 留档行副行：落档时刻 + 来源设备（文件名为主行，可追溯）。
+    static func archiveEntryDetail(_ entry: ConflictArchiveEntry) -> String {
+        if entry.deviceName.isEmpty {
+            return archiveEntryDate(entry)
+        }
+        return t("\(archiveEntryDate(entry)) · from \(entry.deviceName)",
+                 "\(archiveEntryDate(entry)) · 来自 \(entry.deviceName)")
     }
 }
