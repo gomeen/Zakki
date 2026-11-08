@@ -5,6 +5,7 @@
 
 | 报告 | 说明 |
 |---|---|
+| [2026-11-08-icloud-sync-probe.md](2026-11-08-icloud-sync-probe.md) | M4-2 门禁探针：文件选择器路线免 entitlement 验证可行，占位/冲突真机项与 runbook |
 | [2026-10-29-m2-editor-verification.md](2026-10-29-m2-editor-verification.md) | 移动端 M2 编辑器：子票 PR 对照、两次数据丢失级回归、126 条 XCTest 与性能预算 |
 | [2026-10-28-m1-scaffold-verification.md](2026-10-28-m1-scaffold-verification.md) | 移动端 M1 iOS 脚手架：工程结构、导入管道与模拟器实测 |
 | [2026-10-28-review-remediation-verification.md](2026-10-28-review-remediation-verification.md) | 评审整改的实现范围、自动化验证与原生复测结果 |
