@@ -272,9 +272,14 @@ UI 区分「已排定」「待同步／待续排」「权限受限」，不将�
 - [ ] M3：profile 过期检测与提示；同 bundle 覆盖重签、覆盖安装、卸载重装分别测数据／授权／pending
   行为，不预设「重签一定清零」；演练免费账号 7 天流程及 App ID／每设备 App 配额（D19、R5）。
 - [ ] M3／桌面：睡眠、唤醒、手动改时、时区改变、连续编辑跨触发点；首次启动不补发与会话宽限（R1，iOS 侧对账管线与只排未来触发已实现，真机矩阵待验）。
-- [ ] M4：GitHub 蜂窝真机可达性、CAS 冲突、token 过期／刷新／撤销、Keychain／Keystore 安全保存；
-  同步开启暂停两个旧 Git 调度器，关闭恢复，远端更新后能先拉取再提交；§2.2 判定表的四种情况
-  与 conflicts/ 留档文件生成可复现。
+- [x] M4：§2.2 判定表四种情况、conflicts/ 留档文件生成、CAS 冲突（409/422 拒绝后重拉重判定，
+  不盲重试旧 sha）、token 过期／刷新／撤销路径、Keychain 存取（mock）——iOS XCTest（注入时钟 +
+  mock 传输/Keychain）与模拟器端到端（进程内 GitHub stub：连接→拉推→远端变化→冲突→留档）覆盖
+  （[#52](https://github.com/gomeen/Zakki/issues/52)，46 条新 XCTest，记录见
+  [2026-11-08-m4-1-sync-verification](reports/2026-11-08-m4-1-sync-verification.md)）。
+- [ ] M4：GitHub 蜂窝真机可达性、真实 GitHub App 账号 Device Flow 连接与真实 token 过期／撤销、
+  Keychain 真机安全保存（R7）；同步开启暂停两个旧 Git 调度器、关闭恢复、远端更新后先拉取再提交——
+  桌面侧随 #54 落地后联调复现。
 - [ ] M4：iCloud 探针（后端 B 开工前置，D21）：Personal Team 下 iCloud capability 核对与
   文件选择器授权 + security-scoped bookmark 路线可用、iCloud Drive 占位文件能触发下载、
   冲突副本（`zakki (1).json`）枚举与 NSFileVersion 恢复可行；三项全部通过后端 B 才开工，

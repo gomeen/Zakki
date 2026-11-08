@@ -5,6 +5,7 @@
 
 | 报告 | 说明 |
 |---|---|
+| [2026-11-08-m4-1-sync-verification.md](2026-11-08-m4-1-sync-verification.md) | 移动端 M4-1 同步引擎与 GitHub 后端 A：D13 判定表、sha CAS 重拉、Device Flow/刷新/撤销、Keychain、conflicts/ 留档的 46 条 XCTest 与 stub 端到端实测 |
 | [2026-11-08-m3-ios-reminders-verification.md](2026-11-08-m3-ios-reminders-verification.md) | 移动端 M3-1 iOS 提醒：评审遗留 bug 核对、弹层/对账/推进/64 槽实现对照、53 条新 XCTest 与模拟器端到端实测 |
 | [2026-11-08-icloud-sync-probe.md](2026-11-08-icloud-sync-probe.md) | M4-2 门禁探针：文件选择器路线免 entitlement 验证可行，占位/冲突真机项与 runbook |
 | [2026-10-29-m2-editor-verification.md](2026-10-29-m2-editor-verification.md) | 移动端 M2 编辑器：子票 PR 对照、两次数据丢失级回归、126 条 XCTest 与性能预算 |
