@@ -3,7 +3,7 @@
 > 状态：**规格已确认；移动端尚未实现**。本文是
 > [#1「手机提醒与 iOS 客户端路线」](https://github.com/gomeen/Zakki/issues/1) 的目的地产物，
 > 汇总 #3–#12 研究与定案，并按 [2026-10-28 review](reports/2026-10-28-reminders-mobile-review.md)
-> 与 [#16](https://github.com/gomeen/Zakki/issues/16) 校正；D11、D13、D17 已定案，见 §10。
+> 与 [#16](https://github.com/gomeen/Zakki/issues/16) 校正；D11、D13、D17、D21 已定案，见 §10。
 > 术语见 [GLOSSARY.md](../GLOSSARY.md)，时间与重复语义以
 > [ADR-0001](adr/0001-inline-time-tokens.md) 和 [ADR-0002 修订节](adr/0002-recurring-time-tokens.md#2026-10-28-修订统一实例语法与日历边界)
 > 为准；视觉基线见 [design-tokens-mobile-draft.md](design-tokens-mobile-draft.md)。
@@ -244,13 +244,16 @@ UI 区分「已排定」「待同步／待续排」「权限受限」，不将�
 
 ## 7. 里程碑
 
+2026-11-07 定案（D21）：M3 与 M4 合并一轮实施；云盘后端 B 提前自 M5 进 M4，走 iCloud
+文件选择器路线，以探针门禁决定去留（探针失败回落 M5）。
+
 | 里程碑 | 内容 | 出口标准 |
 |---|---|---|
 | M1 脚手架 | iOS 工程、同仓 mobile/binding + replace、目标绑定／XCFramework、model 提取、CI；系统文件选择器导入 zakki.json | 模拟器显示真实导入文件的标签；高版本写保护、未知字段／桌面设置往返测试通过 |
 | M2 编辑器 | iOS 双模式、标签、最小主题集、导出本地文件 | 长中文重度编辑由用户验收；M4 前经系统文件导入／导出手动交换，不承诺自动回传桌面 |
 | M3 iOS 提醒 | iOS 令牌弹层、单次通知重排、完成推进、重复、Time Sensitive 能力验证 | **仅 iOS** 到点响、槽位策略、重签／重启分场景恢复、状态展示通过；不要求 Android 出口 |
-| M4 同步 | GitHub 后端、§2.2 的冲突处理与留档、桌面同步配套 | 桌面 ↔ iPhone 双向同步、CAS 冲突与旧 Git 暂停可复现；§2.2 判定表四种情况与 conflicts/ 留档生成可复现 |
-| M5 Android 与收尾 | Android 工程／编辑器／AAR／闹钟／同步对齐，云盘后端、双端小组件、分发流程 | Android 全部权限／生命周期检查及云盘、签名、小组件清单通过 |
+| M4 同步 | GitHub 后端、§2.2 的冲突处理与留档、桌面同步配套，云盘后端 B（iCloud 文件选择器路线，探针门禁：探针失败回落 M5，D21） | 桌面 ↔ iPhone 双向同步、CAS 冲突与旧 Git 暂停可复现；§2.2 判定表四种情况与 conflicts/ 留档生成可复现 |
+| M5 Android 与收尾 | Android 工程／编辑器／AAR／闹钟／同步对齐、双端小组件、分发流程；云盘后端若 M4 探针失败则留此（D21） | Android 全部权限／生命周期检查及签名、小组件清单通过；云盘若回落 M5 一并验收 |
 
 每个里程碑开实施票；未决决策阻塞相应出口，不能由实现者擅自选定。共享语义缺口回 core 修。
 
@@ -272,6 +275,10 @@ UI 区分「已排定」「待同步／待续排」「权限受限」，不将�
 - [ ] M4：GitHub 蜂窝真机可达性、CAS 冲突、token 过期／刷新／撤销、Keychain／Keystore 安全保存；
   同步开启暂停两个旧 Git 调度器，关闭恢复，远端更新后能先拉取再提交；§2.2 判定表的四种情况
   与 conflicts/ 留档文件生成可复现。
+- [ ] M4：iCloud 探针（后端 B 开工前置，D21）：Personal Team 下 iCloud capability 核对与
+  文件选择器授权 + security-scoped bookmark 路线可用、iCloud Drive 占位文件能触发下载、
+  冲突副本（`zakki (1).json`）枚举与 NSFileVersion 恢复可行；三项全部通过后端 B 才开工，
+  任一失败则后端 B 回落 M5，不拖后端 A 与整体节奏。
 - [ ] M5：Android 12+ 精确权限拒绝／撤销与降级；API 33+ USE_EXACT_ALARM 主路径、兜底特殊访问；
   POST_NOTIFICATIONS 拒绝、通知通道关闭、Doze、setAlarmClock 图标、force-stop 后再次打开恢复。
 - [ ] M5：BOOT_COMPLETED／MY_PACKAGE_REPLACED／TIME_SET／TIMEZONE_CHANGED 冷启动重建；
@@ -313,5 +320,6 @@ UI 区分「已排定」「待同步／待续排」「权限受限」，不将�
 | D11 FCM 兜底 | 延后为独立票 [#19](https://github.com/gomeen/Zakki/issues/19)；v1 只用本地闹钟，加上打开应用时对账；桌面的改动等下次打开手机才生效，已接受（R6） |
 | D13 同步冲突 | 同步基线 + 冲突由用户选择，不采用自动 LWW；基线是设备本地记录的上次同步成功内容 sha256 与后端版本号；冲突按整个文件处理并弹对话框二选一；落选版本完整留档到 conflicts/，不进标签、不参与调度、不占标签上限；active 字段继续共享、移动端原样往返，当前标签记在设备本地（§2.2） |
 | D17 组件交互 | 点时间组件（任务行与非任务行同样）打开时间弹层，可编辑时刻、提醒与重复；任务只能通过勾选框完成，带重复的任务勾选即推进（Advance）；不存在「点组件即完成」的操作（§4） |
+| D21 里程碑编排 | 2026-11-07 定案：M3 与 M4 合并一轮实施；同步范围为双后端——后端 A GitHub Contents API（sha CAS，Device Flow 的 GitHub App user token，iOS 存 Keychain），后端 B 云盘提前自 M5（走 §2.2 后端 B「打开对账 + 冲突副本」模型，iCloud 用 iCloud Drive 文件夹 + 文件选择器授权路线而非 CloudKit；Windows + iCloud for Windows 仍不做）；开工前置 iCloud 探针（Personal Team capability 核对、文件选择器 security-scoped bookmark 路线、占位文件触发下载、冲突副本／NSFileVersion），探针失败则后端 B 回落 M5，不拖整体；串联点：同步成功应用远端后立即全量对账提醒（§2.2）；M2 验收（#26）并行不阻塞（§7、§8） |
 
 规格已确认；#16 与 #8 随 D11／D13／D17 定案关闭，移动端实现按 §7 里程碑另开实施票。
