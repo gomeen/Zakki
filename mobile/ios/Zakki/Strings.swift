@@ -59,6 +59,10 @@ enum Strings {
     static var pillUnitYear: String { t("years", "年") }
     static var pillAccessibilityLabel: String { t("Time alert", "时间提醒") }
 
+    static func taskCheckbox(_ checked: Bool) -> String {
+        checked ? t("Task completed", "已勾选任务") : t("Task, not completed", "未勾选任务")
+    }
+
     static func pillInterval(_ n: Int, _ unit: String) -> String {
         t("Every \(n) \(unit)", "每 \(n) \(unit)")
     }
@@ -167,4 +171,63 @@ enum Strings {
     static var toolbarBold: String { t("Bold", "加粗") }
     static var toolbarCode: String { t("Inline Code", "行内代码") }
     static var toolbarInsertTime: String { t("Insert time", "插入时间") }
+
+    // MARK: M3 时间弹层（用语对齐桌面 locales 的 time popover）
+
+    static var popoverTitle: String { t("Time", "时间") }
+    static var popoverDue: String { t("Date & time", "日期与时刻") }
+    static var popoverDate: String { t("Date", "日期") }
+    static var popoverClock: String { t("Time", "时刻") }
+    static var popoverAlert: String { t("Alert", "提醒") }
+    static var popoverRecur: String { t("Repeat", "重复") }
+    static var popoverClear: String { t("Clear Time", "清除时间") }
+    static var popoverDone: String { t("Done", "完成") }
+    static var alertNone: String { t("None", "无提醒") }
+    static var alertAtTime: String { t("On time", "准点") }
+    static var alertHour: String { t("1h early", "提前 1 小时") }
+    static var alertDay: String { t("1d early", "提前 1 天") }
+
+    static func alertMinutes(_ n: Int) -> String {
+        t("\(n)m early", "提前 \(n) 分钟")
+    }
+
+    static var recurNone: String { t("No repeat", "不重复") }
+    static var recurDaily: String { t("Daily", "每天") }
+    static var recurWorkdays: String { t("Workdays", "工作日") }
+    static var recurWeekly: String { t("Weekly", "每周") }
+    static var recurMonthly: String { t("Monthly", "每月") }
+    static var recurYearly: String { t("Yearly", "每年") }
+    static var recurCustom: String { t("Custom", "自定义") }
+    static var recurHasEnd: String { t("Until a date", "设结束日期") }
+    static var recurEnd: String { t("End date", "结束日期") }
+    static var recurUnitDay: String { t("Days", "天") }
+    static var recurUnitWeek: String { t("Weeks", "周") }
+    static var recurUnitMonth: String { t("Months", "月") }
+    static var recurUnitYear: String { t("Years", "年") }
+
+    static func recurInterval(_ n: Int, _ unit: String) -> String {
+        t("Every \(n) \(unit)", "每 \(n) \(unit)")
+    }
+
+    static func weekdayShort(_ iso: Int) -> String {
+        let en = ["M", "T", "W", "T", "F", "S", "S"]
+        let zh = ["一", "二", "三", "四", "五", "六", "日"]
+        guard (1...7).contains(iso) else { return "?" }
+        return Strings.t(en[iso - 1], zh[iso - 1])
+    }
+
+    // MARK: M3 提醒状态（四态：已排定／待同步／待续排／权限受限）
+
+    static func statusScheduled(_ count: Int) -> String {
+        t("\(count) scheduled", "已排定 \(count) 条")
+    }
+
+    static var statusNone: String { t("No reminders scheduled", "暂无已排定提醒") }
+    static var statusPendingSync: String { t("Changes pending save", "改动待写入") }
+    static var statusNeedsRenewal: String { t("More pending — open app to continue", "有提醒待续排，打开应用继续") }
+    static var statusLimited: String { t("Notifications denied", "通知权限受限") }
+    static var renewalNoticeBody: String {
+        t("More reminders are waiting. Open Zakki to schedule them.",
+          "还有提醒未排入系统，打开 Zakki 继续排定。")
+    }
 }

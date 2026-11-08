@@ -517,8 +517,30 @@ final class BlockEditorView: UITextView, UITextViewDelegate {
         return offset(from: beginningOfDocument, to: target)
     }
 
+    // 胶囊点击（D17）：解析命中附件的令牌原文交给容器开弹层（M3）。
+    var onTokenTap: ((String) -> Void)?
+
     @objc private func pillTapped(_ recognizer: UITapGestureRecognizer) {
-        // M3 在此打开时间弹层；M2 刻意无动作。
+        guard let attachment = tokenAttachment(at: recognizer.location(in: self)) else { return }
+        onTokenTap?(attachment.tokenRaw)
+    }
+
+    // 点击点处的令牌附件（候选含左右相邻字符，与 isPillHit 同口径）。
+    private func tokenAttachment(at point: CGPoint) -> TimeTokenAttachment? {
+        guard let position = closestPosition(to: point) else { return nil }
+        let offset = offset(from: beginningOfDocument, to: position)
+        let ns = textStorage.string as NSString
+        var candidates = [offset]
+        if offset > 0 { candidates.append(offset - 1) }
+        for candidate in candidates {
+            guard candidate < ns.length else { continue }
+            guard ns.substring(with: NSRange(location: candidate, length: 1)) == "\u{FFFC}" else { continue }
+            if let attachment = textStorage.attribute(.attachment, at: candidate, effectiveRange: nil)
+                as? TimeTokenAttachment {
+                return attachment
+            }
+        }
+        return nil
     }
 
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {

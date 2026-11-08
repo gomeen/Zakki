@@ -6,6 +6,7 @@ import Zakkicore
 // FindTimeToken JSON 结果中的 suffix 字段（字段全出，见 bind.go suffixJSON）。
 struct TimeSuffixInfo: Equatable, Decodable {
     var due: String
+    var dueMs: Int64?
     var hasAlert: Bool
     var alertMs: Int64?
     var recur: String?

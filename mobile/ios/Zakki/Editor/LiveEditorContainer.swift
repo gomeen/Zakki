@@ -16,7 +16,8 @@ final class LiveEditorContainer: UIView {
     var raw: String
     var blockList: LiveBlockList
     private(set) var activeIndex: Int?
-    private let writable: Bool
+    // 模块内可见（弹层协调/事务扩展与 @testable 回归都需要读）。
+    let writable: Bool
 
     // 模块内可见（@testable 命中回归测试需要读 guide/约束状态）。
     let scrollView = UIScrollView()
@@ -314,6 +315,10 @@ final class LiveEditorContainer: UIView {
             if block.kind == .task {
                 cell.onToggleTask = { [weak self] in self?.toggleTask(at: index) }
             }
+            // 胶囊点击开时间弹层（D17：任务行与非任务行同样）。
+            cell.onTokenTap = { [weak self] tokenRaw in
+                self?.openTimePopover(tokenRaw: tokenRaw, blockIndex: index)
+            }
             return cell
         }
     }
@@ -501,6 +506,11 @@ final class LiveEditorContainer: UIView {
         // 组字结束后补跑被推迟的整幅重载（performBufferLoad 的组字守卫）。
         view.onCompositionEnd = { [weak self] in
             self?.scheduleBufferLoad()
+        }
+        // 胶囊点击开时间弹层（D17）：焦点块内同样生效。
+        let popoverIndex = index
+        view.onTokenTap = { [weak self] tokenRaw in
+            self?.openTimePopover(tokenRaw: tokenRaw, blockIndex: popoverIndex)
         }
         view.shouldDelegateEnter = { [weak self] in
             self?.handleEnter() ?? false
