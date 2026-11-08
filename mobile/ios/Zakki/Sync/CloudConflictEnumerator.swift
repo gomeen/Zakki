@@ -40,12 +40,16 @@ enum CloudConflictEnumerator {
             scope = resolved.scope
         } catch let error as CloudFolderError {
             return .failure(CloudFolderBackend.map(error))
+        } catch {
+            return .failure(.api("cloud-resolve"))
         }
         var access = CloudFolderAccess(rootURL: root, scope: scope)
         do {
             try access.startAccessing()
         } catch let error as CloudFolderError {
             return .failure(CloudFolderBackend.map(error))
+        } catch {
+            return .failure(.api("cloud-access"))
         }
         defer { access.stopAccessing() }
         let mainURL = access.mainURL
@@ -131,8 +135,9 @@ enum CloudConflictEnumerator {
         defer { access.stopAccessing() }
         let versions = NSFileVersion.unresolvedConflictVersionsOfItem(at: access.mainURL) ?? []
         for version in versions {
-            // byDeletingCurrentVersion=false：只清冲突标记，不动任何文件内容。
-            try? version.resolve(byDeletingCurrentVersion: false)
+            // isResolved=true：只清冲突标记，不动任何文件内容
+            //（macOS 的 resolve(byDeletingCurrentVersion:) 在 iOS 不可用）。
+            version.isResolved = true
         }
     }
 }

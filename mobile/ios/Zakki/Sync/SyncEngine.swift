@@ -156,18 +156,9 @@ final class SyncEngine: ObservableObject {
         let conflictsDir = ConflictArchiveStore.directory(forZakkiURL: NotesModel.defaultSandboxURL)
         try? FileManager.default.removeItem(at: conflictsDir)
         let tokens = InMemoryTokenStore()
-        // 预授权：临时目录直接建书签（自容器路径无需安全作用域授权，探针 §1 已验证）。
-        let args = ProcessInfo.processInfo.arguments
-        if let i = args.firstIndex(of: SyncStubMode.cloudGrantArg), i + 1 < args.count {
-            let granted = URL(fileURLWithPath: args[i + 1])
-            defaults.set(SyncBackendKind.cloudFolder.rawValue, forKey: ConfigKey.backend)
-            defaults.set(granted.lastPathComponent, forKey: ConfigKey.cloudName)
-            defaults.set(granted.hasDirectoryPath ? CloudGrantScope.folder.rawValue : CloudGrantScope.file.rawValue,
-                         forKey: ConfigKey.cloudScope)
-            if let bookmark = try? CloudFolderAccess.makeBookmarkData(for: granted) {
-                tokens.setToken(bookmark.base64EncodedString(), forKey: TokenKey.cloudFolderBookmark)
-            }
-        }
+        // 后端 B 预授权（stub 专用）：App 容器内临时目录建书签，机制与真实 provider
+        // 一致（书签/会话/读写），模拟器无 iCloud 登录也不碰真实 iCloud（探针 §1）。
+        SyncStubCloudSeed.apply(defaults: defaults, tokens: tokens)
         return SyncEngine(
             tokens: tokens,
             transport: URLSessionTransport(session: SyncStubMode.stubbedSession()),
@@ -313,7 +304,7 @@ final class SyncEngine: ObservableObject {
         } else {
             // 本地落选：完整留档本地内容，再安装远端（active 随远端字节原样往返）。
             guard archiveLoser(localRaw) else { return }
-            var adoptedVersion = candidate.casBaseVersion
+            var adoptedVersion = candidate.casBaseVersion ?? candidate.remoteVersion
             do {
                 if candidate.remoteVersion != candidate.casBaseVersion {
                     // 后端 B 副本候选：候选内容尚不在主文件里，先写回主文件再安装本地
@@ -489,16 +480,36 @@ final class SyncEngine: ObservableObject {
         selectedBackend == .cloudFolder && cloudBookmarkData != nil
     }
 
-    // 文件选择器授权后建立连接：建书签 → 立即解析验证（失效尽早暴露）→ 持久化。
-    // 换位置即换文件身份：清空基线，按 D13「无基线」重新加入；副本列表随之作废。
-    func connectCloudFolder(at url: URL) async -> Bool {
-        let bookmark: Data
+    // 文件选择器授权后建立连接：picker 返回的是安全作用域 URL，按探针端到端顺序——
+    // 先 startAccessing 再建书签（真机 provider 下书签创建依赖访问会话），建完立即解析
+    // 验证（失效尽早暴露）→ 持久化。换位置即换文件身份：清空基线，按 D13「无基线」重新
+    // 加入；副本列表随之作废。
+    func connectCloudFolder(at pickedURL: URL) async -> Bool {
+        // 生产顺序是先在设置页选后端再选位置；stub 预授权与直连路径可能跳过选择，
+        // 统一在此确保后端 B 激活（任一时刻只激活一个，§2.2）。
+        if selectedBackend != .cloudFolder {
+            selectBackend(.cloudFolder)
+        }
         do {
-            bookmark = try CloudFolderAccess.makeBookmarkData(for: url)
-            let resolved = try CloudFolderAccess.resolve(bookmarkData: bookmark)
-            var access = CloudFolderAccess(rootURL: resolved.rootURL, scope: resolved.scope)
-            try access.startAccessing()
-            access.stopAccessing()
+            var granted = CloudFolderAccess(
+                rootURL: pickedURL,
+                scope: pickedURL.hasDirectoryPath ? .folder : .file)
+            try granted.startAccessing()
+            defer { granted.stopAccessing() }
+            let bookmark = try CloudFolderAccess.makeBookmarkData(for: pickedURL)
+            _ = try CloudFolderAccess.resolve(bookmarkData: bookmark)
+            tokens.setToken(bookmark.base64EncodedString(), forKey: TokenKey.cloudFolderBookmark)
+            defaults.set(pickedURL.lastPathComponent, forKey: ConfigKey.cloudName)
+            defaults.set(pickedURL.hasDirectoryPath ? CloudGrantScope.folder.rawValue : CloudGrantScope.file.rawValue,
+                         forKey: ConfigKey.cloudScope)
+            state.baseline = nil
+            saveState()
+            cloudCopies = []
+            cloudCopiesError = nil
+            publish(.idle)
+            objectWillChange.send()
+            await refreshCloudCopies()
+            return true
         } catch let error as CloudFolderError {
             publish(.failed(Self.errorCode(CloudFolderBackend.map(error))))
             return false
@@ -506,18 +517,6 @@ final class SyncEngine: ObservableObject {
             publish(.failed("bookmark-create"))
             return false
         }
-        tokens.setToken(bookmark.base64EncodedString(), forKey: TokenKey.cloudFolderBookmark)
-        defaults.set(url.lastPathComponent, forKey: ConfigKey.cloudName)
-        defaults.set(url.hasDirectoryPath ? CloudGrantScope.folder.rawValue : CloudGrantScope.file.rawValue,
-                     forKey: ConfigKey.cloudScope)
-        state.baseline = nil
-        saveState()
-        cloudCopies = []
-        cloudCopiesError = nil
-        publish(.idle)
-        objectWillChange.send()
-        await refreshCloudCopies()
-        return true
     }
 
     // 断开后端 B：清书签与目标信息（授权失效后无复用价值）。

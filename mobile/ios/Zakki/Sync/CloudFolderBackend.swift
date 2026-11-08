@@ -124,13 +124,15 @@ final class CloudFolderBackend: SyncBackend {
         do {
             if FileManager.default.fileExists(atPath: url.path) {
                 var coordError: NSError?
+                var writeError: NSError?
                 NSFileCoordinator().coordinate(writingItemAt: url, options: [], error: &coordError) { target in
                     do {
                         try data.write(to: target)
                     } catch {
-                        coordError = error as NSError
+                        writeError = error as NSError
                     }
                 }
+                if let writeError { coordError = writeError }
                 if let coordError { throw coordError }
             } else {
                 try data.write(to: url)

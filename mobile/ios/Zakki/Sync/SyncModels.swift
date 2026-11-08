@@ -3,13 +3,13 @@ import CryptoKit
 
 // MARK: - 后端抽象的值类型（§2.2：双后端任一时刻只激活一个）
 
-// 后端种类；后端 B（云盘文件夹，#53）占位，实现同一 SyncBackend 契约接入。
+// 后端种类；B（云盘文件夹，#53）与 A 接同一 SyncBackend 契约，任一时刻只激活一个。
 enum SyncBackendKind: String, Codable, CaseIterable {
     case github // A. GitHub Contents API（sha CAS）
-    case cloudFolder // B. 云盘文件夹（#53，暂未实现，UI 灰显占位）
+    case cloudFolder // B. 云盘文件夹（iCloud Drive 文件选择器 + security-scoped bookmark）
 }
 
-// 远端 zakki.json 快照：内容与后端版本号（后端 A 为 blob sha，B 为文件身份+修改时间，留位）。
+// 远端 zakki.json 快照：内容与后端版本号（后端 A 为 blob sha，B 为文件身份+修改时间）。
 struct RemoteFile: Equatable, Sendable {
     var exists: Bool
     var content: String?

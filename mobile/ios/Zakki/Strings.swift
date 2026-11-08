@@ -329,6 +329,10 @@ enum Strings {
         t("Enumeration failed (\(code))", "枚举失败（\(code)）")
     }
 
+    static func cloudCopiesOpen(count: Int) -> String {
+        t("View Copies (\(count))", "查看副本（\(count)）")
+    }
+
     // Device Flow 弹层。
     static var deviceFlowUserCodeHint: String {
         t("Open github.com/login/device and enter this code", "打开 github.com/login/device 并输入以下代码")

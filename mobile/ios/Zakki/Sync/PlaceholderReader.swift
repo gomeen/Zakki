@@ -20,8 +20,9 @@ enum PlaceholderReader {
     }
 
     // 诊断下载状态；非 iCloud 文件两个键都缺失（nil），verdict 落 localFile。
+    // 用新 URL 对象读资源值，避开 URL 实例的 resourceValues 缓存。
     static func diagnose(url: URL) -> Diagnosis {
-        let values = try? url.resourceValues(forKeys: [
+        let values = try? URL(fileURLWithPath: url.path).resourceValues(forKeys: [
             .isUbiquitousItemKey,
             .ubiquitousItemDownloadingStatusKey,
         ])
@@ -57,12 +58,15 @@ enum PlaceholderReader {
             }
             let deadline = Date().addingTimeInterval(timeout)
             while Date() < deadline {
-                let status = try? url.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey])
+                // 每轮新 URL 对象：同一实例的 resourceValues 缓存会让轮询永远读到旧状态。
+                let status = try? URL(fileURLWithPath: url.path)
+                    .resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey])
                     .ubiquitousItemDownloadingStatus
                 if status == .current { break }
                 try await sleep(pollInterval)
             }
-            let status = try? url.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey])
+            let status = try? URL(fileURLWithPath: url.path)
+                .resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey])
                 .ubiquitousItemDownloadingStatus
             if status != .current {
                 throw CloudFolderError.downloadTimeout
@@ -71,15 +75,17 @@ enum PlaceholderReader {
         // NSFileCoordinator 协调读（iCloud 项目并发安全；.withoutChanges 避免触碰修改时间）。
         var data: Data?
         var coordError: NSError?
+        var readError: NSError?
         NSFileCoordinator().coordinate(readingItemAt: url, options: [.withoutChanges], error: &coordError) { u in
             do {
                 data = try Data(contentsOf: u)
             } catch {
-                coordError = error as NSError
+                readError = error as NSError
             }
         }
+        if let readError { coordError = readError }
         if let coordError {
-            throw CloudFolderError.mapIOError(coordError, reading: true)
+            throw CloudFolderAccess.mapIOError(coordError, reading: true)
         }
         guard let data else {
             throw CloudFolderError.readFailed(code: "coordinated-empty")

@@ -30,6 +30,13 @@ struct CloudFolderAccess {
 
     private var accessing = false
 
+    // 显式 internal init：private 字段会把 memberwise init 收窄成 private，
+    // 跨文件（后端/枚举器）无法构造会话。
+    init(rootURL: URL, scope: CloudGrantScope) {
+        self.rootURL = rootURL
+        self.scope = scope
+    }
+
     // security-scoped bookmark 的范围与解析选项按目标种类区分：目录用 .withoutUI？
     // 不——探针验证的最小可用组合是 .minimalBookmark 创建 + 空选项解析。
     static func makeBookmarkData(for url: URL) throws -> Data {
@@ -69,7 +76,8 @@ struct CloudFolderAccess {
 
     // 会话内执行；异常路径也保证 stopAccessing。
     static func withAccess<T>(bookmarkData: Data, _ body: (CloudFolderAccess) throws -> T) throws -> T {
-        var access = try resolve(bookmarkData: bookmarkData)
+        let resolved = try resolve(bookmarkData: bookmarkData)
+        var access = CloudFolderAccess(rootURL: resolved.rootURL, scope: resolved.scope)
         try access.startAccessing()
         defer { access.stopAccessing() }
         return try body(access)
@@ -95,14 +103,18 @@ struct CloudFolderAccess {
     // 判定表的「远端已变」由它驱动，内容是否真的不同由内容 sha256 决定，见 SyncModels）。
 
     static func version(of url: URL) -> String? {
-        let values = try? url.resourceValues(forKeys: [.fileIdentifierKey, .contentModificationDateKey])
+        // 每次用新 URL 对象读：URL 实例会缓存 resourceValues，同一实例重复读
+        // 会拿到旧 identity/mtime，基线判定会被陈旧版本号误导。
+        let fresh = URL(fileURLWithPath: url.path)
+        let values = try? fresh.resourceValues(forKeys: [.fileIdentifierKey, .contentModificationDateKey])
         guard let identifier = values?.fileIdentifier else { return nil }
         let ms = values?.contentModificationDate.map { Int64(($0.timeIntervalSince1970 * 1000).rounded()) } ?? 0
         return "\(identifier)-\(ms)"
     }
 
     static func modificationMs(of url: URL) -> Int64 {
-        let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+        let fresh = URL(fileURLWithPath: url.path)
+        let values = try? fresh.resourceValues(forKeys: [.contentModificationDateKey])
         return values?.contentModificationDate.map { Int64(($0.timeIntervalSince1970 * 1000).rounded()) } ?? 0
     }
 

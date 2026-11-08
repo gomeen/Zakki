@@ -9,12 +9,20 @@ struct SettingsView: View {
     @State private var ownerText = ""
     @State private var repoText = ""
     @State private var isSyncingNow = false
+    // 后端 B（#53）：文件选择器弹层开关（文件夹/文件两种授权形态各一个 sheet）。
+    @State private var pickingCloudFolder = false
+    @State private var pickingCloudFile = false
 
     var body: some View {
         Form {
             backendSection
             if sync.selectedBackend == .github {
                 githubSection
+            } else {
+                cloudConnectSection
+                if sync.isCloudFolderConnected, sync.cloudScope == .folder {
+                    cloudCopiesSection
+                }
             }
             archiveSection
         }
@@ -30,6 +38,16 @@ struct SettingsView: View {
             ownerText = sync.repoOwner
             repoText = sync.repoName
         }
+        .sheet(isPresented: $pickingCloudFolder) {
+            SecurityScopedPicker(contentTypes: [.folder]) { url in
+                Task { await sync.connectCloudFolder(at: url) }
+            }
+        }
+        .sheet(isPresented: $pickingCloudFile) {
+            SecurityScopedPicker(contentTypes: [.json]) { url in
+                Task { await sync.connectCloudFolder(at: url) }
+            }
+        }
         .sheet(item: Binding(
             get: { sync.deviceFlow },
             set: { if $0 == nil { sync.cancelDeviceFlow() } }
@@ -38,7 +56,7 @@ struct SettingsView: View {
         }
     }
 
-    // 后端选择：GitHub 可用；云盘（后端 B，#53）占位灰显——协议抽象为 B 留位。
+    // 后端选择：任一时刻只激活一个（§2.2）；切换即清基线重新按 D13 加入。
     private var backendSection: some View {
         Section(Strings.syncBackendSection) {
             row(SyncBackendKind.github)
@@ -48,14 +66,12 @@ struct SettingsView: View {
 
     private func row(_ kind: SyncBackendKind) -> some View {
         Button {
-            if kind == .github {
-                sync.selectBackend(kind)
-            }
+            sync.selectBackend(kind)
         } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(kind == .github ? Strings.syncBackendGitHub : Strings.syncBackendCloudFolder)
-                        .foregroundStyle(kind == .github ? Color.primary : Color.secondary)
+                        .foregroundStyle(Color.primary)
                     if kind == .cloudFolder {
                         Text(Strings.syncBackendCloudFolderHint)
                             .font(.footnote)
@@ -69,7 +85,6 @@ struct SettingsView: View {
                 }
             }
         }
-        .disabled(kind != .github)
     }
 
     @ViewBuilder
@@ -104,20 +119,7 @@ struct SettingsView: View {
             } label: {
                 Text(Strings.syncLastSync)
             }
-            Button {
-                guard !isSyncingNow else { return }
-                isSyncingNow = true
-                Task {
-                    await sync.syncNow()
-                    isSyncingNow = false
-                }
-            } label: {
-                if isSyncingNow {
-                    HStack { ProgressView(); Text(Strings.syncSyncing) }
-                } else {
-                    Text(Strings.syncSyncNow)
-                }
-            }
+            syncNowRow
             Button(Strings.syncDisconnect, role: .destructive) {
                 sync.disconnect()
             }
@@ -139,6 +141,127 @@ struct SettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    // MARK: 后端 B（云盘文件夹）：授权 / 状态 / 失效重选（探针 §5 错误形态）
+
+    // 书签失效类错误码：目标被删/挪走（bookmark-invalid）或授权被系统撤销（access-denied）。
+    // 任一出现都引导重新选位置，不自动重试（书签无复用价值）。
+    private var isBookmarkInvalidated: Bool {
+        switch sync.lastSummary?.outcome {
+        case .failed(let code): return code == "bookmark-invalid" || code == "access-denied"
+        default: return false
+        }
+    }
+
+    @ViewBuilder
+    private var cloudConnectSection: some View {
+        Section {
+            if sync.isCloudFolderConnected {
+                LabeledContent {
+                    Text(sync.cloudScope == .folder ? Strings.cloudScopeFolder : Strings.cloudScopeFile)
+                } label: {
+                    Text(sync.cloudTargetName)
+                }
+                LabeledContent {
+                    Text(Strings.syncOutcomeText(sync.lastSummary?.outcome))
+                        .foregroundStyle(isSyncFailure ? Color.red : Color.primary)
+                } label: {
+                    Text(Strings.syncLastSync)
+                }
+                syncNowRow
+                if isBookmarkInvalidated {
+                    Text(Strings.cloudBookmarkInvalidHint)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                    Button(Strings.cloudReselect) {
+                        if sync.cloudScope == .folder {
+                            pickingCloudFolder = true
+                        } else {
+                            pickingCloudFile = true
+                        }
+                    }
+                }
+                if sync.cloudScope == .file {
+                    Text(Strings.cloudArchiveLocalHint)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Button(Strings.syncDisconnect, role: .destructive) {
+                    sync.disconnect()
+                }
+            } else {
+                cloudPickButtons
+            }
+        } header: {
+            Text(Strings.syncCloudSection)
+        } footer: {
+            if !sync.isCloudFolderConnected {
+                Text(Strings.cloudGuideFooter)
+            }
+        }
+    }
+
+    private var cloudPickButtons: some View {
+        Group {
+            Button {
+                pickingCloudFolder = true
+            } label: {
+                Label(Strings.cloudPickFolder, systemImage: "folder")
+            }
+            Button {
+                pickingCloudFile = true
+            } label: {
+                Label(Strings.cloudPickFile, systemImage: "doc")
+            }
+        }
+    }
+
+    private var isSyncFailure: Bool {
+        sync.lastSummary?.outcome.isFailure == true
+    }
+
+    // 立即同步（两种后端共用；弹冲突卡片时设置页由 ContentView 收起）。
+    private var syncNowRow: some View {
+        Button {
+            guard !isSyncingNow else { return }
+            isSyncingNow = true
+            Task {
+                await sync.syncNow()
+                if sync.selectedBackend == .cloudFolder {
+                    await sync.refreshCloudCopies()
+                }
+                isSyncingNow = false
+            }
+        } label: {
+            if isSyncingNow {
+                HStack { ProgressView(); Text(Strings.syncSyncing) }
+            } else {
+                Text(Strings.syncSyncNow)
+            }
+        }
+    }
+
+    // 云端冲突副本（双通道枚举）：仅文件夹授权可用（仅文件授权列不了父目录）。
+    private var cloudCopiesSection: some View {
+        Section(Strings.cloudCopySection) {
+            if let error = sync.cloudCopiesError {
+                Text(Strings.cloudCopiesFailedText(error))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            if sync.cloudCopies.isEmpty {
+                Text(Strings.cloudCopyEmpty)
+                    .foregroundStyle(.secondary)
+            } else {
+                NavigationLink(Strings.cloudCopiesOpen(count: sync.cloudCopies.count)) {
+                    CloudCopiesListView()
+                }
+            }
+        }
+        .onAppear {
+            Task { await sync.refreshCloudCopies() }
         }
     }
 
@@ -354,6 +477,109 @@ struct ConflictArchiveViewer: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(Strings.editorDone) { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 云端冲突副本列表与查看（双通道枚举结果；采用走同一 D13 对话框）
+
+struct CloudCopiesListView: View {
+    @EnvironmentObject private var sync: SyncEngine
+    @State private var viewing: CloudConflictEnumerator.Copy?
+
+    var body: some View {
+        List {
+            if sync.cloudCopies.isEmpty {
+                Text(Strings.cloudCopyEmpty)
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(sync.cloudCopies) { copy in
+                row(copy)
+            }
+        }
+        .navigationTitle(Strings.cloudCopySection)
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            Task { await sync.refreshCloudCopies() }
+        }
+        .sheet(item: $viewing) { copy in
+            CloudCopyViewer(copy: copy)
+        }
+    }
+
+    private func row(_ copy: CloudConflictEnumerator.Copy) -> some View {
+        Button {
+            viewing = copy
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(copy.fileName)
+                    .font(.footnote.monospaced())
+                    .lineLimit(1)
+                Text(Self.detail(copy))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private static func detail(_ copy: CloudConflictEnumerator.Copy) -> String {
+        let source = copy.source == .namedCopy ? Strings.cloudCopySourceNamed : Strings.cloudCopySourceVersion
+        return "\(source) · \(dateText(copy.modifiedAtMs))"
+    }
+
+    private static let detailDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f
+    }()
+
+    private static func dateText(_ ms: Int64) -> String {
+        guard ms > 0 else { return "--" }
+        return detailDateFormatter.string(from: Date(timeIntervalSince1970: Double(ms) / 1000))
+    }
+}
+
+// 副本全文查看：只读展示 + 采用入口；采用后关闭自身，冲突卡片在根层弹出
+//（ContentView onChange 收起设置 sheet，与同步判定冲突同一通路）。
+struct CloudCopyViewer: View {
+    let copy: CloudConflictEnumerator.Copy
+    @EnvironmentObject private var sync: SyncEngine
+    @Environment(\.dismiss) private var dismiss
+    @State private var isAdopting = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(Strings.cloudCopyAdoptHint)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Text(copy.content)
+                        .font(.system(size: 12, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                .padding(16)
+            }
+            .navigationTitle(Strings.cloudCopyViewerTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(Strings.editorDone) { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        guard !isAdopting else { return }
+                        isAdopting = true
+                        Task {
+                            dismiss()
+                            await sync.adoptCloudCopy(copy)
+                        }
+                    } label: {
+                        Text(Strings.cloudCopyAdopt)
+                    }
                 }
             }
         }

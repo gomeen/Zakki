@@ -23,6 +23,56 @@ enum SyncStubMode {
     }
 }
 
+// MARK: - 后端 B 模拟器预授权（-ZakkiCloudGrant；仅 stub 模式，真实授权走文件选择器）
+
+// 书签目标用 App 容器内临时目录（自容器路径无需安全作用域授权，探针 §1 已验证），
+// 机制与真实 provider 一致（书签/会话/读写），模拟器无 iCloud 登录也不碰真实 iCloud。
+// 键名与 SyncEngine.ConfigKey 一致（stub 惯例：字面量 + 注释，不走内部可见性）。
+enum SyncStubCloudSeed {
+    // grant 值：auto-folder（文件夹授权）/ auto-file（仅文件授权）/
+    // missing（建书签后删目标：启动即处于「书签在、位置没了」状态）。
+    static func apply(defaults: UserDefaults, tokens: TokenStoring) {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: SyncStubMode.cloudGrantArg), i + 1 < args.count else { return }
+        let mode = args[i + 1]
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("zakki-cloud-stub", isDirectory: true)
+        // 每次启动重放种子：端到端脚本从确定状态开始。
+        try? fm.removeItem(at: dir)
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let mainURL = dir.appendingPathComponent("zakki.json", isDirectory: false)
+        if let seed = Self.fileArg("-ZakkiCloudSeedPath", in: args) {
+            try? Data(contentsOf: seed).write(to: mainURL)
+        }
+        if let copy = Self.fileArg("-ZakkiCloudCopyPath", in: args) {
+            try? Data(contentsOf: copy).write(to: dir.appendingPathComponent("zakki (1).json", isDirectory: false))
+        }
+        let granted = mode == "auto-file" ? mainURL : dir
+        defaults.set(SyncBackendKind.cloudFolder.rawValue, forKey: "sync.backend")
+        defaults.set(granted.lastPathComponent, forKey: "sync.cloud.name")
+        defaults.set(granted.hasDirectoryPath ? CloudGrantScope.folder.rawValue : CloudGrantScope.file.rawValue,
+                     forKey: "sync.cloud.scope")
+        if let bookmark = try? CloudFolderAccess.makeBookmarkData(for: granted) {
+            tokens.setToken(bookmark.base64EncodedString(), forKey: TokenKey.cloudFolderBookmark)
+        }
+        if mode == "missing" {
+            // 书签先建后删目标：复现真机「目标被删/挪走」的失效入口（探针 §5 解析抛错）。
+            try? fm.removeItem(at: dir)
+        }
+        // 真实 picker 端到端：Documents 根放 demo json（picker「我的 iPhone」可直接看到，
+        // 不进子目录——iOS 26.5 模拟器子目录返回导航不可自动化，探针 §4）。
+        if let demo = Self.fileArg("-ZakkiCloudDemoSeed", in: args) {
+            let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            try? Data(contentsOf: demo).write(to: docs.appendingPathComponent("demo-zakki.json", isDirectory: false))
+        }
+    }
+
+    private static func fileArg(_ name: String, in args: [String]) -> URL? {
+        guard let i = args.firstIndex(of: name), i + 1 < args.count else { return nil }
+        return URL(fileURLWithPath: args[i + 1])
+    }
+}
+
 // PUT zakki.json 的脚本化结果：成功返回新版本号；CAS 不匹配返回冲突语义。
 enum StubPutOutcome {
     case updated(newVersion: String)
