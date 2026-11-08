@@ -12,6 +12,10 @@ final class TimeTokenAttachment: NSTextAttachment {
         self.info = EditorDocument.findTimeToken(in: tokenRaw, protectedJSON: "").map(TimeTokenInfo.init)
             ?? TimeTokenInfo(due: tokenRaw) // 防御：扫描异常时原样展示 raw，不臆造信息
         super.init(data: nil, ofType: nil)
+        // 无障碍：附件在文本存储中不是元素，显式暴露给 VoiceOver 与 UI 测试
+        //（点按行为由编辑器手势处理）。
+        isAccessibilityElement = true
+        accessibilityLabel = info.displayText
         applyAppearance(traits: .current)
     }
 

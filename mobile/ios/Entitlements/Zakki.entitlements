@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Time Sensitive 通知能力（R2/D19）。默认构建不引用本文件（Personal
+	     Team 不支持该 capability，接入会让免费签名设备构建失败）。付费团队
+	     真机验证时：project.yml 里给 Zakki target 加
+	     CODE_SIGN_ENTITLEMENTS: Entitlements/Zakki.entitlements，并在
+	     Info.plist 声明 ZakkiTimeSensitiveEntitlement=true 让运行时状态按
+	     能力可用展示；无 entitlement 的构建由系统把 .timeSensitive 降级为
+	     普通通知（调度代码始终尝试请求该级别）。真机实测结果记录到
+	     docs/reports/ 的 M3 验证报告。 -->
+	<key>com.apple.developer.usernotifications.time-sensitive</key>
+	<true/>
+</dict>
+</plist>

@@ -190,6 +190,8 @@ final class LiveTextCell: LiveBaseCell {
     private var kind: LiveBlockKind = .para
     // 点 ☐/☑ 饰件翻转勾选（不落光标、不激活行——桌面：勾选框点击不冒泡）。
     var onToggleTask: (() -> Void)?
+    // 点时间胶囊开弹层（D17）：交出命中的令牌原文。
+    var onTokenTap: ((String) -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -239,6 +241,10 @@ final class LiveTextCell: LiveBaseCell {
             textLeadingConstraint?.constant = Theme.Typography.quoteBar + 8
         } else if let marker = Self.marker(for: block) {
             ornamentLabel.text = marker.text
+            // 无障碍：任务方框暴露为可点元素（VoiceOver/UI 测试点击入口）。
+            ornamentLabel.isAccessibilityElement = block.kind == .task
+            ornamentLabel.accessibilityLabel = block.kind == .task
+                ? Strings.taskCheckbox(block.checked) : nil
             // 任务方框在手机端仍偏小（用户二次反馈）：用独立大字号 26pt 绘制
             // ☐/☑（字形约 18pt 见方）；缩进宽度用同一字体量，避免与正文重叠。
             let markerFont: UIFont = block.kind == .task
@@ -292,10 +298,33 @@ final class LiveTextCell: LiveBaseCell {
         return frame.contains(p)
     }
 
+    // 点击点处的令牌附件（候选含左邻字符；D17 任务行与非任务行同样开弹层）。
+    private func tokenAttachment(at pointInTextView: CGPoint) -> TimeTokenAttachment? {
+        let offset = textView.caretOffset(at: pointInTextView)
+        guard let attributed = textView.attributedText else { return nil }
+        let ns = attributed.string as NSString
+        var candidates = [offset]
+        if offset > 0 { candidates.append(offset - 1) }
+        for candidate in candidates {
+            guard candidate < ns.length else { continue }
+            guard ns.substring(with: NSRange(location: candidate, length: 1)) == "\u{FFFC}" else { continue }
+            if let attachment = attributed.attribute(.attachment, at: candidate, effectiveRange: nil)
+                as? TimeTokenAttachment {
+                return attachment
+            }
+        }
+        return nil
+    }
+
     @objc private func textTapped(_ recognizer: UITapGestureRecognizer) {
         let point = recognizer.location(in: textView)
         if taskOrnamentHit(point) {
             onToggleTask?()
+            return
+        }
+        // 胶囊命中优先于进入编辑（D17：点组件开弹层，不落光标）。
+        if let attachment = tokenAttachment(at: point) {
+            onTokenTap?(attachment.tokenRaw)
             return
         }
         // 块尾间隙下半段归下一块行首（最近行吸附跨块）：textView 被约束拉伸
@@ -324,6 +353,12 @@ final class LiveTextCell: LiveBaseCell {
             onToggleTask?()
             return
         }
+        let inTextView = convert(inCell, to: textView)
+        // 胶囊命中优先于进入编辑（D17：点组件开弹层，不落光标）。
+        if let attachment = tokenAttachment(at: inTextView) {
+            onTokenTap?(attachment.tokenRaw)
+            return
+        }
         // 块尾间隙下半段归下一块行首（最近行吸附跨块）：段落间分隔空行处的
         // 间隙带高达两倍块距，手指点下一段首行时上沿落在间隙里会被上一块
         // 吞掉、光标跳走（真机反馈：点首行光标不动）。
@@ -333,7 +368,6 @@ final class LiveTextCell: LiveBaseCell {
         }
         // 点在饰件/行内留白：换算到最近行的光标（桌面：点行内留白停在最近文字）。
         // 原实现一律落块末，真机反馈点字符间空隙会跳到行尾。
-        let inTextView = convert(inCell, to: textView)
         let clamped = CGPoint(x: max(0, min(inTextView.x, textView.bounds.width - 1)),
                               y: max(0, min(inTextView.y, textView.bounds.height - 1)))
         reportTap(visibleCaret: textView.caretOffset(at: clamped))

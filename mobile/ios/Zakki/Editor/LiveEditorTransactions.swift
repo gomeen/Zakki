@@ -63,29 +63,58 @@ extension LiveEditorContainer {
 
     // MARK: 跨块结构编辑
 
-    // 任务勾选（M2 最小语义）：翻转首行 ☐/☑ 标记，记账可撤销、写回照常；
-    // 不激活块、不移动键盘焦点（桌面：勾选框点击不冒泡到行）。重复提醒的
-    // 推进（Advance）属 M3。
+    // 任务勾选（M3 语义，D17/§3.3）：非重复任务翻转首行 ☐/☑ 标记；带合法重复
+    // 规则的未完成任务勾选即推进（Advance）——改写锚点到下一实例并保持未完成，
+    // 序列已结束才标记完成；未知规则整簇任务按普通任务翻转。记账可撤销、写回
+    // 照常；不激活块、不移动键盘焦点。渲染 cell 的勾选不依赖焦点块（M3 起生效）。
     func toggleTask(at index: Int) {
-        guard blockList.blocks.indices.contains(index), activeEditor != nil else { return }
+        guard blockList.blocks.indices.contains(index) else { return }
         let block = blockList.blocks[index]
         guard block.kind == .task else { return }
+        if !block.checked, let hit = block.timeTokenRaw
+            .flatMap({ EditorDocument.findTimeToken(in: $0, protectedJSON: "") }),
+           let recurRaw = hit.suffix.recur, !recurRaw.isEmpty {
+            advanceRecurringTask(at: index, block: block, hit: hit, recurRaw: recurRaw)
+            return
+        }
+        applyLineEdit(blockIndex: index, newBlockRaw: Self.toggledRaw(block))
+    }
+
+    // 翻转首行勾选标记（保留其余部分）。
+    static func toggledRaw(_ block: LiveBlock) -> String {
         let flip: [(String, String)] = [("- [ ] ", "- [x] "), ("- [x] ", "- [ ] "),
                                         ("- [ ]", "- [x]"), ("- [x]", "- [ ]")]
-        guard let (old, new) = flip.first(where: { block.raw.hasPrefix($0.0) }) else { return }
-        let newRaw = new + block.raw.dropFirst(old.count)
-        let beforeDoc = raw
-        var lines = beforeDoc.components(separatedBy: "\n")
-        guard block.startLine < lines.count else { return }
-        lines[block.startLine] = newRaw
-        let newDoc = lines.joined(separator: "\n")
-        raw = newDoc
-        let oldBlocks = blockList.blocks
-        blockList = LiveBlocks.split(newDoc)
-        recordOp(before: beforeDoc, after: newDoc, beforeCaret: trackedDocCaret, afterCaret: trackedDocCaret,
-                 kind: .command, fencePair: false)
-        remountChangedBlocks(oldBlocks, blockList.blocks)
-        onRawChange?(newDoc)
+        for (old, new) in flip where block.raw.hasPrefix(old) {
+            return new + block.raw.dropFirst(old.count)
+        }
+        return block.raw
+    }
+
+    // 重复任务推进：Advance 拿下一实例，改写锚点（保留 ~ 与 ^ 段原文）；
+    // 规则非法或序列已结束则标记完成。
+    private func advanceRecurringTask(at index: Int, block: LiveBlock, hit: TimeTokenHit, recurRaw: String) {
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        guard let nextDueMs = ReminderPlanner.advance(recurRaw: recurRaw, anchorMs: hit.suffix.dueMs ?? 0, nowMs: nowMs) else {
+            // 序列已结束（越 end／无后继）：标记完成，不再排定。
+            applyLineEdit(blockIndex: index, newBlockRaw: Self.toggledRaw(block))
+            return
+        }
+        let hasAlert = hit.suffix.hasAlert
+        let payload: [String: Any] = [
+            "due": ReminderPlanner.formatDueMs(nextDueMs),
+            "dueMs": 0, // 仅输出、忽略输入；写回由 core 按 due + 时区重算
+            "alertMs": hasAlert ? (hit.suffix.alertMs ?? 0) : 0,
+            "hasAlert": hasAlert,
+            "recur": recurRaw,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let suffixJSON = String(data: data, encoding: .utf8),
+              let newLineRaw = Self.replaceTokenLine(block.raw, suffixJSON: suffixJSON) else {
+            // 绑定写回失败：保持原状，日志可查（不打断勾选手势）。
+            NSLog("ZAKKI-REM advance 写回失败 block %d", index)
+            return
+        }
+        applyLineEdit(blockIndex: index, newBlockRaw: newLineRaw)
     }
 
     func handleEnter() -> Bool {

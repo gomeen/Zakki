@@ -23,6 +23,9 @@ final class NotesModel: ObservableObject {
 
     // 待写回的 tab 集合；防抖定时器到点或编辑器关闭时统一落盘。
     private var pendingTabIDs: Set<UInt64> = []
+    // 是否有待落盘改动（提醒状态“待同步”的判定源：写盘成功 ≠ 系统已接受，
+    // 调度引擎以此区分展示）。
+    @Published private(set) var hasPendingWrites = false
     private var saveWorkItem: DispatchWorkItem?
     // 测试注入沙盒路径用；生产路径由 defaultSandboxURL 提供。
     // swiftlint:disable:next private_init
@@ -135,6 +138,7 @@ final class NotesModel: ObservableObject {
         snap.tabs = tabs
         snapshot = snap
         pendingTabIDs.insert(tabID)
+        hasPendingWrites = true
         scheduleSave()
     }
 
@@ -258,6 +262,7 @@ final class NotesModel: ObservableObject {
         guard !pendingTabIDs.isEmpty else { return }
         guard let raw, let snap = snapshot, snap.writable, let tabs = snap.tabs else {
             pendingTabIDs = []
+            hasPendingWrites = false
             return
         }
         do {
@@ -267,6 +272,7 @@ final class NotesModel: ObservableObject {
             // encode 输出成为新 raw 基线：后续 encode 都基于它（保持绑定往返稳定）。
             self.raw = out
             pendingTabIDs = []
+            hasPendingWrites = false
             saveError = nil
         } catch {
             // 写回失败如实上报；保留待写集合，下次 flush 重试。

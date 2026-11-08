@@ -72,6 +72,10 @@ struct ContentView: View {
                 } message: {
                     Text(model.importError ?? "")
                 }
+                // 调度引擎接入：打开时对账重排（规格 §3.3 主循环入口）。
+                .onAppear {
+                    ReminderScheduler.shared.attach(model: model)
+                }
         }
     }
 
@@ -121,6 +125,8 @@ struct ContentView: View {
                     WriteProtectBanner(message: Strings.bannerMessage(for: snapshot.reason))
                 }
                 tabList(snapshot)
+                // 提醒状态条（§3.4）：跨标签的调度状态，常驻列表底部。
+                ReminderStatusBar()
             }
         } else {
             ContentUnavailableView(
