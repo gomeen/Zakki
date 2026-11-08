@@ -267,11 +267,11 @@ UI 区分「已排定」「待同步／待续排」「权限受限」，不将�
   排除绑定目录及模块元数据，故意改坏副本或添加额外源码会使检查失败；core 另在纽约时区回归（R3）。
 - [ ] M3／M5：Find／Split／Replace 一致性，UTF-16 中文／emoji 保护区，未知规则整簇普通文本，
   AlertTiers 形状、每函数错误码与 recover；DST gap 归一化后恢复钟点、每月／闰日跳过、Every 上限。
-- [ ] M3：Personal Team 下 Time Sensitive entitlement 真机／Xcode 实测；不支持时普通通知降级和状态文案（R2）。
+- [x] M3：64 槽跨任务按最早 fireAt 分配、最后槽续排、窗口边界；已排定／待同步／待续排状态展示（[#51](https://github.com/gomeen/Zakki/issues/51)：53 条新 XCTest 覆盖采集/展开/槽位/状态映射，模拟器实测 scheduled=63+renewal，记录见 [2026-11-08-m3-ios-reminders-verification](reports/2026-11-08-m3-ios-reminders-verification.md)；权限受限态同票覆盖）。
+- [ ] M3：Personal Team 下 Time Sensitive entitlement 真机／Xcode 实测；不支持时普通通知降级和状态文案（R2，降级路径已实现并模拟器验证，真机待验）。
 - [ ] M3：profile 过期检测与提示；同 bundle 覆盖重签、覆盖安装、卸载重装分别测数据／授权／pending
   行为，不预设「重签一定清零」；演练免费账号 7 天流程及 App ID／每设备 App 配额（D19、R5）。
-- [ ] M3：64 槽跨任务按最早 fireAt 分配、最后槽续排、窗口边界；已排定／待同步／待续排状态展示。
-- [ ] M3／桌面：睡眠、唤醒、手动改时、时区改变、连续编辑跨触发点；首次启动不补发与会话宽限（R1）。
+- [ ] M3／桌面：睡眠、唤醒、手动改时、时区改变、连续编辑跨触发点；首次启动不补发与会话宽限（R1，iOS 侧对账管线与只排未来触发已实现，真机矩阵待验）。
 - [ ] M4：GitHub 蜂窝真机可达性、CAS 冲突、token 过期／刷新／撤销、Keychain／Keystore 安全保存；
   同步开启暂停两个旧 Git 调度器，关闭恢复，远端更新后能先拉取再提交；§2.2 判定表的四种情况
   与 conflicts/ 留档文件生成可复现。

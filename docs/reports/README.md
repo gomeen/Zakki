@@ -5,6 +5,7 @@
 
 | 报告 | 说明 |
 |---|---|
+| [2026-11-08-m3-ios-reminders-verification.md](2026-11-08-m3-ios-reminders-verification.md) | 移动端 M3-1 iOS 提醒：评审遗留 bug 核对、弹层/对账/推进/64 槽实现对照、53 条新 XCTest 与模拟器端到端实测 |
 | [2026-11-08-icloud-sync-probe.md](2026-11-08-icloud-sync-probe.md) | M4-2 门禁探针：文件选择器路线免 entitlement 验证可行，占位/冲突真机项与 runbook |
 | [2026-10-29-m2-editor-verification.md](2026-10-29-m2-editor-verification.md) | 移动端 M2 编辑器：子票 PR 对照、两次数据丢失级回归、126 条 XCTest 与性能预算 |
 | [2026-10-28-m1-scaffold-verification.md](2026-10-28-m1-scaffold-verification.md) | 移动端 M1 iOS 脚手架：工程结构、导入管道与模拟器实测 |
