@@ -117,6 +117,7 @@ func (s *Store) relocateLocked(old, target string, req *pendingSave, persist fun
 	s.dataPath = target
 	s.diskKnown, s.diskExists = true, true
 	s.diskHash = sha256.Sum256(raw)
+	s.syncHold = false // 迁址整体替换了磁盘状态，解除同步冻结
 	s.invalidateGitLocked(true)
 	s.armGitLocked()
 	s.mu.Unlock()

@@ -72,6 +72,11 @@ func (s *Store) armGitLocked() {
 	if s.closed || s.saveBlocked || s.invalid || !s.diskExists || s.gitRunning || s.gitTimer != nil {
 		return
 	}
+	if s.syncActive {
+		// 云同步开启：旧 Git 调度器暂停（§2.2）。用户原开关保留在偏好里，
+		// 关闭同步后 ConfigureSync 会重新装填。
+		return
+	}
 	cfg := s.gitConfig
 	if !cfg.AutoCommit && !cfg.AutoPush {
 		return
@@ -270,5 +275,15 @@ func (s *Store) Close() {
 	defer s.mu.Unlock()
 	s.closed = true
 	s.stopTimerLocked()
+	s.stopSyncTimerLocked()
 	s.invalidateGitLocked(false)
+	// 云同步在途轮次作废：最终保存（Shutdown）先于 Close 完成，此处不再
+	// 等待网络轮次（与 Git 同一约定），随后的 publish 会因代号失效被丢弃。
+	s.syncGen++
+	s.syncQueued = false
+	s.syncState.Running = false
+	if s.syncCancel != nil {
+		s.syncCancel()
+		s.syncCancel = nil
+	}
 }

@@ -40,6 +40,10 @@ func (s *Store) SaveNow(f File) error {
 		s.mu.Unlock()
 		return ErrStopped
 	}
+	if s.syncHold {
+		s.mu.Unlock()
+		return ErrSyncHold
+	}
 	req := s.acceptLocked(f)
 	s.pending = nil
 	s.stopTimerLocked()
@@ -61,7 +65,9 @@ func (s *Store) ScheduleSave(f File, interval time.Duration, after func()) {
 	f = cloneFile(f)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.stopped || s.closed {
+	if s.stopped || s.closed || s.syncHold {
+		// 同步冻结期（远端内容已落盘等待重载）：快照直接丢弃，界面重载
+		// 会把磁盘内容带回内存；否则旧快照会把刚应用的远端覆盖掉。
 		return
 	}
 	ready := s.pending != nil && s.pending.ready
@@ -81,7 +87,7 @@ func (s *Store) armSaveLocked(delay time.Duration) {
 
 func (s *Store) flushPending(gen uint64) {
 	s.mu.Lock()
-	if gen != s.timerGen || s.stopped || s.closed || s.pending == nil {
+	if gen != s.timerGen || s.stopped || s.closed || s.pending == nil || s.syncHold {
 		s.mu.Unlock()
 		return
 	}
@@ -146,6 +152,7 @@ func (s *Store) completeSave(revision uint64, err error) {
 	if err == nil {
 		s.saveSaved = revision
 		s.armGitLocked()
+		s.armSyncAfterSaveLocked()
 	}
 }
 
