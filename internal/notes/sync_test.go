@@ -715,3 +715,24 @@ func TestSyncNotConfiguredNoop(t *testing.T) {
 func encodeForTest(f File) ([]byte, error) {
 	return model.Encode(model.Document{File: f})
 }
+
+// TestSyncPostSaveDebounceRepeats 防抖轮触发后必须重新可装填：连续两笔
+// 保存各产生一轮同步（探针实测发现字段残留缺陷的回归）。
+func TestSyncPostSaveDebounceRepeats(t *testing.T) {
+	old := syncSaveDebounce
+	syncSaveDebounce = 40 * time.Millisecond
+	t.Cleanup(func() { syncSaveDebounce = old })
+
+	s, be, _ := newSyncStore(t, "基线")
+	be.existed, be.remote, be.version = true, docBytes("基线"), "r1"
+	s.ConfigureSync(be, "gomeen/notes", filepath.Join(filepath.Dir(s.DataPath()), "sync-state.json"), nil)
+	if err := s.SaveNow(doc("第一笔")); err != nil {
+		t.Fatal(err)
+	}
+	await(t, func() bool { be.mu.Lock(); defer be.mu.Unlock(); return be.pullCalls >= 1 })
+	if err := s.SaveNow(doc("第二笔")); err != nil {
+		t.Fatal(err)
+	}
+	// 缺陷形态：首轮触发后 syncTimer 字段残留，第二笔永远不再触发同步。
+	await(t, func() bool { be.mu.Lock(); defer be.mu.Unlock(); return be.pullCalls >= 2 })
+}

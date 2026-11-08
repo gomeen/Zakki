@@ -44,12 +44,15 @@ type syncState struct {
 // dataDir 返回应用数据目录（preferences.json 所在目录）。
 func (a *app) dataDir() string { return filepath.Dir(a.prefsStore.Path) }
 
+// systemKeyringFactory 供测试注入内存实现；生产经 notes.SystemKeyring。
+var systemKeyringFactory = notes.SystemKeyring
+
 // systemKeyring 懒创建系统安全存储（失败只记日志，调用处如实展示）。
 func (a *app) systemKeyring() notes.Keyring {
 	if a.syncState.keyring != nil {
 		return a.syncState.keyring
 	}
-	k, err := notes.SystemKeyring(a.dataDir())
+	k, err := systemKeyringFactory(a.dataDir())
 	if err != nil {
 		slog.Warn("同步安全存储不可用", "error", err)
 		return nil
@@ -240,7 +243,9 @@ func (a *app) connectGitHubSync() {
 			a.finishConnect(notify, err)
 			return
 		}
-		a.showConnectCodeDialog(notify, start.VerificationURI, start.UserCode)
+		// 用户码弹层在独立 goroutine 展示：Dialog.Message 阻塞至关闭，
+		// 不能挡住同 goroutine 里的授权轮询。
+		go a.showConnectCodeDialog(notify, start.VerificationURI, start.UserCode)
 		deadline := start.ExpiresAt
 		interval := start.Interval
 		for a.now().Before(deadline) {

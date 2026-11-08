@@ -47,8 +47,38 @@ func (f *fakeSyncBackend2) Push(_ context.Context, content []byte, _ string) (st
 	return "r-new", nil
 }
 
+// fakeTestKeyring 是测试用内存安全存储（替换真实钥匙串访问）。
+type fakeTestKeyring struct {
+	mu    sync.Mutex
+	value []byte
+}
+
+func (k *fakeTestKeyring) Load() ([]byte, error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.value == nil {
+		return nil, notes.ErrKeyringEmpty
+	}
+	return append([]byte(nil), k.value...), nil
+}
+
+func (k *fakeTestKeyring) Store(v []byte) error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.value = append([]byte(nil), v...)
+	return nil
+}
+
+func (k *fakeTestKeyring) Delete() error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.value = nil
+	return nil
+}
+
 // enableSyncPrefs 打开云同步偏好并应用到运行时（configureSync 会装配
-// 真实后端壳，但测试随后用假后端覆盖，凭据 provider 不会执行）。
+// 真实后端壳，但测试随后用假后端覆盖，凭据 provider 不会执行）。安全
+// 存储替换为内存实现，测试永不接触真实钥匙串。
 func enableSyncPrefs(t *testing.T, a *app) {
 	t.Helper()
 	if err := a.updatePreferences(func(p *preferences) {

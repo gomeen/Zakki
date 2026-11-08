@@ -34,7 +34,8 @@ var ErrSyncConflict = errors.New("远端文件已被其他设备更新")
 var ErrSyncHold = errors.New("正在应用远端同步内容，请稍后重试")
 
 // syncSaveDebounce 是保存成功后的同步防抖：连续输入时只跟最后一笔。
-const syncSaveDebounce = 10 * time.Second
+// var 以便测试注入短周期（notes 包测试串行执行）。
+var syncSaveDebounce = 10 * time.Second
 
 // syncMaxAttempts 是单轮内「pull → 判定 → commit」的最大重判次数；
 // 只用于 CAS 冲突重拉，绝不盲重试旧版本号。
@@ -311,8 +312,8 @@ func (s *Store) syncRun(gen uint64) {
 			s.mu.Unlock()
 		}
 		remote, version, existed, err := backend.Pull(ctx)
-		cancel()
 		if err != nil {
+			cancel()
 			lastErr = err
 			break
 		}
@@ -320,9 +321,13 @@ func (s *Store) syncRun(gen uint64) {
 		valid = s.syncValidLocked(gen)
 		s.mu.Unlock()
 		if !valid {
+			cancel()
 			return
 		}
 		retry, err := s.syncRound(gen, backend, remote, version, existed, ctx)
+		// pull 与 commit 共用同一轮上下文，本地阶段结束后才取消；
+		// Close 经 syncCancel 中止在途网络请求。
+		cancel()
 		if err != nil {
 			lastErr = err
 			break
@@ -645,7 +650,14 @@ func (s *Store) armSyncAfterSaveLocked() {
 	if s.closed || s.stopped || s.syncBackend == nil || s.syncHold || s.syncTimer != nil {
 		return
 	}
-	s.syncTimer = time.AfterFunc(syncSaveDebounce, func() { s.SyncNow() })
+	s.syncTimer = time.AfterFunc(syncSaveDebounce, func() {
+		// 触发后先清空字段再入轮：否则字段残留会永久阻止后续防抖装填
+		// （探针实测发现的缺陷）。
+		s.mu.Lock()
+		s.syncTimer = nil
+		s.mu.Unlock()
+		s.SyncNow()
+	})
 }
 
 // stopSyncTimerLocked 取消未触发的防抖同步排程（mu 内调用）。

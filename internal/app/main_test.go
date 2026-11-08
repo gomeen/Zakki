@@ -11,6 +11,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
+
+	"zakki/internal/notes"
 )
 
 // TestMain 兜底声明测试进程的界面语言。注意 MyGo 在包初始化阶段就解析并
@@ -30,6 +32,11 @@ func newTestApp(tb testing.TB) *app {
 	registerHandFont()
 	dir := tb.TempDir()
 	a := newAppAt(dir)
+	// 同步凭据的「系统安全存储」替换为每应用独立的内存实现：测试永不
+	// 接触真实钥匙串（工厂在 Cleanup 还原，包内测试串行执行）。
+	oldKeyringFactory := systemKeyringFactory
+	systemKeyringFactory = func(string) (notes.Keyring, error) { return &fakeTestKeyring{}, nil }
+	tb.Cleanup(func() { systemKeyringFactory = oldKeyringFactory })
 	tb.Cleanup(a.notes.Close)
 	a.prefs.Storage.SaveIntervalMS = 100 // 等待落盘的测试不必等默认 2 秒；校验下限 100
 	a.mdActive = 0                       // 编辑机制测试默认从首个焦点块开始（生产环境启动是预览态 -1）
