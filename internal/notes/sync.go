@@ -81,6 +81,22 @@ type SyncState struct {
 // syncDecision 是 D13 判定表的结论。
 type syncDecision int
 
+func (d syncDecision) String() string {
+	switch d {
+	case syncNone:
+		return "none"
+	case syncAdoptRemote:
+		return "adopt-remote"
+	case syncUploadLocal:
+		return "upload-local"
+	case syncUpdateBaseline:
+		return "update-baseline"
+	case syncNeedResolve:
+		return "need-resolve"
+	}
+	return fmt.Sprintf("unknown(%d)", int(d))
+}
+
 const (
 	syncNone           syncDecision = iota // 双方均未变，无需动作
 	syncAdoptRemote                        // 采用远端（以没有未保存本地修改为前提）
@@ -345,6 +361,11 @@ func (s *Store) syncRun(gen uint64) {
 	if lastErr == nil && lastWasRetry {
 		lastErr = errors.New("远端持续被其他设备更新，已完成重判仍未提交；请稍后重试")
 	}
+	if lastErr != nil {
+		// 离线时在途请求等 HTTP 客户端超时（60s）才落地；失败原因进日志
+		// 与状态栏，恢复后由下一次激活/保存防抖重新触发（无自动重试定时器）。
+		slog.Warn("同步轮失败", "error", lastErr)
+	}
 	s.mu.Lock()
 	if gen == s.syncGen {
 		st := &s.syncState
@@ -437,6 +458,13 @@ func (s *Store) syncLocalPhase(gen uint64, backend SyncBackend, remote []byte, v
 	localHash := contentHash(local)
 	remoteHash := contentHash(remote)
 	decision := decideSync(localExisted, localHash, existed, remoteHash, base, directive)
+	// 触发源、判定与三方指纹进日志：双实例排查时能对出「哪一端、哪一轮、
+	// 按什么判据」落的动作（离线慢失败/恢复延迟的 E2E 现场同理）。
+	slog.Info("同步轮判定",
+		"decision", decision,
+		"local", contentHashPrefix(localHash),
+		"remote", contentHashPrefix(remoteHash),
+		"base", contentHashPrefix(base.ContentSHA256))
 
 	switch decision {
 	case syncNone:
@@ -656,6 +684,7 @@ func (s *Store) armSyncAfterSaveLocked() {
 		s.mu.Lock()
 		s.syncTimer = nil
 		s.mu.Unlock()
+		slog.Info("保存后防抖同步轮触发")
 		s.SyncNow()
 	})
 }
@@ -716,6 +745,14 @@ func contentHash(content []byte) string {
 	}
 	sum := sha256.Sum256(content)
 	return hex.EncodeToString(sum[:])
+}
+
+// contentHashPrefix 把指纹截短为日志友好的前缀；空串（无文件）原样返回。
+func contentHashPrefix(hash string) string {
+	if len(hash) > 12 {
+		return hash[:12]
+	}
+	return hash
 }
 
 // ConflictInfo 是 conflicts/ 留档的列表条目（设置页查看与删除用）。
