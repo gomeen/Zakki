@@ -102,7 +102,7 @@ func TestPreferencesMigrateFontSplit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Version != CurrentVersion || CurrentVersion != 13 {
+	if got.Version != CurrentVersion || CurrentVersion != 14 {
 		t.Fatalf("版本应升到 %d，当前 %d", CurrentVersion, got.Version)
 	}
 	if got.Appearance.LatinFont != "" {

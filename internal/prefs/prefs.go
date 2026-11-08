@@ -37,7 +37,11 @@ import (
 // 静默摘除（不迁移语义，含开发期写出的版本 12 带旧键文件），写回即为版本 12。
 // 版本 13 新增 appearance.padX / padY（正文区左右 / 上下内边距覆盖，DIP；
 // 0 = 跟随排版主题）。旧文件从未写过这两个键，解码即零值 = 跟随，无需迁移。
-const CurrentVersion = 13
+// 版本 14 新增 sync 节：云同步开关、后端与仓库标识，全部为非凭据配置
+// （token 一律进系统安全存储，绝不写入偏好文件，R7）。旧文件缺键解码即
+// 零值（关闭），无需迁移逻辑；开启同步时桌面暂停 git.autoCommit /
+// git.autoPush 两个旧调度器，用户原开关保留在本节之外的 git 节。
+const CurrentVersion = 14
 
 // 整体风格：手账风格下颜色与排版由风格决定，colorTheme / markdownTheme 保留不动。
 const (
@@ -55,6 +59,7 @@ type Preferences struct {
 	Window     Window     `json:"window"`
 	Storage    Storage    `json:"storage"`
 	Git        Git        `json:"git"`
+	Sync       Sync       `json:"sync"`
 	Keymap     Keymap     `json:"keymap"`
 	Advanced   Advanced   `json:"advanced"`
 }
@@ -103,6 +108,22 @@ type Git struct {
 	AutoPush      bool `json:"autoPush"`
 	CommitMinutes int  `json:"commitMinutes"`
 	PushMinutes   int  `json:"pushMinutes"`
+}
+
+// SyncBackendGitHub 是后端 A（GitHub Contents API，sha CAS）的 backend 标识。
+const SyncBackendGitHub = "github"
+
+// Sync 是云同步偏好，只记录开关与后端指向等非凭据配置；token / refresh
+// token 一律进系统安全存储，绝不写入本节或任何偏好文件（R7）。
+// 开启同步即暂停 git.autoCommit / git.autoPush 两个旧调度器（§2.2），
+// 用户原开关原样保留；关闭同步后按保留配置恢复备份功能。
+type Sync struct {
+	// Enabled 开启云同步；开启时要求 Backend 与 Repo 合法（见 Validate）。
+	Enabled bool `json:"enabled"`
+	// Backend 是激活的同步后端："github"（后端 A）；空串 = 未选择。
+	Backend string `json:"backend"`
+	// Repo 是后端仓库标识 owner/name；后端为云盘时复用此键记录文件夹标识。
+	Repo string `json:"repo"`
 }
 
 type Keymap struct {
@@ -219,6 +240,19 @@ func (p Preferences) Validate(v AccelValidator) error {
 	if p.Git.AutoPush && !p.Git.AutoCommit {
 		return errors.New("git.autoPush 要求开启 git.autoCommit")
 	}
+	switch p.Sync.Backend {
+	case "", SyncBackendGitHub:
+	default:
+		return fmt.Errorf("sync.backend 的值 %q 无效，可选值：%q", p.Sync.Backend, []string{"", SyncBackendGitHub})
+	}
+	if p.Sync.Repo != "" || p.Sync.Enabled {
+		if err := validateSyncRepo(p.Sync.Repo); err != nil {
+			return err
+		}
+	}
+	if p.Sync.Enabled && p.Sync.Backend == "" {
+		return errors.New("sync.enabled 开启时必须选择 sync.backend")
+	}
 	if v != nil {
 		for id, acc := range p.Keymap.Overrides {
 			if acc == "" {
@@ -226,6 +260,28 @@ func (p Preferences) Validate(v AccelValidator) error {
 			}
 			if err := v(acc); err != nil {
 				return fmt.Errorf("keymap.overrides[%s] 的快捷键 %q 无效: %w", id, acc, err)
+			}
+		}
+	}
+	return nil
+}
+
+// validateSyncRepo 校验 sync.repo 的 owner/name 形状；非法值在设置页
+// 以行内错误呈现，不会写入磁盘。
+func validateSyncRepo(repo string) error {
+	owner, name, ok := strings.Cut(repo, "/")
+	if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
+		return errors.New("sync.repo 必须是 owner/name 形式的仓库标识")
+	}
+	for _, part := range []string{owner, name} {
+		if part == "." || part == ".." || len(part) > 100 {
+			return errors.New("sync.repo 必须是 owner/name 形式的仓库标识")
+		}
+		for _, r := range part {
+			valid := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' ||
+				r == '-' || r == '_' || r == '.'
+			if !valid {
+				return errors.New("sync.repo 只允许字母、数字与 . _ -（owner/name）")
 			}
 		}
 	}
