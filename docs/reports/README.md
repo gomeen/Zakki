@@ -5,6 +5,7 @@
 
 | 报告 | 说明 |
 |---|---|
+| [2026-11-08-m4-2-icloud-backend-verification.md](2026-11-08-m4-2-icloud-backend-verification.md) | 移动端 M4-2 iCloud 云盘后端 B：文件选择器授权/书签失效重选、身份+mtime 基线 CAS、双通道冲突副本、复用 D13 判定表与留档的 35 条新 XCTest 与模拟器端到端实测（含跨容器真实 picker 授权） |
 | [2026-11-08-m4-3-desktop-sync-verification.md](2026-11-08-m4-3-desktop-sync-verification.md) | 桌面同步配套（M4-3）：sync 偏好节 v14、旧 Git 调度器暂停/恢复、先拉后提同步循环、D13 冲突对话框与留档，隔离探针全流程实测 |
 | [2026-11-08-m4-1-sync-verification.md](2026-11-08-m4-1-sync-verification.md) | 移动端 M4-1 同步引擎与 GitHub 后端 A：D13 判定表、sha CAS 重拉、Device Flow/刷新/撤销、Keychain、conflicts/ 留档的 46 条 XCTest 与 stub 端到端实测 |
 (docs: M4-3 桌面同步验证记录与架构/配置/规格勾选更新)

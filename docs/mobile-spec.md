@@ -283,10 +283,20 @@ UI 区分「已排定」「待同步／待续排」「权限受限」，不将�
 - [ ] M4：GitHub 蜂窝真机可达性、真实 GitHub App 账号 Device Flow 连接与真实 token 过期／撤销、
   Keychain 真机安全保存（R7）；桌面 ↔ iPhone 双向同步联调随总票 M4 出口复现。
 (docs: M4-3 桌面同步验证记录与架构/配置/规格勾选更新)
-- [ ] M4：iCloud 探针（后端 B 开工前置，D21）：Personal Team 下 iCloud capability 核对与
+- [x] M4：iCloud 探针（后端 B 开工前置，D21）：Personal Team 下 iCloud capability 核对与
   文件选择器授权 + security-scoped bookmark 路线可用、iCloud Drive 占位文件能触发下载、
   冲突副本（`zakki (1).json`）枚举与 NSFileVersion 恢复可行；三项全部通过后端 B 才开工，
-  任一失败则后端 B 回落 M5，不拖后端 A 与整体节奏。
+  任一失败则后端 B 回落 M5，不拖后端 A 与整体节奏（三项通过，记录见
+  [2026-11-08-icloud-sync-probe](reports/2026-11-08-icloud-sync-probe.md)，占位/真冲突子项随
+  真机验收）。
+- [x] M4：后端 B（云盘文件夹，#53）：文件选择器授权 + security-scoped bookmark 持久化、
+  基线=文件身份+修改时间的写前版本比对（CAS 失败重拉重判定）、命名扫描 + NSFileVersion
+  双通道冲突副本走同一 D13 对话框、conflicts/ 留档随同步保存（仅文件授权留档留在本机）、
+  书签失效→重选状态机——iOS XCTest（35 条新增）与模拟器端到端（stub 预授权文件夹/仅文件/
+  书签失效三场景 + 探针容器跨 App 真实 picker 授权）覆盖（记录见
+  [2026-11-08-m4-2-icloud-backend-verification](reports/2026-11-08-m4-2-icloud-backend-verification.md)）。
+- [ ] M4：后端 B 真机 5 项：picker 的 iCloud Drive 节点可见可选、就地写回 Mac 侧可见、
+  无授权直读被拒、占位文件下载轮询、真实冲突副本双通道检测；关键项失败按 D21 回落 M5。
 - [ ] M5：Android 12+ 精确权限拒绝／撤销与降级；API 33+ USE_EXACT_ALARM 主路径、兜底特殊访问；
   POST_NOTIFICATIONS 拒绝、通知通道关闭、Doze、setAlarmClock 图标、force-stop 后再次打开恢复。
 - [ ] M5：BOOT_COMPLETED／MY_PACKAGE_REPLACED／TIME_SET／TIMEZONE_CHANGED 冷启动重建；
