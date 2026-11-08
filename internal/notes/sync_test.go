@@ -208,6 +208,66 @@ func TestSyncAdoptRemote(t *testing.T) {
 	}
 }
 
+// TestShutdownDuringSyncHoldKeepsAdoptedRemote 锁定 #61：远端内容已采用
+// （syncHold 冻结中）时，退出最终保存不得把重载前的陈旧编辑快照写盘，
+// 否则下次启动的同步轮会把旧内容当「本地已变」上传，静默回退另一端
+// 刚同步上去的编辑。
+func TestShutdownDuringSyncHoldKeepsAdoptedRemote(t *testing.T) {
+	s, be, _ := newSyncStore(t, "本地基线")
+	be.existed, be.remote, be.version = true, docBytes("本地基线"), "r1"
+	if st := startSync(t, s, be); st.Error != "" {
+		t.Fatalf("建立基线失败: %s", st.Error)
+	}
+	be.mu.Lock()
+	be.remote, be.version = docBytes("远端新内容"), "r2"
+	be.mu.Unlock()
+	if st := startSync(t, s, be); st.Error != "" || !s.SyncNeedsReload() {
+		t.Fatalf("应采用远端并进入冻结: %+v", st)
+	}
+	// 编辑器内存仍持有重载前的陈旧快照（未落盘本地改动）：退出最终
+	// 保存必须被冻结拦截，返回成功放行退出。
+	if err := s.Shutdown(doc("陈旧的编辑快照")); err != nil {
+		t.Fatalf("冻结期退出保存应成功放行: %v", err)
+	}
+	if got, err := os.ReadFile(s.DataPath()); err != nil || !bytes.Equal(got, docBytes("远端新内容")) {
+		t.Fatalf("退出不得覆盖已采用的远端内容: %q %v", got, err)
+	}
+	if s.Unsaved() {
+		t.Fatal("冻结期退出不应留下未保存状态")
+	}
+	if base := readBaseline(t, s); base.RemoteVersion != "r2" {
+		t.Fatalf("基线不得被退出改动: %+v", base)
+	}
+	// R11 语义保留：退出后新同步保存明确拒绝；重试退出幂等成功。
+	if err := s.SaveNow(doc("退出后的输入")); !errors.Is(err, ErrStopped) {
+		t.Fatalf("退出后 SaveNow = %v, want ErrStopped", err)
+	}
+	if err := s.Shutdown(doc("再次退出")); err != nil {
+		t.Fatalf("重试退出应幂等成功: %v", err)
+	}
+	// 保存失败取消退出时 stopped 回滚（app 层语义）：冻结仍在，再次退出
+	// 依旧不得写盘。
+	s.SetStopped(false)
+	s.ScheduleSave(doc("冻结期输入"), time.Hour, nil)
+	if err := s.Shutdown(doc("重试的退出快照")); err != nil {
+		t.Fatalf("取消退出后的重试应放行: %v", err)
+	}
+	if got, err := os.ReadFile(s.DataPath()); err != nil || !bytes.Equal(got, docBytes("远端新内容")) {
+		t.Fatalf("重试退出仍不得覆盖远端内容: %q %v", got, err)
+	}
+	// 下次启动：重载把已采用的远端内容带回内存，冻结解除。
+	f, _, _, err := s.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Tabs) == 0 || f.Tabs[0].Text != "远端新内容" {
+		t.Fatalf("重启后内存应为远端内容: %+v", f)
+	}
+	if s.SyncNeedsReload() {
+		t.Fatal("重载后应解除冻结")
+	}
+}
+
 // TestSyncUploadLocal 情况二：本地已变、远端等于基线 → 上传本地并更新基线。
 func TestSyncUploadLocal(t *testing.T) {
 	s, be, _ := newSyncStore(t, "旧内容")

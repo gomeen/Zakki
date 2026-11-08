@@ -241,6 +241,7 @@ func (a *app) openSettings(page string) {
 		Content:   ui.View(a.settingsView),
 	})
 	a.settingsWin = win
+	a.settingsWindow.Store(win)
 	win.OnClose(func(e *mygo.CloseEvent) {
 		if a.storageMoving {
 			e.PreventDefault()
@@ -253,6 +254,7 @@ func (a *app) openSettings(page string) {
 		a.setKeymapRecording("")
 		a.settingsUI.fontPreparation.stop()
 		a.settingsWin = nil
+		a.settingsWindow.CompareAndSwap(win, nil)
 		a.settingsUI = settingsUIState{}
 		if a.win != nil && a.winOpen {
 			a.win.Update(func() {})

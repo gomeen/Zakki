@@ -231,6 +231,15 @@ func (s *Store) Shutdown(f File) error {
 	s.stopTimerLocked()
 	s.stopped = true
 	s.pending = nil
+	if s.syncHold {
+		// 同步冻结期（远端内容已落盘等待重载）：内存快照是重载前的陈旧
+		// 编辑态，落盘会把刚采用的远端内容静默回退为旧版，下次启动的
+		// 同步轮还会把它当「本地已变」上传。与 ScheduleSave/SaveNow 的
+		// 冻结语义一致：快照丢弃，下次启动以磁盘为准重载；返回成功放行
+		// 退出，不能把用户困在保存失败的重试循环里。
+		s.mu.Unlock()
+		return nil
+	}
 	req := s.acceptLocked(f)
 	s.mu.Unlock()
 	s.writeMu.Lock()

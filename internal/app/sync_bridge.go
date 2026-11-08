@@ -47,6 +47,10 @@ func (a *app) dataDir() string { return filepath.Dir(a.prefsStore.Path) }
 // systemKeyringFactory 供测试注入内存实现；生产经 notes.SystemKeyring。
 var systemKeyringFactory = notes.SystemKeyring
 
+// syncDeliver 经仍存活的窗口把消化回调投回主线程；测试注入同步执行
+// 以在无窗口环境下锁定「回调可达」。
+var syncDeliver = func(win *mygo.Window, fn func()) { win.Update(fn) }
+
 // systemKeyring 懒创建系统安全存储（失败只记日志，调用处如实展示）。
 func (a *app) systemKeyring() notes.Keyring {
 	if a.syncState.keyring != nil {
@@ -111,18 +115,27 @@ func (a *app) configureSync() {
 }
 
 // syncRefresh 供 Store 在每轮结束后回调：投递回主线程消化状态
-// （重载远端内容、弹冲突对话框、刷新设置页）。
+// （重载远端内容、弹冲突对话框、刷新设置页）。窗口在回调触发时经
+// atomic 持有器解析，而不是配置时捕获——configureSync 在建窗之前执行
+// （偏好预置开启同步的冷启动），那时捕获的窗口指针恒为 nil，重载、
+// toast 与冲突对话框会静默丢失（#60）。
 func (a *app) syncRefresh() func() {
-	main, settings := a.win, a.settingsWin
 	return func() {
-		if main != nil {
-			main.Update(func() { a.syncPump() })
-			return
-		}
-		if settings != nil {
-			settings.Update(func() { a.syncPump() })
+		if win := a.syncRefreshTarget(); win != nil {
+			syncDeliver(win, func() { a.syncPump() })
 		}
 	}
+}
+
+// syncRefreshTarget 在回调触发时解析投递窗口：主窗口优先，未开时回退
+// 设置窗。两个持有器都是 atomic，后台回调 goroutine 读取不构成数据
+// 竞态；窗口若恰在投递后关闭，Update 进主线程后对已关窗口是 no-op，
+// 消化逻辑本身幂等。
+func (a *app) syncRefreshTarget() *mygo.Window {
+	if win := a.mainWindow.Load(); win != nil {
+		return win
+	}
+	return a.settingsWindow.Load()
 }
 
 // syncOnActivate 在窗口激活（启动、唤起）时拉推一轮：前台聚焦时同步

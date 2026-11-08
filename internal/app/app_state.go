@@ -185,21 +185,24 @@ type toastState struct {
 
 // desktopRefs 窗口、菜单、托盘、全局热键与状态栏提示。
 type desktopRefs struct {
-	win           *mygo.Window
-	mainWindow    atomic.Pointer[mygo.Window]
-	winOpen       bool
-	hidden        bool
-	menu          *mygo.Menu
-	miPreview     *mygo.MenuItem
-	miFind        *mygo.MenuItem
-	miFindNext    *mygo.MenuItem
-	miFindPrev    *mygo.MenuItem
-	miFindAllTabs *mygo.MenuItem
-	miTop         *mygo.MenuItem
-	hotkeyAcc     string
-	noticeHotkey  string
-	notice        string
-	tray          *mygo.Tray
+	win        *mygo.Window
+	mainWindow atomic.Pointer[mygo.Window]
+	// settingsWindow 是 settingsWin 的原子镜像：后台回调（同步通知等）
+	// 在主窗口未开时经它解析设置窗，不在后台直接读主线程字段。
+	settingsWindow atomic.Pointer[mygo.Window]
+	winOpen        bool
+	hidden         bool
+	menu           *mygo.Menu
+	miPreview      *mygo.MenuItem
+	miFind         *mygo.MenuItem
+	miFindNext     *mygo.MenuItem
+	miFindPrev     *mygo.MenuItem
+	miFindAllTabs  *mygo.MenuItem
+	miTop          *mygo.MenuItem
+	hotkeyAcc      string
+	noticeHotkey   string
+	notice         string
+	tray           *mygo.Tray
 }
 
 // prefsRuntimeState 内存中的偏好及其一次性迁移结果。
