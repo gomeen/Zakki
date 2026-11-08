@@ -7,6 +7,8 @@ import Foundation
 // 仅供模拟器端到端实测与 UI 测试使用；单测走独立 URLProtocol mock。
 enum SyncStubMode {
     static let launchArg = "-ZakkiSyncStub"
+    // 预授权路径启动参数（仅 stub 模式生效）：模拟器端到端实测后端 B，见 SyncEngine.forLaunch。
+    static let cloudGrantArg = "-ZakkiCloudGrant"
     static var isActive: Bool { ProcessInfo.processInfo.arguments.contains(launchArg) }
     static let host = "stub.zakki.local"
     // Device Flow 端点挂在 /github 下，Contents API 挂在 /api 下（单域名拦截）。

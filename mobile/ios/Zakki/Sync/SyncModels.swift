@@ -87,13 +87,26 @@ enum ConflictDecision {
 
 // MARK: - 冲突候选（对话框呈现与裁决的载体）
 
-// 判定为 conflict 时暂存的双方内容；用户二选一后按此执行，CAS 以候选里的
-// 远端版本号为基准——若期间远端又前进，push 会 CAS 失败并回到重拉重判定（D12）。
+// 判定为 conflict 时暂存的双方内容；用户二选一后按此执行，CAS 以 casBaseVersion 为基准
+// ——若期间远端又前进，push 会 CAS 失败并回到重拉重判定（D12）。
+// casBaseVersion：写回/基线记录所用的远端主文件版本号。后端 A 与 remoteVersion 相同
+//（即主文件 blob sha）；后端 B 采用云盘副本候选时是主文件当前版本号，而非副本自身版本
+//（落盘目标是主文件，基线也必须记录主文件的下一轮版本号）。
 struct ConflictCandidate: Identifiable, Equatable {
     var id: String { remoteVersion }
     var remoteContent: String
     var remoteVersion: String
     var localRaw: String
+    var casBaseVersion: String?
+
+    // 后端 A 路径：候选即主文件，CAS/基线基准与候选版本一致。
+    init(remoteContent: String, remoteVersion: String, localRaw: String,
+         casBaseVersion: String? = nil) {
+        self.remoteContent = remoteContent
+        self.remoteVersion = remoteVersion
+        self.localRaw = localRaw
+        self.casBaseVersion = casBaseVersion ?? remoteVersion
+    }
 }
 
 // MARK: - 轮次结果与持久化状态
@@ -144,11 +157,17 @@ extension SyncPersistedState: Decodable {
 // MARK: - 错误（客户端按错误码处理，不匹配文案；文案在 Strings）
 
 enum SyncError: Error, Equatable {
-    case casConflict // PUT 409/422：远端已前进，需重新 pull 重判定（不盲重试）
+    case casConflict // PUT 409/422 或写前版本比对失败：远端已前进，需重新 pull 重判定（不盲重试）
     case needsReauth // 401 且刷新失败：token 过期/被撤销，需重新 Device Flow
     case notConfigured // 缺 client_id / owner/repo / token
     case api(String) // 其他 API 错误（`code: 说明` 形式）
     case deviceFlow(String) // Device Flow 失败（expired/denied 等）
+    // 后端 B（#53）：书签失效（目标被删/移动）→ 引导重新选位置；
+    // 授权被撤销（系统设置）→ 同样走重选；一切 startAccessing/读写按可失败设计（探针 §5）。
+    case bookmarkInvalid
+    case accessDenied
+    // 后端 B 仅文件授权：写不进 zakki.json 同目录的 conflicts/，留档保留设备本地即可。
+    case archiveNotSupported
 }
 
 // MARK: - 工具

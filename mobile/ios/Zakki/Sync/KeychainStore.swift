@@ -16,6 +16,9 @@ enum TokenKey {
     static let accessToken = "github.access-token"
     static let refreshToken = "github.refresh-token"
     static let accessTokenExpiry = "github.access-token-expiry"
+    // 后端 B（#53）：security-scoped bookmark（base64）。书签不含敏感数据，
+    // 但属授权凭据，与 token 同规则进 Keychain，不进 prefs/zakki.json（R7）。
+    static let cloudFolderBookmark = "cloud.folder.bookmark"
 }
 
 // 系统 Keychain 实现：kSecClassGenericPassword，service 固定、account 即键名。
