@@ -67,7 +67,7 @@ final class NotesModel: ObservableObject {
         ]
         do {
             let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
-            install(data)
+            _ = install(data)
         } catch {
             importError = error.localizedDescription
         }
@@ -102,7 +102,8 @@ final class NotesModel: ObservableObject {
     }
 
     // 解码失败（reason=invalid）也保留副本：写保护横幅要能解释磁盘现状。
-    private func install(_ data: Data) -> Bool {
+    // 同步引擎安装远端内容复用此路径（同目录内原子替换 + 快照刷新）。
+    func install(_ data: Data) -> Bool {
         do {
             // 全新沙盒里 Application Support 不存在，原子写会因父目录缺失失败。
             let dir = sandboxURL.deletingLastPathComponent()
@@ -152,6 +153,14 @@ final class NotesModel: ObservableObject {
     // 用户确认保存失败提示后清除。
     func clearSaveError() {
         saveError = nil
+    }
+
+    // 同步安装远端内容前作废待写状态（引擎专用，见 NotesModelSync）。
+    func discardPendingWrites() {
+        saveWorkItem?.cancel()
+        saveWorkItem = nil
+        pendingTabIDs = []
+        hasPendingWrites = false
     }
 
     // 仅供测试注入被污染的基线以触发 write_protected 兑底路径；生产流程不调用。
