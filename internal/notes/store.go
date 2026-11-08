@@ -54,6 +54,22 @@ type Store struct {
 	gitCancel                        func()
 	gitAfter                         func()
 	gitCommitAttempt, gitPushAttempt time.Time
+
+	// 云同步（sync.go）：后端与基线路径由 ConfigureSync 注入；syncGen
+	// 作废在途轮次；syncHold 表示远端内容已落盘、等待界面重载（期间
+	// 暂停本地保存）；syncActive 是暂停旧 Git 调度器的门禁（§2.2）。
+	syncBackend             SyncBackend
+	syncRepo, syncStateFile string
+	syncActive              bool
+	syncGen                 uint64
+	syncTimer               *time.Timer
+	syncRunning             bool
+	syncQueued, syncHold    bool
+	syncDone                chan struct{}
+	syncCancel              func()
+	syncAfter               func()
+	syncDirective           *syncDirective
+	syncState               SyncState
 }
 
 // NewStore 创建单文件存储；缺省时钟使用 time.Now。
@@ -115,6 +131,10 @@ func hadTabsIn(raw []byte) bool {
 func (s *Store) Load() (f File, exists, hadTabs bool, err error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
+	// 显式重载解除同步冻结：无论成功与否，磁盘状态都以本次读取为准。
+	s.mu.Lock()
+	s.syncHold = false
+	s.mu.Unlock()
 	path := s.DataPath()
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {

@@ -5577,3 +5577,423 @@ func TimeGuideBody() string { return In(i18n.Locale()).TimeGuideBody() }
 func (msgs Messages) TimeGuideBody() string {
 	return Catalog.Format(msgs.locale, "timeGuideBody", nil)
 }
+
+// SyncSection says "Cloud Sync"
+// in the language the app shows.
+func SyncSection() string { return In(i18n.Locale()).SyncSection() }
+
+// SyncSection says "Cloud Sync"
+// in the language of msgs.
+func (msgs Messages) SyncSection() string {
+	return Catalog.Format(msgs.locale, "syncSection", nil)
+}
+
+// SyncEnable says "Cloud sync"
+// in the language the app shows.
+func SyncEnable() string { return In(i18n.Locale()).SyncEnable() }
+
+// SyncEnable says "Cloud sync"
+// in the language of msgs.
+func (msgs Messages) SyncEnable() string {
+	return Catalog.Format(msgs.locale, "syncEnable", nil)
+}
+
+// SyncEnableHint says "Syncs zakki.json with GitHub. While sync is on, Git auto commit and push pause; they resume with your saved settings …"
+// in the language the app shows.
+func SyncEnableHint() string { return In(i18n.Locale()).SyncEnableHint() }
+
+// SyncEnableHint says "Syncs zakki.json with GitHub. While sync is on, Git auto commit and push pause; they resume with your saved settings …"
+// in the language of msgs.
+func (msgs Messages) SyncEnableHint() string {
+	return Catalog.Format(msgs.locale, "syncEnableHint", nil)
+}
+
+// SyncPausedGitHint says "Git automatic commit and push are paused while cloud sync is on. Your original switches are kept and restored when sy…"
+// in the language the app shows.
+func SyncPausedGitHint() string { return In(i18n.Locale()).SyncPausedGitHint() }
+
+// SyncPausedGitHint says "Git automatic commit and push are paused while cloud sync is on. Your original switches are kept and restored when sy…"
+// in the language of msgs.
+func (msgs Messages) SyncPausedGitHint() string {
+	return Catalog.Format(msgs.locale, "syncPausedGitHint", nil)
+}
+
+// SyncRepo says "Repository"
+// in the language the app shows.
+func SyncRepo() string { return In(i18n.Locale()).SyncRepo() }
+
+// SyncRepo says "Repository"
+// in the language of msgs.
+func (msgs Messages) SyncRepo() string {
+	return Catalog.Format(msgs.locale, "syncRepo", nil)
+}
+
+// SyncRepoHint says "GitHub repository in owner/name form, for example gomeen/notes."
+// in the language the app shows.
+func SyncRepoHint() string { return In(i18n.Locale()).SyncRepoHint() }
+
+// SyncRepoHint says "GitHub repository in owner/name form, for example gomeen/notes."
+// in the language of msgs.
+func (msgs Messages) SyncRepoHint() string {
+	return Catalog.Format(msgs.locale, "syncRepoHint", nil)
+}
+
+// SyncConnect says "Connect GitHub…"
+// in the language the app shows.
+func SyncConnect() string { return In(i18n.Locale()).SyncConnect() }
+
+// SyncConnect says "Connect GitHub…"
+// in the language of msgs.
+func (msgs Messages) SyncConnect() string {
+	return Catalog.Format(msgs.locale, "syncConnect", nil)
+}
+
+// SyncDisconnect says "Disconnect"
+// in the language the app shows.
+func SyncDisconnect() string { return In(i18n.Locale()).SyncDisconnect() }
+
+// SyncDisconnect says "Disconnect"
+// in the language of msgs.
+func (msgs Messages) SyncDisconnect() string {
+	return Catalog.Format(msgs.locale, "syncDisconnect", nil)
+}
+
+// SyncOpenAuthPage says "Open authorization page"
+// in the language the app shows.
+func SyncOpenAuthPage() string { return In(i18n.Locale()).SyncOpenAuthPage() }
+
+// SyncOpenAuthPage says "Open authorization page"
+// in the language of msgs.
+func (msgs Messages) SyncOpenAuthPage() string {
+	return Catalog.Format(msgs.locale, "syncOpenAuthPage", nil)
+}
+
+// SyncNow says "Sync now"
+// in the language the app shows.
+func SyncNow() string { return In(i18n.Locale()).SyncNow() }
+
+// SyncNow says "Sync now"
+// in the language of msgs.
+func (msgs Messages) SyncNow() string {
+	return Catalog.Format(msgs.locale, "syncNow", nil)
+}
+
+// SyncIdleStatus says "Sync on, waiting for the first round"
+// in the language the app shows.
+func SyncIdleStatus() string { return In(i18n.Locale()).SyncIdleStatus() }
+
+// SyncIdleStatus says "Sync on, waiting for the first round"
+// in the language of msgs.
+func (msgs Messages) SyncIdleStatus() string {
+	return Catalog.Format(msgs.locale, "syncIdleStatus", nil)
+}
+
+// SyncRunningStatus says "Syncing…"
+// in the language the app shows.
+func SyncRunningStatus() string { return In(i18n.Locale()).SyncRunningStatus() }
+
+// SyncRunningStatus says "Syncing…"
+// in the language of msgs.
+func (msgs Messages) SyncRunningStatus() string {
+	return Catalog.Format(msgs.locale, "syncRunningStatus", nil)
+}
+
+// SyncOffStatus says "Cloud sync is off; Git backup follows your saved settings."
+// in the language the app shows.
+func SyncOffStatus() string { return In(i18n.Locale()).SyncOffStatus() }
+
+// SyncOffStatus says "Cloud sync is off; Git backup follows your saved settings."
+// in the language of msgs.
+func (msgs Messages) SyncOffStatus() string {
+	return Catalog.Format(msgs.locale, "syncOffStatus", nil)
+}
+
+// SyncLastSync says "Last sync: {time}"
+// in the language the app shows.
+//
+// time is 01-02 15:04
+func SyncLastSync(time_ string) string { return In(i18n.Locale()).SyncLastSync(time_) }
+
+// SyncLastSync says "Last sync: {time}"
+// in the language of msgs.
+//
+// time is 01-02 15:04
+func (msgs Messages) SyncLastSync(time_ string) string {
+	return Catalog.Format(msgs.locale, "syncLastSync", map[string]any{"time": time_})
+}
+
+// SyncNotConnected says "GitHub not connected"
+// in the language the app shows.
+func SyncNotConnected() string { return In(i18n.Locale()).SyncNotConnected() }
+
+// SyncNotConnected says "GitHub not connected"
+// in the language of msgs.
+func (msgs Messages) SyncNotConnected() string {
+	return Catalog.Format(msgs.locale, "syncNotConnected", nil)
+}
+
+// SyncRemoteApplied says "Remote notes applied"
+// in the language the app shows.
+func SyncRemoteApplied() string { return In(i18n.Locale()).SyncRemoteApplied() }
+
+// SyncRemoteApplied says "Remote notes applied"
+// in the language of msgs.
+func (msgs Messages) SyncRemoteApplied() string {
+	return Catalog.Format(msgs.locale, "syncRemoteApplied", nil)
+}
+
+// SyncConflictTitle says "Sync conflict"
+// in the language the app shows.
+func SyncConflictTitle() string { return In(i18n.Locale()).SyncConflictTitle() }
+
+// SyncConflictTitle says "Sync conflict"
+// in the language of msgs.
+func (msgs Messages) SyncConflictTitle() string {
+	return Catalog.Format(msgs.locale, "syncConflictTitle", nil)
+}
+
+// SyncConflictMessage says "Your notes changed on this device and on GitHub since the last sync. Keep which version?"
+// in the language the app shows.
+func SyncConflictMessage() string { return In(i18n.Locale()).SyncConflictMessage() }
+
+// SyncConflictMessage says "Your notes changed on this device and on GitHub since the last sync. Keep which version?"
+// in the language of msgs.
+func (msgs Messages) SyncConflictMessage() string {
+	return Catalog.Format(msgs.locale, "syncConflictMessage", nil)
+}
+
+// SyncConflictDetail says "The losing version is archived in full under conflicts/ next to zakki.json. It never joins tabs, reminders or the tab…"
+// in the language the app shows.
+func SyncConflictDetail() string { return In(i18n.Locale()).SyncConflictDetail() }
+
+// SyncConflictDetail says "The losing version is archived in full under conflicts/ next to zakki.json. It never joins tabs, reminders or the tab…"
+// in the language of msgs.
+func (msgs Messages) SyncConflictDetail() string {
+	return Catalog.Format(msgs.locale, "syncConflictDetail", nil)
+}
+
+// SyncKeepLocal says "Keep this device"
+// in the language the app shows.
+func SyncKeepLocal() string { return In(i18n.Locale()).SyncKeepLocal() }
+
+// SyncKeepLocal says "Keep this device"
+// in the language of msgs.
+func (msgs Messages) SyncKeepLocal() string {
+	return Catalog.Format(msgs.locale, "syncKeepLocal", nil)
+}
+
+// SyncKeepRemote says "Keep GitHub"
+// in the language the app shows.
+func SyncKeepRemote() string { return In(i18n.Locale()).SyncKeepRemote() }
+
+// SyncKeepRemote says "Keep GitHub"
+// in the language of msgs.
+func (msgs Messages) SyncKeepRemote() string {
+	return Catalog.Format(msgs.locale, "syncKeepRemote", nil)
+}
+
+// SyncConflictPending says "Conflict pending: both sides changed; the losing version will be archived under conflicts/."
+// in the language the app shows.
+func SyncConflictPending() string { return In(i18n.Locale()).SyncConflictPending() }
+
+// SyncConflictPending says "Conflict pending: both sides changed; the losing version will be archived under conflicts/."
+// in the language of msgs.
+func (msgs Messages) SyncConflictPending() string {
+	return Catalog.Format(msgs.locale, "syncConflictPending", nil)
+}
+
+// SyncConflictsTitle says "Conflict archives"
+// in the language the app shows.
+func SyncConflictsTitle() string { return In(i18n.Locale()).SyncConflictsTitle() }
+
+// SyncConflictsTitle says "Conflict archives"
+// in the language of msgs.
+func (msgs Messages) SyncConflictsTitle() string {
+	return Catalog.Format(msgs.locale, "syncConflictsTitle", nil)
+}
+
+// SyncConflictsHint says "Full copies of the losing versions from sync conflicts. They do not join tabs or reminders and are never cleaned auto…"
+// in the language the app shows.
+func SyncConflictsHint() string { return In(i18n.Locale()).SyncConflictsHint() }
+
+// SyncConflictsHint says "Full copies of the losing versions from sync conflicts. They do not join tabs or reminders and are never cleaned auto…"
+// in the language of msgs.
+func (msgs Messages) SyncConflictsHint() string {
+	return Catalog.Format(msgs.locale, "syncConflictsHint", nil)
+}
+
+// SyncDeleteArchive says "Delete archive"
+// in the language the app shows.
+func SyncDeleteArchive() string { return In(i18n.Locale()).SyncDeleteArchive() }
+
+// SyncDeleteArchive says "Delete archive"
+// in the language of msgs.
+func (msgs Messages) SyncDeleteArchive() string {
+	return Catalog.Format(msgs.locale, "syncDeleteArchive", nil)
+}
+
+// SyncClientIDMissing says "To connect, set the ZAKKI_GITHUB_CLIENT_ID environment variable to your GitHub App client ID first."
+// in the language the app shows.
+func SyncClientIDMissing() string { return In(i18n.Locale()).SyncClientIDMissing() }
+
+// SyncClientIDMissing says "To connect, set the ZAKKI_GITHUB_CLIENT_ID environment variable to your GitHub App client ID first."
+// in the language of msgs.
+func (msgs Messages) SyncClientIDMissing() string {
+	return Catalog.Format(msgs.locale, "syncClientIDMissing", nil)
+}
+
+// SyncKeyringUnavailable says "System secure storage is unavailable; sync credentials cannot be stored."
+// in the language the app shows.
+func SyncKeyringUnavailable() string { return In(i18n.Locale()).SyncKeyringUnavailable() }
+
+// SyncKeyringUnavailable says "System secure storage is unavailable; sync credentials cannot be stored."
+// in the language of msgs.
+func (msgs Messages) SyncKeyringUnavailable() string {
+	return Catalog.Format(msgs.locale, "syncKeyringUnavailable", nil)
+}
+
+// SyncConnectTitle says "Connect GitHub"
+// in the language the app shows.
+func SyncConnectTitle() string { return In(i18n.Locale()).SyncConnectTitle() }
+
+// SyncConnectTitle says "Connect GitHub"
+// in the language of msgs.
+func (msgs Messages) SyncConnectTitle() string {
+	return Catalog.Format(msgs.locale, "syncConnectTitle", nil)
+}
+
+// SyncConnectCode says "On github.com/login/device enter this code: {code}"
+// in the language the app shows.
+//
+// code is the one-time user code
+func SyncConnectCode(code string) string { return In(i18n.Locale()).SyncConnectCode(code) }
+
+// SyncConnectCode says "On github.com/login/device enter this code: {code}"
+// in the language of msgs.
+//
+// code is the one-time user code
+func (msgs Messages) SyncConnectCode(code string) string {
+	return Catalog.Format(msgs.locale, "syncConnectCode", map[string]any{"code": code})
+}
+
+// SyncConnectHint says "Or open {url} and enter the code above. Zakki keeps polling until you finish or the code expires."
+// in the language the app shows.
+//
+// url is the verification page
+func SyncConnectHint(url string) string { return In(i18n.Locale()).SyncConnectHint(url) }
+
+// SyncConnectHint says "Or open {url} and enter the code above. Zakki keeps polling until you finish or the code expires."
+// in the language of msgs.
+//
+// url is the verification page
+func (msgs Messages) SyncConnectHint(url string) string {
+	return Catalog.Format(msgs.locale, "syncConnectHint", map[string]any{"url": url})
+}
+
+// SyncConnectOpen says "Open GitHub"
+// in the language the app shows.
+func SyncConnectOpen() string { return In(i18n.Locale()).SyncConnectOpen() }
+
+// SyncConnectOpen says "Open GitHub"
+// in the language of msgs.
+func (msgs Messages) SyncConnectOpen() string {
+	return Catalog.Format(msgs.locale, "syncConnectOpen", nil)
+}
+
+// SyncConnectTimeout says "The device code expired before authorization finished; try connecting again."
+// in the language the app shows.
+func SyncConnectTimeout() string { return In(i18n.Locale()).SyncConnectTimeout() }
+
+// SyncConnectTimeout says "The device code expired before authorization finished; try connecting again."
+// in the language of msgs.
+func (msgs Messages) SyncConnectTimeout() string {
+	return Catalog.Format(msgs.locale, "syncConnectTimeout", nil)
+}
+
+// SyncConnectedToast says "GitHub connected; sync credentials are stored in the system keychain."
+// in the language the app shows.
+func SyncConnectedToast() string { return In(i18n.Locale()).SyncConnectedToast() }
+
+// SyncConnectedToast says "GitHub connected; sync credentials are stored in the system keychain."
+// in the language of msgs.
+func (msgs Messages) SyncConnectedToast() string {
+	return Catalog.Format(msgs.locale, "syncConnectedToast", nil)
+}
+
+// SyncConnectFailed says "Connecting GitHub failed: {err}"
+// in the language the app shows.
+//
+// err is the failure reason
+func SyncConnectFailed(err string) string { return In(i18n.Locale()).SyncConnectFailed(err) }
+
+// SyncConnectFailed says "Connecting GitHub failed: {err}"
+// in the language of msgs.
+//
+// err is the failure reason
+func (msgs Messages) SyncConnectFailed(err string) string {
+	return Catalog.Format(msgs.locale, "syncConnectFailed", map[string]any{"err": err})
+}
+
+// SyncDisconnectedToast says "Sync credentials removed."
+// in the language the app shows.
+func SyncDisconnectedToast() string { return In(i18n.Locale()).SyncDisconnectedToast() }
+
+// SyncDisconnectedToast says "Sync credentials removed."
+// in the language of msgs.
+func (msgs Messages) SyncDisconnectedToast() string {
+	return Catalog.Format(msgs.locale, "syncDisconnectedToast", nil)
+}
+
+// SyncDisconnectFailed says "Removing sync credentials failed: {err}"
+// in the language the app shows.
+//
+// err is the failure reason
+func SyncDisconnectFailed(err string) string { return In(i18n.Locale()).SyncDisconnectFailed(err) }
+
+// SyncDisconnectFailed says "Removing sync credentials failed: {err}"
+// in the language of msgs.
+//
+// err is the failure reason
+func (msgs Messages) SyncDisconnectFailed(err string) string {
+	return Catalog.Format(msgs.locale, "syncDisconnectFailed", map[string]any{"err": err})
+}
+
+// SyncDeleteFailed says "Deleting the archive failed: {err}"
+// in the language the app shows.
+//
+// err is the failure reason
+func SyncDeleteFailed(err string) string { return In(i18n.Locale()).SyncDeleteFailed(err) }
+
+// SyncDeleteFailed says "Deleting the archive failed: {err}"
+// in the language of msgs.
+//
+// err is the failure reason
+func (msgs Messages) SyncDeleteFailed(err string) string {
+	return Catalog.Format(msgs.locale, "syncDeleteFailed", map[string]any{"err": err})
+}
+
+// SyncConnectWaiting says "Waiting for authorization…"
+// in the language the app shows.
+func SyncConnectWaiting() string { return In(i18n.Locale()).SyncConnectWaiting() }
+
+// SyncConnectWaiting says "Waiting for authorization…"
+// in the language of msgs.
+func (msgs Messages) SyncConnectWaiting() string {
+	return Catalog.Format(msgs.locale, "syncConnectWaiting", nil)
+}
+
+// SyncArchiveMeta says "{size} {unit} · {time}"
+// in the language the app shows.
+//
+// size is a number; unit is B/KB/MB; time is 01-02 15:04
+func SyncArchiveMeta(size string, unit string, time_ string) string {
+	return In(i18n.Locale()).SyncArchiveMeta(size, unit, time_)
+}
+
+// SyncArchiveMeta says "{size} {unit} · {time}"
+// in the language of msgs.
+//
+// size is a number; unit is B/KB/MB; time is 01-02 15:04
+func (msgs Messages) SyncArchiveMeta(size string, unit string, time_ string) string {
+	return Catalog.Format(msgs.locale, "syncArchiveMeta", map[string]any{"size": size, "unit": unit, "time": time_})
+}

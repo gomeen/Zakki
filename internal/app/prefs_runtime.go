@@ -178,6 +178,7 @@ func (a *app) applyPreferencesToRuntime() {
 	a.cfg.AlwaysOnTop = p.Window.AlwaysOnTop
 	a.cfg.HideOnEscape = p.Window.HideOnEscape
 	a.configureGit()
+	a.configureSync()
 	if a.ready {
 		applyTheme(p.Appearance.AppearanceMode)
 	}

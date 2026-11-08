@@ -106,6 +106,7 @@ func (a *app) storagePage(c *ui.Context) {
 					ui.Text(c, status.Error).FontSize(12).TextColor(c.Theme().Danger)
 				}
 			}
+			a.syncSection(c)
 
 		})
 	})

@@ -33,8 +33,8 @@
 | `mobile/binding` / `mobile/ios` | 移动端脚手架（不参与桌面 `make check` 的根 module 构建与测试）：`mobile/binding` 是独立 Go module，`require zakki/core` 并 `replace => ../../core`，是唯一允许依赖 golang.org/x/mobile 的模块（tool directive 固定版本），供 `gomobile bind` 把 `core/zakkicore` 打成 XCFramework／AAR；`mobile/ios` 是 XcodeGen 工程（`project.yml` 生成 .xcodeproj，生成物与绑定产物不入库），不参与任何 Go 构建。core 仍是零依赖叶子。 |
 | `internal/markdown` | Markdown 解析、格式变换、表格纯函数（无 MyGo 依赖）。时间令牌（`@时刻`、`~提前量`、`^重复`）的行内识别与原位更新（`timeinline.go`）与旧行尾解析（`rowtime.go`）已委托 `core`，本包只保留调用面（含 `ParseRule` / `Expand` / `Occurrence` / `Advance` 薄转发）并把行内代码/链接的 rune 保护区换算为 core 的字节保护区；`AlertTiers` 与弹层共用一份档位白名单。 |
 | `internal/codehl` | 代码块逐行词法着色纯函数：`Kind`（注释/字符串/数字/关键字/函数/键）× 行内 `Span`，按围栏 info 归一化语言（go/js/ts/py/sh/json/yaml/toml/rust/c/java 家族，未知语言走通用规则）；不跨行追踪，块注释/多行字符串只着色起始行（无 MyGo 依赖）。 |
-| `internal/notes` | 唯一权威文件 zakki.json 的 `Store`（磁盘模型、迁移与未知字段编解码语义在 `core/model`，本包以类型别名与转发消费）：`store.go` 负载入（经 `model.Decode`：返回文件存在性与原始 hadTabs，记住磁盘字节指纹，并在锁内保存顶层/settings/tab 三层未知字段快照；成功重读作废旧待写快照与重试）、写保护（损坏/高版本/标签超限/外部改动时拒写，不产生副本）与路径状态；`save.go` 负责 `ScheduleSave`（首笔修改固定截止、后续输入只换快照不延期）、`SaveNow`、退出 `Shutdown` 与失败自动重试（写盘组装未知字段快照后走 `model.Encode`：无未知字段时与旧 `MarshalIndent` 输出逐字节相同，未知字段跨保存往返保留，已删标签的未知字段不再落盘）；`relocate.go` 负责 `Relocate` 单文件安全迁址；`git_sync.go` / `git_schedule.go` 负责对这一个文件的精确路径 Git 提交与按间隔推送（后台单 worker、代号门禁、本地写命令与迁址互斥、推送不占锁）。数据版本 3：排版主题旧 ID 随载入迁移为 `note`。
-| `internal/prefs` | `preferences.json` 模型、`Store`（修订号/防抖写盘/异常门禁）。偏好版本 13：新增 `appearance.padX` / `padY` 正文内边距覆盖；版本 12 新增 `storage.dataFile`（笔记文件绝对路径，空串 = 应用数据目录 `zakki.json`）与 `storage.saveIntervalMs`（默认 2000），新增 `git.autoCommit` / `git.autoPush`（默认关）与提交/推送间隔（默认 1 / 10 分钟），并移除 `backup` 整节与 `advanced.autosaveDelayMs`。版本 11：`advanced.windowColumns` / `windowRows` 取代像素宽高（`WindowPixels` / `WindowGrid` 换算）。版本 10：`appearance.style`（标准 / 手账），生效值经 `EffectiveColorTheme` / `EffectiveMarkdownTheme`。更早版本差异见 configuration.md。
+| `internal/notes` | 唯一权威文件 zakki.json 的 `Store`（磁盘模型、迁移与未知字段编解码语义在 `core/model`，本包以类型别名与转发消费）：`store.go` 负载入（经 `model.Decode`：返回文件存在性与原始 hadTabs，记住磁盘字节指纹，并在锁内保存顶层/settings/tab 三层未知字段快照；成功重读作废旧待写快照与重试）、写保护（损坏/高版本/标签超限/外部改动时拒写，不产生副本）与路径状态；`save.go` 负责 `ScheduleSave`（首笔修改固定截止、后续输入只换快照不延期）、`SaveNow`、退出 `Shutdown` 与失败自动重试（写盘组装未知字段快照后走 `model.Encode`：无未知字段时与旧 `MarshalIndent` 输出逐字节相同，未知字段跨保存往返保留，已删标签的未知字段不再落盘）；`relocate.go` 负责 `Relocate` 单文件安全迁址；`git_sync.go` / `git_schedule.go` 负责对这一个文件的精确路径 Git 提交与按间隔推送（后台单 worker、代号门禁、本地写命令与迁址互斥、推送不占锁）；`sync.go` 负责云同步循环（先拉取远端与版本号 → flush 待保存 + verifyDisk → D13 判定表 → CAS 上传/采用远端/只更基线/挂起冲突，CAS 失败重新拉取重判；本地阶段持有 writeMu+gitGate 与迁址、写保护互斥，网络不占锁；基线存设备本地状态文件，冲突留档写 conflicts/）；`sync_github.go` 是后端 A（GitHub Contents API blob sha CAS、大文件 raw 回退）；`sync_oauth.go` 是 Device Flow 与令牌刷新；`sync_keyring*.go` 抽象系统安全存储（macOS 钥匙串经 security CLI、Windows DPAPI 用户级加密文件、其他平台明确不可用）。数据版本 3：排版主题旧 ID 随载入迁移为 `note`。
+| `internal/prefs` | `preferences.json` 模型、`Store`（修订号/防抖写盘/异常门禁）。偏好版本 14：新增 `sync` 节（云同步开关 `enabled`、后端 `backend`、仓库 `repo`；全部为非凭据配置，token 只进系统安全存储，绝不写入偏好文件；开启时校验后端与 owner/name 仓库）。版本 13：新增 `appearance.padX` / `padY` 正文内边距覆盖；版本 12 新增 `storage.dataFile`（笔记文件绝对路径，空串 = 应用数据目录 `zakki.json`）与 `storage.saveIntervalMs`（默认 2000），新增 `git.autoCommit` / `git.autoPush`（默认关）与提交/推送间隔（默认 1 / 10 分钟），并移除 `backup` 整节与 `advanced.autosaveDelayMs`。版本 11：`advanced.windowColumns` / `windowRows` 取代像素宽高（`WindowPixels` / `WindowGrid` 换算）。版本 10：`appearance.style`（标准 / 手账），生效值经 `EffectiveColorTheme` / `EffectiveMarkdownTheme`。更早版本差异见 configuration.md。
 | `locales/` | MyGo i18n 目录：`en.json`（源）+ `zh-Hans.json`，ICU MessageFormat；`go tool mygo generate` 生成 `catalog_gen.go`。`internal/app` 统一经 `locales.*` 取文案；语言选择在首启向导第一步、设置通用页与应用菜单，变更经 `App.SetLocale` 生效并由 `OnLocaleChanged` 重建菜单。 |
 | `internal/app/datamigrate.go` | 数据目录解析：正式安装 `<系统应用数据>/Zakki`，开发运行 `Zakki Dev`（`resolveDataDir` 内 `sync.Once` 缓存，解析失败不构造 Store）。应用不扫描或迁移旧目录；当前目录或已配置路径的数据照常读取，找不到当前数据时才按全新安装处理。 |
 | `internal/app/live_markdown.go` / `internal/app/view_highlight.go` | 桥接 `internal/markdown`；源码高亮 `editorRanges`（依赖 `ui.TextRange`），用每 rune 一位的占用位图判交，保留搜索优先与重叠候选整段拒绝；代码内容行按外观「代码配色」方案套 `internal/codehl` 区间。行内时间令牌在源码模式按 `@` 强调色、`~` 次级色分色，组件后的正文不染色。 |
@@ -45,6 +45,7 @@
 | `internal/app/live_format.go` | 格式命令执行（`execFormatCommand`）：标题/列表/引用/行内/代码块/插入在实时预览与源码模式共用；无选区切换「待输入格式」意图（`mdPending`，输入/粘贴/IME 确认时经 `pendingWrapFor` 生成有效 Markdown）；命令以独立撤销事务执行（`editCommand`）。 |
 | `internal/app/live_link.go` | 链接浮层 `linkTool`：打开、校验并写回链接。 |
 | `internal/app/settings_window.go` / `internal/app/settings_ui.go` / `internal/app/settings_storage.go` / `internal/app/settings_keymap.go` | 原生设置窗口：单实例非模态（`StateKey: "settings"`），四页导航（通用、标签、保存与同步、快捷键）与草稿绑定；变更经 `updatePreferences`；「保存与同步」页在 settings_storage.go（文件路径、保存状态与 Git 开关，见 storage_file.go 行）；快捷键页点击徽标录键、冲突就地「改用到这里」（录键期间经 `setKeymapRecording` 临时摘除菜单与全局热键，退出时重建；校验与写入在 keymap_bindings.go），全局热键先注册新键再注销旧键。字段契约见 [configuration.md](configuration.md)。 |
+| `internal/app/sync_bridge.go` / `internal/app/settings_sync.go` | 桌面云同步桥接：`configureSync` 把偏好 sync 节装配为 `notes.Store` 的同步配置（后端 A + token provider + 基线状态文件路径，随每次偏好应用重放）；同步触发（启动、窗口激活、保存后防抖、手动）与状态泵 `syncPump`（远端已应用则重载笔记并重排提醒；冲突待决弹原生对话框二选一，取消后设置页保留持久入口）；连接流程 `connectGitHubSync`（Device Flow：设备码 → 用户码弹层在独立 goroutine 展示不阻塞轮询 → 令牌存系统安全存储；`ZAKKI_GITHUB_CLIENT_ID` 注入 Client ID，`ZAKKI_GITHUB_BASE_URL` 仅供自测注入本地假服务）、断开连接清凭据；「保存与同步」页云同步分区（settings_sync.go：开关、仓库、连接/断开、立即同步、状态行、Git 暂停说明横幅、冲突入口与留档列表/删除）。 |
 | `internal/app/settings_general.go` | 「通用」页骨架：常规（语言、窗口）在前，随后由 `settings_ui.go` 的 `appearanceSections` 构建主题、排版、代码、顶栏分区，整页共用受窗口高度约束的滚动区与单一重置入口；重置同时恢复窗口与外观，保留存储、Git、快捷键和笔记。默认窗口大小按每行字数 × 行数输入，附当前字号换算的像素。偏好异常的恢复入口保留在页顶。 |
 | `internal/app/settings_select.go` | 设置页下拉：`boundedSelect` 与 `ui.Select` 同外观与键盘行为，弹层限高 300 并在内部滚动（`ui.Select` 不限高，选项多时被窗口裁掉）；`selectTrigger` / `selectPanel` 供字体选择器共用。 |
 | `internal/app/view_theme.go` | 双层主题：`colorThemes`、`markdownLayouts`；经典颜色主题在主窗口与其他界面一样走中性调色板（`classicNeutralPalette`），`dotThemes` 只提供标签圆点与焦点 accent；状态栏仅小圆点保留标签色，正文按对比度选中性色、持久错误用主题危险色；`resolveStyle` 合并颜色 + 排版 + 用户覆盖，结果按（外观偏好、圆点、明暗、是否覆盖、本机字体列表身份）缓存最近 4 份（`fontRuntimeState.styles`），字体栈拼接与本机字体查找不再每帧重复；排版可带装饰尺寸（引用条宽、代码圆角/描边，手账主题使用）。字体栈在 Apple 字体之后列 Windows 回退（微软雅黑、宋体、Segoe UI、Consolas），macOS 渲染不变。 |
@@ -130,6 +131,18 @@
 沿用原实现；配置失效、写保护或 `Close` 时按代号作废在途任务并取消上下文；非快进等远端拒绝推送报告 `ErrPushRejected` 并提示手动同步、解决冲突后再推送；`GitStatus` 发布
 仓库根、最近提交/推送时间与错误，供「保存与同步」页展示。
 
+### 云同步（sync.go，开关开启后激活）
+
+每轮「先拉取 → 本地判定 → CAS 提交」（D12/D13）：pull 读取远端内容与版本号（后端 A 为 blob sha）；
+持锁本地阶段（顺序 writeMu → gitGate → mu，与迁址、写保护互斥）先 flush 待保存快照并 verifyDisk，
+再按 D13 判定表处置：采用远端（verifyDisk 通过才落盘，落盘后冻结保存并请求界面重载，`Load` 解除）、
+上传本地（CAS 期望用本轮刚拉到的版本号，容忍同内容版本漂移）、只更新基线、或挂起冲突等用户裁决
+（`ResolveSyncConflict` 定向轮：保留本机=以最新版本号覆盖远端，保留远端=落盘重载；落选方完整留档
+`conflicts/zakki-YYYYMMDD-HHmmss-<设备名>.json`）。CAS 被拒不盲重试旧版本号，重拉重判上限 3 轮。
+基线（内容 sha256 + 后端版本号 + 本地/远端存在性）存应用数据目录 `sync-state.json`，损坏时按
+「从未同步」保守降级。开启同步经 `syncActive` 门禁暂停旧 Git 调度器（用户偏好原样保留），关闭后
+按保留配置恢复；token 只存在于后端闭包与系统安全存储，绝不落盘（R7，测试扫描数据目录与日志断言）。
+
 ### 异常处理（无备份副本）
 
 - 文件不存在且未配置过 `storage.dataFile`：首次运行，写入欢迎文本。
@@ -185,7 +198,7 @@
 运行期所有偏好变更走 `updatePreferences` 统一入口：校验 → 应用运行时 → 同步菜单/窗口/热键 →
 防抖自动保存；磁盘写经 `prefs.Store` 串行化、tmp/rename 原子替换，修订号防旧快照覆盖新值。
 `preferences.json` 损坏或版本超前时进入待恢复状态：不覆盖原文件，设置页提供「另存原件并恢复默认」；恢复成功后当前会话立即按恢复后的路径重新载入笔记，只有载入成功才解除写保护。
-偏好版本当前为 **13**：版本 13 新增正文区左右/上下内边距覆盖；版本 12 由 `storage` 与 `git` 取代 `backup` 与防抖毫秒（见 `internal/prefs` 行）；
+偏好版本当前为 **14**：版本 14 新增云同步 `sync` 节（见「保存与同步」云同步小节与 `internal/app/sync_bridge.go` 行）；版本 13 新增正文区左右/上下内边距覆盖；版本 12 由 `storage` 与 `git` 取代 `backup` 与防抖毫秒（见 `internal/prefs` 行）；
 更早版本的键升级语义见 configuration.md。退出流程（`shutdownForQuit`）在笔记数据最终保存后等待
 偏好最终保存，任一失败阻止退出或更新重启。完整契约见 [偏好与设置](configuration.md)；
 MyGo 更新器另外管理 `updater.json`，不改变应用偏好的 JSON 契约。

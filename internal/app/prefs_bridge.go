@@ -20,6 +20,8 @@ const (
 
 	styleStandard = prefs.StyleStandard
 	styleSketch   = prefs.StyleSketch
+
+	syncBackendGitHub = prefs.SyncBackendGitHub
 )
 
 func defaultPreferences() preferences {

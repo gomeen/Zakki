@@ -22,8 +22,9 @@ func TestStoragePageRendersFileAndGitControls(t *testing.T) {
 			t.Fatalf("保存页缺少 %q: %v", want, tt.Texts())
 		}
 	}
-	// 普通文件夹不渲染 Git 区块（用长文案断言，避免命中被裁剪的短标题）。
-	for _, gone := range []string{"自动提交", "提交间隔", "最近提交"} {
+	// 普通文件夹不渲染 Git 区块：断言 Git 区块独有的文案（云同步提示
+	// 也会提到「自动提交」，不再作为区块判定）。
+	for _, gone := range []string{"提交间隔", "最近提交"} {
 		if tt.HasText(gone) {
 			t.Fatalf("非 git 仓库不应显示 %q: %v", gone, tt.Texts())
 		}
