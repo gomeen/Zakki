@@ -215,3 +215,35 @@ func TestLiveArrowSkipsParagraphSeparator(t *testing.T) {
 		})
 	}
 }
+
+// ⌃P/⌃N 在 darwin 上必须与上下方向键同语义：跨块走边界提示，块内走原生移动。
+func TestLiveCtrlPMovesToPreviousBlock(t *testing.T) {
+	a := newTestApp(t)
+	t.Cleanup(a.shutdown)
+	a.tabs[0].Text = "甲\n\n乙\n\n尾"
+	tt := ui.NewTester(a.view, 400, 540)
+	a.focusBlock(1, 0, 0)
+	tt.Frame()
+	tt.Key(ui.Ctrl, ui.KeyP)
+	for frame := 0; frame < 3; frame++ {
+		tt.Frame()
+	}
+	tt.Type("X")
+	if got, want := a.tabs[0].Text, "甲X\n\n乙\n\n尾"; got != want {
+		t.Fatalf("⌃P doc=%q, want %q", got, want)
+	}
+}
+
+func TestLiveCtrlNMovesWithinBlock(t *testing.T) {
+	a := newTestApp(t)
+	t.Cleanup(a.shutdown)
+	a.tabs[0].Text = "甲\n乙"
+	tt := ui.NewTester(a.view, 400, 540)
+	a.focusBlock(0, 1, 1) // 第一个软行的行尾
+	tt.Frame()
+	tt.Key(ui.Ctrl, ui.KeyN)
+	tt.Type("X")
+	if got, want := a.tabs[0].Text, "甲\n乙X"; got != want {
+		t.Fatalf("⌃N doc=%q, want %q", got, want)
+	}
+}

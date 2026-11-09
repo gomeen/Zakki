@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"runtime"
 	"sort"
 	"strconv"
 	"unicode/utf8"
@@ -36,6 +37,19 @@ func (a *app) recordProjectedKey(ev ui.InputEvent, p liveProjection) bool {
 	}
 	if a.mdComposing {
 		return false
+	}
+	// macOS Emacs 键位：⌃P/⌃N（可带 Shift 选区扩展）等价上下方向键。原生编辑器
+	// 虽有同样翻译，但仅限事件直达 editor.key() 的路径；在此先归一成箭头键，块
+	// 边界提示与块内原生移动共用既有语义。仅 darwin：Windows 的 Ctrl+P/N 惯例是
+	// 打印/新建，不绑。
+	if runtime.GOOS == "darwin" && ev.Kind == ui.InputKeyDown &&
+		(ev.Mods == ui.Ctrl || ev.Mods == ui.Ctrl|ui.Shift) {
+		switch ev.Key {
+		case ui.KeyP:
+			ev.Key, ev.Mods = ui.KeyUp, ev.Mods&ui.Shift
+		case ui.KeyN:
+			ev.Key, ev.Mods = ui.KeyDown, ev.Mods&ui.Shift
+		}
 	}
 	// 文档级全选（菜单 InputCommand 或主修饰键+A）：表格单元格内保持原生全选。
 	if !p.cell {
