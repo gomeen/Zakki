@@ -6,12 +6,10 @@ package app
 
 import (
 	"strconv"
-	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
-	"zakki/internal/notes"
 	"zakki/locales"
 )
 
@@ -79,11 +77,8 @@ type settingsUIState struct {
 	gitProbeDir  string
 	gitProbeRepo bool
 
-	// 云同步（保存页）：仓库输入框的工作副本与留档列表缓存（1 秒
-	// TTL，列表扫描不进构建帧）。
-	syncRepoText    string
-	syncConflicts   []notes.ConflictInfo
-	syncConflictsAt time.Time
+	// 云同步（保存页）：仓库输入框的工作副本。
+	syncRepoText string
 
 	// Keymap 页：搜索词、正在录制的命令 ID、冲突/非法提示。keyErrID 非空时
 	// 提示显示在该命令行下方，否则在页面底部（其他页的写入错误也走 keyErr）。

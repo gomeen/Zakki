@@ -2822,14 +2822,14 @@ func (msgs Messages) PrefsNeedRecovery() string {
 	return Catalog.Format(msgs.locale, "prefsNeedRecovery", nil)
 }
 
-// SaveCopyAndReset says "Save a copy, then reset to defaults"
+// DiscardAndResetPrefs says "Discard the damaged file and reset to defaults"
 // in the language the app shows.
-func SaveCopyAndReset() string { return In(i18n.Locale()).SaveCopyAndReset() }
+func DiscardAndResetPrefs() string { return In(i18n.Locale()).DiscardAndResetPrefs() }
 
-// SaveCopyAndReset says "Save a copy, then reset to defaults"
+// DiscardAndResetPrefs says "Discard the damaged file and reset to defaults"
 // in the language of msgs.
-func (msgs Messages) SaveCopyAndReset() string {
-	return Catalog.Format(msgs.locale, "saveCopyAndReset", nil)
+func (msgs Messages) DiscardAndResetPrefs() string {
+	return Catalog.Format(msgs.locale, "discardAndResetPrefs", nil)
 }
 
 // PrefsMigratedFrom says "Migrated once from {from}; the old file is kept as is and no longer read."
@@ -4490,16 +4490,6 @@ func (msgs Messages) PrefsReadErr(path string) string {
 	return Catalog.Format(msgs.locale, "prefsReadErr", map[string]any{"path": path})
 }
 
-// PrefsBackupCopyErr says "Failed to save a copy of the original"
-// in the language the app shows.
-func PrefsBackupCopyErr() string { return In(i18n.Locale()).PrefsBackupCopyErr() }
-
-// PrefsBackupCopyErr says "Failed to save a copy of the original"
-// in the language of msgs.
-func (msgs Messages) PrefsBackupCopyErr() string {
-	return Catalog.Format(msgs.locale, "prefsBackupCopyErr", nil)
-}
-
 // CtxParagraphContext says "Used in paragraph context; unavailable inside table cells"
 // in the language the app shows.
 func CtxParagraphContext() string { return In(i18n.Locale()).CtxParagraphContext() }
@@ -5742,94 +5732,14 @@ func (msgs Messages) SyncRemoteApplied() string {
 	return Catalog.Format(msgs.locale, "syncRemoteApplied", nil)
 }
 
-// SyncConflictTitle says "Sync conflict"
+// SyncMerged says "Merged changes from your other device"
 // in the language the app shows.
-func SyncConflictTitle() string { return In(i18n.Locale()).SyncConflictTitle() }
+func SyncMerged() string { return In(i18n.Locale()).SyncMerged() }
 
-// SyncConflictTitle says "Sync conflict"
+// SyncMerged says "Merged changes from your other device"
 // in the language of msgs.
-func (msgs Messages) SyncConflictTitle() string {
-	return Catalog.Format(msgs.locale, "syncConflictTitle", nil)
-}
-
-// SyncConflictMessage says "Your notes changed on this device and on GitHub since the last sync. Keep which version?"
-// in the language the app shows.
-func SyncConflictMessage() string { return In(i18n.Locale()).SyncConflictMessage() }
-
-// SyncConflictMessage says "Your notes changed on this device and on GitHub since the last sync. Keep which version?"
-// in the language of msgs.
-func (msgs Messages) SyncConflictMessage() string {
-	return Catalog.Format(msgs.locale, "syncConflictMessage", nil)
-}
-
-// SyncConflictDetail says "The losing version is archived in full under conflicts/ next to zakki.json. It never joins tabs, reminders or the tab…"
-// in the language the app shows.
-func SyncConflictDetail() string { return In(i18n.Locale()).SyncConflictDetail() }
-
-// SyncConflictDetail says "The losing version is archived in full under conflicts/ next to zakki.json. It never joins tabs, reminders or the tab…"
-// in the language of msgs.
-func (msgs Messages) SyncConflictDetail() string {
-	return Catalog.Format(msgs.locale, "syncConflictDetail", nil)
-}
-
-// SyncKeepLocal says "Keep this device"
-// in the language the app shows.
-func SyncKeepLocal() string { return In(i18n.Locale()).SyncKeepLocal() }
-
-// SyncKeepLocal says "Keep this device"
-// in the language of msgs.
-func (msgs Messages) SyncKeepLocal() string {
-	return Catalog.Format(msgs.locale, "syncKeepLocal", nil)
-}
-
-// SyncKeepRemote says "Keep GitHub"
-// in the language the app shows.
-func SyncKeepRemote() string { return In(i18n.Locale()).SyncKeepRemote() }
-
-// SyncKeepRemote says "Keep GitHub"
-// in the language of msgs.
-func (msgs Messages) SyncKeepRemote() string {
-	return Catalog.Format(msgs.locale, "syncKeepRemote", nil)
-}
-
-// SyncConflictPending says "Conflict pending: both sides changed; the losing version will be archived under conflicts/."
-// in the language the app shows.
-func SyncConflictPending() string { return In(i18n.Locale()).SyncConflictPending() }
-
-// SyncConflictPending says "Conflict pending: both sides changed; the losing version will be archived under conflicts/."
-// in the language of msgs.
-func (msgs Messages) SyncConflictPending() string {
-	return Catalog.Format(msgs.locale, "syncConflictPending", nil)
-}
-
-// SyncConflictsTitle says "Conflict archives"
-// in the language the app shows.
-func SyncConflictsTitle() string { return In(i18n.Locale()).SyncConflictsTitle() }
-
-// SyncConflictsTitle says "Conflict archives"
-// in the language of msgs.
-func (msgs Messages) SyncConflictsTitle() string {
-	return Catalog.Format(msgs.locale, "syncConflictsTitle", nil)
-}
-
-// SyncConflictsHint says "Full copies of the losing versions from sync conflicts. They do not join tabs or reminders and are never cleaned auto…"
-// in the language the app shows.
-func SyncConflictsHint() string { return In(i18n.Locale()).SyncConflictsHint() }
-
-// SyncConflictsHint says "Full copies of the losing versions from sync conflicts. They do not join tabs or reminders and are never cleaned auto…"
-// in the language of msgs.
-func (msgs Messages) SyncConflictsHint() string {
-	return Catalog.Format(msgs.locale, "syncConflictsHint", nil)
-}
-
-// SyncDeleteArchive says "Delete archive"
-// in the language the app shows.
-func SyncDeleteArchive() string { return In(i18n.Locale()).SyncDeleteArchive() }
-
-// SyncDeleteArchive says "Delete archive"
-// in the language of msgs.
-func (msgs Messages) SyncDeleteArchive() string {
-	return Catalog.Format(msgs.locale, "syncDeleteArchive", nil)
+func (msgs Messages) SyncMerged() string {
+	return Catalog.Format(msgs.locale, "syncMerged", nil)
 }
 
 // SyncClientIDMissing says "To connect, set the ZAKKI_GITHUB_CLIENT_ID environment variable to your GitHub App client ID first."
@@ -5958,20 +5868,6 @@ func (msgs Messages) SyncDisconnectFailed(err string) string {
 	return Catalog.Format(msgs.locale, "syncDisconnectFailed", map[string]any{"err": err})
 }
 
-// SyncDeleteFailed says "Deleting the archive failed: {err}"
-// in the language the app shows.
-//
-// err is the failure reason
-func SyncDeleteFailed(err string) string { return In(i18n.Locale()).SyncDeleteFailed(err) }
-
-// SyncDeleteFailed says "Deleting the archive failed: {err}"
-// in the language of msgs.
-//
-// err is the failure reason
-func (msgs Messages) SyncDeleteFailed(err string) string {
-	return Catalog.Format(msgs.locale, "syncDeleteFailed", map[string]any{"err": err})
-}
-
 // SyncConnectWaiting says "Waiting for authorization…"
 // in the language the app shows.
 func SyncConnectWaiting() string { return In(i18n.Locale()).SyncConnectWaiting() }
@@ -5980,20 +5876,4 @@ func SyncConnectWaiting() string { return In(i18n.Locale()).SyncConnectWaiting()
 // in the language of msgs.
 func (msgs Messages) SyncConnectWaiting() string {
 	return Catalog.Format(msgs.locale, "syncConnectWaiting", nil)
-}
-
-// SyncArchiveMeta says "{size} {unit} · {time}"
-// in the language the app shows.
-//
-// size is a number; unit is B/KB/MB; time is 01-02 15:04
-func SyncArchiveMeta(size string, unit string, time_ string) string {
-	return In(i18n.Locale()).SyncArchiveMeta(size, unit, time_)
-}
-
-// SyncArchiveMeta says "{size} {unit} · {time}"
-// in the language of msgs.
-//
-// size is a number; unit is B/KB/MB; time is 01-02 15:04
-func (msgs Messages) SyncArchiveMeta(size string, unit string, time_ string) string {
-	return Catalog.Format(msgs.locale, "syncArchiveMeta", map[string]any{"size": size, "unit": unit, "time": time_})
 }

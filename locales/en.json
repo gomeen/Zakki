@@ -266,7 +266,7 @@
   "legacyConfigFailed": "Legacy config could not be imported",
   "useExistingPrefs": "Continue with current settings",
   "prefsNeedRecovery": "Preferences file needs recovery",
-  "saveCopyAndReset": "Save a copy, then reset to defaults",
+  "discardAndResetPrefs": "Discard the damaged file and reset to defaults",
   "prefsMigratedFrom": "Migrated once from {from}; the old file is kept as is and no longer read.",
   "prefsMigrationLine": "Preferences migration: {detail}",
   "previewLabel": "Preview",
@@ -527,7 +527,6 @@
   "resetPageButton": "Reset this page",
   "prefsWriteErr": "Failed to write preferences file {path}",
   "prefsReadErr": "Failed to read preferences file {path}",
-  "prefsBackupCopyErr": "Failed to save a copy of the original",
   "ctxParagraphContext": "Used in paragraph context; unavailable inside table cells",
   "ctxBodyLines": "Changes the paragraph or the body lines of the source selection; unavailable in code blocks and tables",
   "ctxSelectedLines": "Processes the selected lines and keeps the text; unavailable in code blocks and tables",
@@ -657,15 +656,7 @@
   "syncLastSync": "Last sync: {time}",
   "syncNotConnected": "GitHub not connected",
   "syncRemoteApplied": "Remote notes applied",
-  "syncConflictTitle": "Sync conflict",
-  "syncConflictMessage": "Your notes changed on this device and on GitHub since the last sync. Keep which version?",
-  "syncConflictDetail": "The losing version is archived in full under conflicts/ next to zakki.json. It never joins tabs, reminders or the tab limit.",
-  "syncKeepLocal": "Keep this device",
-  "syncKeepRemote": "Keep GitHub",
-  "syncConflictPending": "Conflict pending: both sides changed; the losing version will be archived under conflicts/.",
-  "syncConflictsTitle": "Conflict archives",
-  "syncConflictsHint": "Full copies of the losing versions from sync conflicts. They do not join tabs or reminders and are never cleaned automatically.",
-  "syncDeleteArchive": "Delete archive",
+  "syncMerged": "Merged changes from your other device",
   "syncClientIDMissing": "To connect, set the ZAKKI_GITHUB_CLIENT_ID environment variable to your GitHub App client ID first.",
   "syncKeyringUnavailable": "System secure storage is unavailable; sync credentials cannot be stored.",
   "syncConnectTitle": "Connect GitHub",
@@ -692,13 +683,5 @@
   "@syncDisconnectFailed": {
     "description": "err is the failure reason"
   },
-  "syncDeleteFailed": "Deleting the archive failed: {err}",
-  "@syncDeleteFailed": {
-    "description": "err is the failure reason"
-  },
-  "syncConnectWaiting": "Waiting for authorization…",
-  "syncArchiveMeta": "{size} {unit} · {time}",
-  "@syncArchiveMeta": {
-    "description": "size is a number; unit is B/KB/MB; time is 01-02 15:04"
-  }
+  "syncConnectWaiting": "Waiting for authorization…"
 }

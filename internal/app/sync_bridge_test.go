@@ -1,7 +1,8 @@
 package app
 
 // 桌面云同步桥接测试：开关与暂停说明、旧 Git 调度器暂停/恢复、远端
-// 应用后的重载、冲突留档管理。全部使用隔离数据目录与假后端，不触网。
+// 应用后的重载、双方都改时的自动合并、窗口失焦与退出时的推送。
+// 全部使用隔离数据目录与假后端，不触网。
 
 import (
 	"context"
@@ -320,7 +321,7 @@ func TestSyncRemoteApplyReloadsNotes(t *testing.T) {
 	// 建立基线：本地等于远端 → 只更新基线，不产生任何动作。
 	a.notes.SyncNow()
 	waitSyncIdleFor(t, a)
-	if st := a.notes.SyncStateSnapshot(); st.Error != "" || st.Conflict != nil {
+	if st := a.notes.SyncStateSnapshot(); st.Error != "" {
 		t.Fatalf("基线建立失败: %+v", st)
 	}
 	// 远端更新为不同内容：本地未变 → 采用远端并请求重载。
@@ -342,7 +343,55 @@ func TestSyncRemoteApplyReloadsNotes(t *testing.T) {
 	}
 }
 
-func TestSyncConflictAreaButtons(t *testing.T) {
+// 双方分别改了不同标签：不弹窗、不留档，自动逐标签合并，界面重载后提示已合并。
+func TestSyncBothChangedMergesWithoutDialog(t *testing.T) {
+	a := newTestApp(t)
+	t.Cleanup(a.shutdown)
+	twoTabs := func(first, second string) savedFile {
+		return savedFile{Version: currentDataVersion, Tabs: []savedTab{{ID: 1, Text: first}, {ID: 2, Text: second}}}
+	}
+	be := &fakeSyncBackend2{existed: true, version: "r1", remote: encodeFileForTest(t, twoTabs("一", "二"))}
+	enableSyncPrefs(t, a)
+	attachFakeBackend(t, a, be)
+	if err := a.notes.SaveNow(twoTabs("一", "二")); err != nil {
+		t.Fatal(err)
+	}
+	a.notes.SyncNow()
+	waitSyncIdleFor(t, a)
+	// 本机改标签 1，另一台设备改标签 2。
+	if err := a.notes.SaveNow(twoTabs("一（本机）", "二")); err != nil {
+		t.Fatal(err)
+	}
+	be.mu.Lock()
+	be.remote, be.version = encodeFileForTest(t, twoTabs("一", "二（远端）")), "r2"
+	be.mu.Unlock()
+	a.notes.SyncNow()
+	waitSyncIdleFor(t, a)
+	if st := a.notes.SyncStateSnapshot(); st.Error != "" || st.LastMerge.IsZero() {
+		t.Fatalf("应自动合并: %+v", st)
+	}
+	a.syncPump()
+	if got := []string{a.tabs[0].Text, a.tabs[1].Text}; got[0] != "一（本机）" || got[1] != "二（远端）" {
+		t.Fatalf("两端修改都应保留: %q", got)
+	}
+	if !strings.Contains(strings.Join(a.toasts.pending, "\n"), locales.SyncMerged()) {
+		t.Fatalf("应提示已合并: %q", a.toasts.pending)
+	}
+	// 合并结果已推到云端。
+	be.mu.Lock()
+	pushed := be.pushes
+	be.mu.Unlock()
+	if pushed == 0 {
+		t.Fatal("合并结果应上传")
+	}
+	// 数据目录没有 conflicts/ 之类的留档。
+	if _, err := os.Stat(filepath.Join(filepath.Dir(a.notes.DataPath()), "conflicts")); !os.IsNotExist(err) {
+		t.Fatalf("不应生成冲突留档目录: %v", err)
+	}
+}
+
+// 窗口失焦：有尚未推送的修改就立即推送（限频），没有修改不碰网络。
+func TestSyncOnBlurPushesPendingChanges(t *testing.T) {
 	a := newTestApp(t)
 	t.Cleanup(a.shutdown)
 	be := &fakeSyncBackend2{existed: true, version: "r1", remote: encodeFileForTest(t, syncDoc("基线"))}
@@ -353,41 +402,49 @@ func TestSyncConflictAreaButtons(t *testing.T) {
 	}
 	a.notes.SyncNow()
 	waitSyncIdleFor(t, a)
-	// 制造双向分叉。
-	if err := a.notes.SaveNow(syncDoc("本机修改")); err != nil {
+
+	a.syncOnBlur() // 内容与云端一致：即便跑一轮也不上传
+	waitSyncIdleFor(t, a)
+	be.mu.Lock()
+	pushes := be.pushes
+	be.mu.Unlock()
+	if pushes != 0 {
+		t.Fatalf("没有修改不应推送: %d", pushes)
+	}
+
+	// 只调度未落盘的修改：失焦应先保存再推送。拨动时钟越过限频间隔。
+	later := a.now().Add(syncBlurPushInterval)
+	a.setTestNow(func() time.Time { return later })
+	a.notes.ScheduleSave(syncDoc("离开前的修改"), time.Hour, nil)
+	a.syncOnBlur()
+	waitSyncIdleFor(t, a)
+	be.mu.Lock()
+	remote := string(be.remote)
+	be.mu.Unlock()
+	if !strings.Contains(remote, "离开前的修改") {
+		t.Fatalf("失焦应推送未保存的修改: %s", remote)
+	}
+}
+
+// 退出：最终保存后尽力推送一轮，另一台设备立即拿得到。
+func TestSyncFinalPushOnQuit(t *testing.T) {
+	a := newTestApp(t)
+	be := &fakeSyncBackend2{existed: true, version: "r1", remote: encodeFileForTest(t, syncDoc("基线"))}
+	enableSyncPrefs(t, a)
+	attachFakeBackend(t, a, be)
+	if err := a.notes.SaveNow(syncDoc("基线")); err != nil {
+		t.Fatal(err)
+	}
+	a.notes.SyncNow()
+	waitSyncIdleFor(t, a)
+	a.tabs = []tab{{ID: 1, Text: "退出前最后一笔"}}
+	if err := a.shutdownForQuit(); err != nil {
 		t.Fatal(err)
 	}
 	be.mu.Lock()
-	be.remote, be.version = encodeFileForTest(t, syncDoc("远端修改")), "r2"
+	remote := string(be.remote)
 	be.mu.Unlock()
-	a.notes.SyncNow()
-	waitSyncIdleFor(t, a)
-	if a.notes.SyncStateSnapshot().Conflict == nil {
-		t.Fatal("应挂起冲突")
-	}
-	// 设置页冲突区提供持久二选一入口。
-	a.settingsPage = pageStorage
-	a.settingsUI.syncDraftFromPrefs(a.prefs)
-	tt := ui.NewTester(a.settingsView, 900, 900)
-	tt.Frame()
-	if !tt.HasText(locales.SyncConflictPending()) {
-		t.Fatalf("应显示冲突提示: %v", tt.Texts())
-	}
-	if err := tt.Click(locales.SyncKeepRemote()); err != nil {
-		t.Fatal(err)
-	}
-	waitSyncIdleFor(t, a)
-	if st := a.notes.SyncStateSnapshot(); st.Conflict != nil {
-		t.Fatal("保留远端后冲突应解除")
-	}
-	// 落选的本机版本留档在 conflicts/，命名符合规格格式。
-	entries := a.listSyncConflicts()
-	if len(entries) != 1 || !strings.HasPrefix(entries[0].Name, "zakki-") {
-		t.Fatalf("应有一个冲突留档: %+v", entries)
-	}
-	// 删除留档。
-	a.deleteConflictArchive(entries[0].Name)
-	if left := a.listSyncConflicts(); len(left) != 0 {
-		t.Fatalf("删除后应为空: %+v", left)
+	if !strings.Contains(remote, "退出前最后一笔") {
+		t.Fatalf("退出时应推送最后的修改: %s", remote)
 	}
 }

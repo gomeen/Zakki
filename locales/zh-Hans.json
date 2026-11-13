@@ -266,7 +266,7 @@
   "legacyConfigFailed": "旧配置未能导入",
   "useExistingPrefs": "使用已有偏好继续",
   "prefsNeedRecovery": "偏好文件需要恢复",
-  "saveCopyAndReset": "另存原件并恢复默认设置",
+  "discardAndResetPrefs": "丢弃损坏的文件并恢复默认设置",
   "prefsMigratedFrom": "已从 {from} 迁移一次；旧文件保留原样，不再读取。",
   "prefsMigrationLine": "偏好迁移：{detail}",
   "previewLabel": "预览",
@@ -432,7 +432,6 @@
   "resetPageButton": "恢复本页默认值",
   "prefsWriteErr": "写入偏好文件 {path}",
   "prefsReadErr": "读取偏好文件 {path}",
-  "prefsBackupCopyErr": "另存原件失败",
   "ctxParagraphContext": "在段落上下文中使用；表格单元格内不可用",
   "ctxBodyLines": "修改当前段落或源码选区覆盖的正文行；代码块与表格内不可用",
   "ctxSelectedLines": "处理所选行并保留文本；代码块与表格内不可用",
@@ -556,15 +555,7 @@
   "syncLastSync": "上次同步：{time}",
   "syncNotConnected": "尚未连接 GitHub",
   "syncRemoteApplied": "已应用远端笔记",
-  "syncConflictTitle": "同步冲突",
-  "syncConflictMessage": "上次同步后，本机与 GitHub 上的笔记都发生了变化。保留哪个版本？",
-  "syncConflictDetail": "落选的版本会完整留档在 zakki.json 旁的 conflicts/ 目录；不进入标签、不参与提醒调度、不占用标签上限。",
-  "syncKeepLocal": "保留本机",
-  "syncKeepRemote": "保留远端",
-  "syncConflictPending": "存在待处理冲突：两边都有修改；落选版本将完整留档到 conflicts/。",
-  "syncConflictsTitle": "冲突留档",
-  "syncConflictsHint": "同步冲突中落选版本的完整副本；不进入标签与提醒调度，也不会自动清理。",
-  "syncDeleteArchive": "删除留档",
+  "syncMerged": "已合并其他设备的修改",
   "syncClientIDMissing": "连接前请先把环境变量 ZAKKI_GITHUB_CLIENT_ID 设为你的 GitHub App Client ID。",
   "syncKeyringUnavailable": "系统安全存储不可用，无法保存同步凭据。",
   "syncConnectTitle": "连接 GitHub",
@@ -591,13 +582,5 @@
   "@syncDisconnectFailed": {
     "description": "err is the failure reason"
   },
-  "syncDeleteFailed": "删除留档失败：{err}",
-  "@syncDeleteFailed": {
-    "description": "err is the failure reason"
-  },
-  "syncConnectWaiting": "等待授权…",
-  "syncArchiveMeta": "{size} {unit} · {time}",
-  "@syncArchiveMeta": {
-    "description": "size is a number; unit is B/KB/MB; time is 01-02 15:04"
-  }
+  "syncConnectWaiting": "等待授权…"
 }

@@ -1,7 +1,8 @@
 package app
 
 // 桌面云同步桥接：把偏好 sync 节翻译成 notes.Store 的同步配置；管理
-// GitHub Device Flow 连接、冲突对话框与远端应用后的界面重载。
+// GitHub Device Flow 连接、远端（或合并）内容写入后的界面重载，以及
+// 窗口聚焦/失焦时的拉推时机（ADR-0004）。
 // 后台 goroutine 只触碰注入的快照与系统存储，回主线程一律经窗口 Update。
 
 import (
@@ -25,9 +26,8 @@ type syncState struct {
 	// handledRemoteApply 是已触发界面重载的最近「远端已应用」时间，
 	// 防止每次回调重复重载。
 	handledRemoteApply time.Time
-	// conflictShown 表示冲突对话框已为当前现场弹出；取消后不再自动
-	// 重弹，设置页保留持久入口。
-	conflictShown bool
+	// lastFocusPull / lastBlurPush 是窗口聚焦拉取、失焦推送的最近时间（限频）。
+	lastFocusPull, lastBlurPush time.Time
 	// connecting 表示 Device Flow 进行中；带 15 分钟时效，应用重启前
 	// 遗留的标志不会永久锁死连接按钮。
 	connecting       bool
@@ -89,7 +89,7 @@ func (a *app) deviceFlow() *notes.DeviceFlow {
 
 // syncStatePath 返回基线状态文件路径：应用数据目录的独立文件（设备本
 // 地，不随笔记文件夹漂移；旧 Git 调度器只提交 zakki.json 精确路径，
-// 该文件与 conflicts/ 都不会进入 Git 备份）。
+// 该文件不会进入 Git 备份）。
 func (a *app) syncStatePath() string { return filepath.Join(a.dataDir(), "sync-state.json") }
 
 // syncEnabledPref 报告偏好是否指向已启用的 GitHub 后端。
@@ -115,10 +115,10 @@ func (a *app) configureSync() {
 }
 
 // syncRefresh 供 Store 在每轮结束后回调：投递回主线程消化状态
-// （重载远端内容、弹冲突对话框、刷新设置页）。窗口在回调触发时经
+// （重载远端或合并内容、刷新设置页）。窗口在回调触发时经
 // atomic 持有器解析，而不是配置时捕获——configureSync 在建窗之前执行
 // （偏好预置开启同步的冷启动），那时捕获的窗口指针恒为 nil，重载、
-// toast 与冲突对话框会静默丢失（#60）。
+// toast 会静默丢失（#60）。
 func (a *app) syncRefresh() func() {
 	return func() {
 		if win := a.syncRefreshTarget(); win != nil {
@@ -143,67 +143,55 @@ func (a *app) syncRefreshTarget() *mygo.Window {
 func (a *app) syncOnActivate() {
 	a.syncPump()
 	if a.syncEnabledPref() {
+		a.syncState.lastFocusPull = a.now()
 		a.notes.SyncNow()
 	}
 }
 
-// syncPump 消化 Store 发布的同步状态（主线程）：远端已应用则重载磁盘
-// 内容（load 会重排提醒，满足「同步成功应用远端后立即对账提醒」），
-// 冲突待决则弹原生对话框。
+// syncFocusPullInterval / syncBlurPushInterval 是聚焦拉取、失焦推送的最小间隔：
+// 反复切窗口不刷爆 GitHub API。
+const (
+	syncFocusPullInterval = 30 * time.Second
+	syncBlurPushInterval  = 5 * time.Second
+)
+
+// syncOnFocus 在主窗口获得焦点时拉一轮（限频）：窗口本来就开着、从别的
+// 应用点回来时，也先看到其他设备的修改再编辑。主线程调用。
+func (a *app) syncOnFocus() {
+	if !a.syncEnabledPref() || a.now().Sub(a.syncState.lastFocusPull) < syncFocusPullInterval {
+		return
+	}
+	a.syncState.lastFocusPull = a.now()
+	a.notes.SyncNow()
+}
+
+// syncOnBlur 在主窗口失焦或隐藏时，若有尚未推送的本机修改就立即保存并推送
+// （限频）：换设备时另一端不必等防抖。同步轮内部会先 flush 待保存快照。
+func (a *app) syncOnBlur() {
+	if !a.syncEnabledPref() || a.now().Sub(a.syncState.lastBlurPush) < syncBlurPushInterval {
+		return
+	}
+	if !a.notes.SyncHasLocalChanges() {
+		return
+	}
+	a.syncState.lastBlurPush = a.now()
+	a.notes.SyncNow()
+}
+
+// syncPump 消化 Store 发布的同步状态（主线程）：远端或合并内容已写入本地则
+// 重载磁盘内容（load 会重排提醒，满足「同步成功应用远端后立即对账提醒」）。
 func (a *app) syncPump() {
 	st := a.notes.SyncStateSnapshot()
 	if a.notes.SyncNeedsReload() && st.LastRemoteApply.After(a.syncState.handledRemoteApply) {
 		a.syncState.handledRemoteApply = st.LastRemoteApply
 		a.reloadNotes()
-		a.showToast(locales.SyncRemoteApplied())
-	}
-	if st.Conflict == nil {
-		a.syncState.conflictShown = false
-	} else if !a.syncState.conflictShown {
-		a.syncState.conflictShown = true
-		a.openSyncConflictDialog(*st.Conflict)
+		if st.LastMerge.Equal(st.LastRemoteApply) {
+			a.showToast(locales.SyncMerged())
+		} else {
+			a.showToast(locales.SyncRemoteApplied())
+		}
 	}
 	a.refreshSettingsWindow()
-}
-
-// openSyncConflictDialog 弹出二选一原生对话框（D13）；Esc 或关闭保持
-// 冲突挂起，设置页提供持久入口。
-func (a *app) openSyncConflictDialog(cf notes.SyncConflict) {
-	parent := a.settingsWin
-	if parent == nil {
-		parent = a.win
-	}
-	go func() {
-		res, err := mygo.Dialog.Message(mygo.MessageOptions{
-			Parent:  parent,
-			Type:    mygo.MessageWarning,
-			Title:   locales.SyncConflictTitle(),
-			Message: locales.SyncConflictMessage(),
-			Detail:  locales.SyncConflictDetail(),
-			Buttons: []string{locales.SyncKeepLocal(), locales.SyncKeepRemote(), locales.CommonCancel()},
-			// Esc = 取消：两个正选项都必须显式点击。
-			CancelButton: 2,
-		})
-		if err != nil {
-			slog.Warn("冲突对话框失败", "error", err)
-			return
-		}
-		choice := -1
-		switch res.Button {
-		case 0:
-			choice = 0 // 保留本机
-		case 1:
-			choice = 1 // 保留远端
-		}
-		a.runOnMain(func() {
-			if choice >= 0 {
-				a.notes.ResolveSyncConflict(choice == 0)
-			}
-			// 取消也把 shown 复位：冲突现场仍挂起，等设置页或下次触发。
-			a.syncState.conflictShown = false
-			a.refreshSettingsWindow()
-		})
-	}()
 }
 
 // syncTokenConnected 报告安全存储里是否有可用凭据（带 5 秒缓存；系统
@@ -342,38 +330,6 @@ func (a *app) disconnectGitHubSync() {
 	}
 	a.invalidateTokenState()
 	a.showToast(locales.SyncDisconnectedToast())
-	a.refreshSettingsWindow()
-}
-
-// listSyncConflicts 列出 conflicts/ 留档（设置页查看用）。缓存 1 秒，
-// 避免每帧扫描目录；返回条目按名字倒序（新的在前）。
-func (a *app) listSyncConflicts() []notes.ConflictInfo {
-	if a.now().Sub(a.settingsUI.syncConflictsAt) < time.Second &&
-		a.settingsUI.syncConflictsAt != (time.Time{}) && a.settingsUI.syncConflicts != nil {
-		return a.settingsUI.syncConflicts
-	}
-	list := notes.ListConflictArchives(a.notes.ConflictsDir())
-	a.settingsUI.syncConflicts, a.settingsUI.syncConflictsAt = list, a.now()
-	return list
-}
-
-// invalidateConflictCache 删除留档后立即使列表缓存过期。
-func (a *app) invalidateConflictCache() {
-	a.settingsUI.syncConflicts, a.settingsUI.syncConflictsAt = nil, time.Time{}
-}
-
-// deleteConflictArchive 删除单个留档文件（设置页入口），失败如实提示。
-func (a *app) deleteConflictArchive(name string) {
-	path := filepath.Join(a.notes.ConflictsDir(), name)
-	// 只允许删 conflicts/ 目录内的普通 JSON 留档，拒绝路径穿越。
-	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "\\") || filepath.Base(path) != name {
-		return
-	}
-	if err := os.Remove(path); err != nil {
-		a.showToast(locales.SyncDeleteFailed(err.Error()))
-		return
-	}
-	a.invalidateConflictCache()
 	a.refreshSettingsWindow()
 }
 

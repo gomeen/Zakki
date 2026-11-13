@@ -1,17 +1,15 @@
 package app
 
 // 设置「保存与同步」页的云同步分区：开关、仓库、连接（Device Flow）、
-// 状态行、暂停说明与冲突留档管理。文案一律经 locales.*；开关写入
+// 状态行与暂停说明。双方都改时自动合并，没有冲突入口（ADR-0004）。文案一律经 locales.*；开关写入
 // preferences.json 的 sync 节，用户原有的 Git 开关不被改写（暂停只在
 // 运行期生效，见 notes.Store 的 syncActive 门禁）。
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
 
-	"zakki/internal/notes"
 	"zakki/locales"
 )
 
@@ -79,63 +77,6 @@ func (a *app) syncSection(c *ui.Context) {
 			}
 		}
 	})
-	a.syncConflictArea(c)
-	a.syncArchivesArea(c)
-}
-
-// syncConflictArea 冲突现场的持久入口：对话框被取消后仍可在此二选一。
-func (a *app) syncConflictArea(c *ui.Context) {
-	st := a.notes.SyncStateSnapshot()
-	if st.Conflict == nil {
-		return
-	}
-	ui.Column(c).FillWidth().Padding(8, 10).Background(c.Theme().Surface).Gap(6).Children(func() {
-		ui.Text(c, locales.SyncConflictPending()).FontSize(12).TextColor(c.Theme().Danger)
-		ui.Row(c).Gap(8).Children(func() {
-			if ui.Button(c, locales.SyncKeepLocal()).Clicked() {
-				a.notes.ResolveSyncConflict(true)
-			}
-			if ui.Button(c, locales.SyncKeepRemote()).Clicked() {
-				a.notes.ResolveSyncConflict(false)
-			}
-		})
-	})
-}
-
-// syncArchivesArea 冲突留档列表：查看名称、大小与时间，逐条删除；
-// 不自动清理（D13）。
-func (a *app) syncArchivesArea(c *ui.Context) {
-	list := a.listSyncConflicts()
-	if len(list) == 0 {
-		return
-	}
-	settingsSectionTitle(c, locales.SyncConflictsTitle())
-	settingsLead(c, locales.SyncConflictsHint())
-	for _, item := range list {
-		name := item.Name
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(8).PaddingY(4).Children(func() {
-			ui.Column(c).Grow(1).Gap(0).Children(func() {
-				ui.Text(c, name).FontSize(12)
-				ui.Text(c, archiveMeta(item)).FontSize(11).TextColor(tMuted(c))
-			})
-			if ui.Button(c, locales.SyncDeleteArchive()).Clicked() {
-				a.deleteConflictArchive(name)
-			}
-		})
-	}
-}
-
-// archiveMeta 生成留档条目的副标题（大小 + 修改时间）。
-func archiveMeta(item notes.ConflictInfo) string {
-	size := item.Size
-	unit := "B"
-	switch {
-	case size >= 1<<20:
-		size, unit = size/(1<<20), "MB"
-	case size >= 1<<10:
-		size, unit = size/(1<<10), "KB"
-	}
-	return locales.SyncArchiveMeta(strconv.FormatInt(size, 10), unit, item.ModTime.Format("01-02 15:04"))
 }
 
 // normalizeSyncRepo 清理仓库输入：去空白；空串原样返回（交由偏好校验）。

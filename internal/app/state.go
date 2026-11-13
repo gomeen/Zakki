@@ -299,10 +299,20 @@ func (a *app) shutdownForQuit() (err error) {
 		a.notes.SetStopped(false)
 		return err
 	}
+	// 最终保存已成功：尽力把本机修改推到云端，换设备时另一端立即拿得到。
+	// 失败不阻止退出，下次启动会自动补推。
+	if a.syncEnabledPref() {
+		if err := a.notes.FinalSync(finalSyncTimeout); err != nil {
+			slog.Warn("退出前推送未完成，下次启动自动补推", "error", err)
+		}
+	}
 	a.notes.Close()
 	slog.Info("退出前已最终保存")
 	return nil
 }
+
+// finalSyncTimeout 是退出时最多等待推送的时间；超时照常退出。
+const finalSyncTimeout = 3 * time.Second
 
 // clearActiveTab 清空当前标签内容；与普通编辑一致走自动保存。
 func (a *app) clearActiveTab() {
