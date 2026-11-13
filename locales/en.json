@@ -263,6 +263,7 @@
   "rememberBoundsSwitch": "Remember window position",
   "languageRow": "App language",
   "languageRowHint": "Follow the system language, or pick one. Changes apply immediately.",
+  "languageRowFollowing": "Following the system, currently {lang}.",
   "legacyConfigFailed": "Legacy config could not be imported",
   "useExistingPrefs": "Continue with current settings",
   "prefsNeedRecovery": "Preferences file needs recovery",

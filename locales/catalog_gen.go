@@ -2792,6 +2792,16 @@ func (msgs Messages) LanguageRowHint() string {
 	return Catalog.Format(msgs.locale, "languageRowHint", nil)
 }
 
+// LanguageRowFollowing says "Following the system, currently {lang}."
+// in the language the app shows.
+func LanguageRowFollowing(lang string) string { return In(i18n.Locale()).LanguageRowFollowing(lang) }
+
+// LanguageRowFollowing says "Following the system, currently {lang}."
+// in the language of msgs.
+func (msgs Messages) LanguageRowFollowing(lang string) string {
+	return Catalog.Format(msgs.locale, "languageRowFollowing", map[string]any{"lang": lang})
+}
+
 // LegacyConfigFailed says "Legacy config could not be imported"
 // in the language the app shows.
 func LegacyConfigFailed() string { return In(i18n.Locale()).LegacyConfigFailed() }

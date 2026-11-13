@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/i18n"
 	"github.com/egoist/mygo/ui"
 
 	"zakki/locales"
@@ -85,6 +87,31 @@ func TestSettingsViewCardLayout(t *testing.T) {
 	}
 	if tt.HasText("立即备份") || tt.HasText("备份文件夹") {
 		t.Fatalf("保存页不应再有备份概念: %v", tt.Texts())
+	}
+}
+
+// TestLanguageRowShowsEffectiveLanguage 跟随系统时在语言行下补出实际生效的语言，
+// 显式选择语言后不再重复说明（下拉里已经显示具体语言）。
+func TestLanguageRowShowsEffectiveLanguage(t *testing.T) {
+	a := newTestApp(t)
+	a.winOpen = true
+	a.settingsPage = pageGeneral
+	a.prefs.Appearance.Language = ""
+	a.settingsUI.syncDraftFromPrefs(a.prefs)
+	following := func() string {
+		return locales.LanguageRowFollowing(i18n.Autonym(mygo.App.Locale()))
+	}
+	tt := ui.NewTester(a.settingsView, 900, 620)
+	tt.Frame()
+	if !tt.HasText(following()) {
+		t.Fatalf("跟随系统应显示实际生效语言 %q: %v", following(), tt.Texts())
+	}
+
+	a.prefs.Appearance.Language = "en"
+	a.settingsUI.syncDraftFromPrefs(a.prefs)
+	tt.Frame()
+	if tt.HasText(following()) {
+		t.Fatalf("显式选择语言后不应再出现跟随系统的说明: %v", tt.Texts())
 	}
 }
 

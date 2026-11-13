@@ -263,6 +263,7 @@
   "rememberBoundsSwitch": "记忆主窗口位置开关",
   "languageRow": "应用语言",
   "languageRowHint": "跟随系统语言，或手动选择；更改即时生效",
+  "languageRowFollowing": "跟随系统，当前显示 {lang}。",
   "legacyConfigFailed": "旧配置未能导入",
   "useExistingPrefs": "使用已有偏好继续",
   "prefsNeedRecovery": "偏好文件需要恢复",

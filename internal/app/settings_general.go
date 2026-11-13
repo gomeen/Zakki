@@ -3,6 +3,7 @@ package app
 // 设置窗口「通用」页：常规分区（语言、窗口）与迁移状态；外观分区在 settings_ui.go。
 
 import (
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/i18n"
 	"github.com/egoist/mygo/ui"
 
@@ -59,13 +60,19 @@ func languageTagOfDisplay(display string) string {
 }
 
 // languageRow 语言选择：变更经 updatePreferences 即时生效并持久化。
+// 跟随系统时在行下补一行实际生效的语言，避免用户分不清选中的是「跟随系统」
+// 还是系统解析出的具体语言。
 func (a *app) languageRow(c *ui.Context) {
 	opts := languageOptions()
 	displays := make([]string, len(opts))
 	for i, o := range opts {
 		displays[i] = o.display
 	}
-	settingsRow(c, locales.LanguageRow(), "", func() {
+	detail := ""
+	if a.prefs.Appearance.Language == "" {
+		detail = locales.LanguageRowFollowing(i18n.Autonym(mygo.App.Locale()))
+	}
+	settingsRow(c, locales.LanguageRow(), detail, func() {
 		if boundedSelect(c, &a.settingsUI.languageSel, displays).Width(200).Changed() {
 			tag := languageTagOfDisplay(a.settingsUI.languageSel)
 			a.settingsUI.draft.Appearance.Language = tag
