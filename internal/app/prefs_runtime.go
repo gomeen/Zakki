@@ -103,21 +103,12 @@ func (a *app) retryPreferencesSave() {
 	}
 }
 
-// confirmRecoverPreferences 用户确认后另存原件并恢复默认设置写盘。
+// confirmRecoverPreferences 用户确认后以默认设置（含本次会话修改）覆盖损坏的
+// preferences.json，不另存原件：数据目录不留副本，按钮文案须写明会丢弃原件。
 func (a *app) confirmRecoverPreferences() error {
 	if a.currentPrefsIssue().Kind != prefsIssuePrefsBroken {
 		return nil
 	}
-	path := a.preferencesPath()
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("%s: %w", locales.PrefsBackupCopyErr(), err)
-	}
-	backup := path + ".bad-" + a.now().Format("20060102-150405")
-	if err := os.WriteFile(backup, raw, 0o644); err != nil {
-		return fmt.Errorf("%s: %w", locales.PrefsBackupCopyErr(), err)
-	}
-	slog.Info("损坏偏好文件已另存", "backup", backup)
 	// 先在异常门仍关闭时完成确认写入；失败则保留原 issue，shutdown 与
 	// 自动保存继续被拦截。只有成功后才开放正常保存。
 	if err := a.prefsStore.WriteInitial(a.prefs); err != nil {

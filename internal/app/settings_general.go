@@ -81,7 +81,7 @@ func (a *app) migrationStatus(c *ui.Context) {
 			Background(c.Theme().Surface).BorderWidth(1).BorderColor(c.Theme().Danger).Children(func() {
 			ui.Text(c, locales.PrefsNeedRecovery()).Bold()
 			ui.Text(c, a.currentPrefsIssue().Message).FontSize(12).TextColor(tMuted(c))
-			if ui.Button(c, locales.SaveCopyAndReset()).Clicked() {
+			if ui.Button(c, locales.DiscardAndResetPrefs()).Clicked() {
 				if err := a.confirmRecoverPreferences(); err != nil {
 					a.settingsUI.keyErr = err.Error()
 				}

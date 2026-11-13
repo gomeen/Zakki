@@ -4,10 +4,8 @@ package app
 
 import (
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"runtime"
 
 	"github.com/egoist/mygo"
@@ -42,6 +40,8 @@ func Run() {
 			slog.Error("笔记文件不可用，已保留原件并暂停保存", "error", err)
 		}
 	}
+	// 笔记路径已确定、尚未开始任何写入：此时清扫崩溃残留的临时文件。
+	a.sweepStaleTemps()
 	a.applyPreferencesToRuntime()
 	// 笔记就绪后接通系统通知投递并做首次提醒调度。
 	a.connectReminders()
@@ -126,21 +126,11 @@ func runStartupFailure(cause error) {
 	}
 }
 
-// setupLogging 把 slog 落到日志目录（控制台同步输出），
-// 持久化等错误统一记 INFO/WARN/ERROR。
+// setupLogging 只把 slog 输出到 stderr，不写日志文件：应用不在用户目录
+// 留下日志。不能调用 mygo.App.Path(mygo.PathLogs)——它会顺手创建日志目录。
+// 持久化等错误仍须经界面如实上报，日志只是开发期诊断。
 func setupLogging() {
-	opts := &slog.HandlerOptions{Level: slog.LevelInfo}
-	dir, err := mygo.App.Path(mygo.PathLogs)
-	if err != nil || dir == "" {
-		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, opts)))
-		return
-	}
-	f, err := os.OpenFile(filepath.Join(dir, "zakki.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, opts)))
-		return
-	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(io.MultiWriter(os.Stderr, f), opts)))
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})))
 }
 
 // applyTheme 把外观模式应用到系统主题。
@@ -169,9 +159,18 @@ func (a *app) createWindow() {
 		a.hidden = false
 		a.applyMinimumWindowSize()
 	})
-	win.OnHide(func() { a.hidden = true })
-	win.OnFocus(func() { win.Update(func() {}) })
-	win.OnBlur(func() { a.setDocumentMenu(false) })
+	win.OnHide(func() {
+		a.hidden = true
+		a.syncOnBlur()
+	})
+	win.OnFocus(func() {
+		a.syncOnFocus()
+		win.Update(func() {})
+	})
+	win.OnBlur(func() {
+		a.setDocumentMenu(false)
+		a.syncOnBlur()
+	})
 	win.OnClosed(func() {
 		a.mainWindow.CompareAndSwap(win, nil)
 		a.winOpen, a.win, a.hidden = false, nil, true

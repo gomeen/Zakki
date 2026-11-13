@@ -123,7 +123,7 @@ func TestPrefsBrokenFileRecovery(t *testing.T) {
 	if got := string(prefsReadRaw(t, a.preferencesPath())); got != broken {
 		t.Fatal("待恢复状态不得改写原文件")
 	}
-	// 确认后：另存原件并恢复默认写盘。
+	// 确认后：丢弃损坏原件并恢复默认写盘，不留另存副本。
 	if err := a.confirmRecoverPreferences(); err != nil {
 		t.Fatal(err)
 	}
@@ -144,14 +144,10 @@ func TestPrefsBrokenFileRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	saved := false
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "preferences.json.bad-") {
-			saved = true
+		if strings.HasPrefix(e.Name(), "preferences.json.") {
+			t.Fatalf("恢复默认不得留下偏好副本: %s", e.Name())
 		}
-	}
-	if !saved {
-		t.Fatal("原件必须已另存")
 	}
 }
 
