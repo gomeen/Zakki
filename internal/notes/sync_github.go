@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -97,11 +98,12 @@ func escapePathSeg(seg string) string {
 	return b.String()
 }
 
-// do 执行一次 API 调用并返回状态码与响应体；token 只进 Authorization 头。
-func (g *GitHubBackend) do(ctx context.Context, method, url, accept string, body []byte) (int, []byte, error) {
+// do 执行一次 API 调用并返回状态码、响应头与响应体；token 只进 Authorization 头。
+// 响应头用于把速率限制转成可读提示（X-RateLimit-Reset / Retry-After）。
+func (g *GitHubBackend) do(ctx context.Context, method, url, accept string, body []byte) (int, http.Header, []byte, error) {
 	token, err := g.token(ctx)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	var reader io.Reader
 	if body != nil {
@@ -109,7 +111,7 @@ func (g *GitHubBackend) do(ctx context.Context, method, url, accept string, body
 	}
 	req, err := http.NewRequestWithContext(ctx, method, url, reader)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", accept)
@@ -120,14 +122,19 @@ func (g *GitHubBackend) do(ctx context.Context, method, url, accept string, body
 	}
 	resp, err := g.client().Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("GitHub 网络请求失败：%w", err)
+		return 0, nil, nil, fmt.Errorf("GitHub 网络请求失败：%w", err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, githubBodyLimit))
 	if err != nil {
-		return resp.StatusCode, nil, fmt.Errorf("读取 GitHub 响应失败：%w", err)
+		return resp.StatusCode, resp.Header, nil, fmt.Errorf("读取 GitHub 响应失败：%w", err)
 	}
-	return resp.StatusCode, data, nil
+	if len(data) >= githubBodyLimit {
+		// LimitReader 无法区分「刚好 64MB」与「被截断」：宁可报错，也不把
+		// 截断内容当文件正文写回本地。
+		return resp.StatusCode, resp.Header, nil, fmt.Errorf("GitHub 响应超过 %d 字节上限，已中止", githubBodyLimit)
+	}
+	return resp.StatusCode, resp.Header, data, nil
 }
 
 func (g *GitHubBackend) token(ctx context.Context) (string, error) {
@@ -144,15 +151,44 @@ func (g *GitHubBackend) token(ctx context.Context) (string, error) {
 	return tok, nil
 }
 
-// githubAPIError 把非预期状态码转成可展示错误（绝不包含 token）。
-func githubAPIError(op string, code int, body []byte) error {
+// githubAPIError 把非预期状态码转成可展示错误（绝不包含 token）；速率限制
+// 优先用响应头算出可读的恢复时间，而不是把 JSON 原文丢给用户。
+func githubAPIError(op string, code int, body []byte, header http.Header) error {
 	switch code {
 	case http.StatusUnauthorized:
 		return errors.New("GitHub 授权失败（token 无效或已过期），请重新连接")
-	case http.StatusForbidden:
-		return fmt.Errorf("GitHub 拒绝了请求（可能达到速率限制）：%s", bodyExcerpt(body))
+	case http.StatusForbidden, http.StatusTooManyRequests:
+		if hint := rateLimitHint(header); hint != "" {
+			return errors.New("GitHub 速率限制：" + hint)
+		}
+		return fmt.Errorf("GitHub 拒绝了请求（可能是速率限制或权限不足）：%s", bodyExcerpt(body))
 	}
 	return fmt.Errorf("%s失败（HTTP %d）：%s", op, code, bodyExcerpt(body))
+}
+
+// rateLimitHint 从速率限制响应头生成提示：主限流看 X-RateLimit-Remaining=0
+// 与 X-RateLimit-Reset（UTC 秒），二级限流看 Retry-After（秒）。
+func rateLimitHint(header http.Header) string {
+	if header == nil {
+		return ""
+	}
+	if header.Get("X-RateLimit-Remaining") == "0" {
+		if reset, err := strconv.ParseInt(header.Get("X-RateLimit-Reset"), 10, 64); err == nil {
+			wait := time.Until(time.Unix(reset, 0))
+			if wait > 0 {
+				return fmt.Sprintf("额度已用尽，请约 %s 后再试", wait.Round(time.Second))
+			}
+			return "额度已用尽，请稍后再试"
+		}
+		return "额度已用尽，请稍后再试"
+	}
+	if retry := strings.TrimSpace(header.Get("Retry-After")); retry != "" {
+		if secs, err := strconv.Atoi(retry); err == nil && secs > 0 {
+			return fmt.Sprintf("请求过快，请 %d 秒后再试", secs)
+		}
+		return "请求过快，请稍后再试（Retry-After: " + retry + "）"
+	}
+	return ""
 }
 
 func bodyExcerpt(body []byte) string {
@@ -170,21 +206,29 @@ func (g *GitHubBackend) Pull(ctx context.Context) (content []byte, version strin
 	if g.Branch != "" {
 		url += "?ref=" + escapePathSeg(g.Branch)
 	}
-	code, body, err := g.do(ctx, http.MethodGet, url, "application/vnd.github+json", nil)
+	code, header, body, err := g.do(ctx, http.MethodGet, url, "application/vnd.github+json", nil)
 	if err != nil {
 		return nil, "", false, err
 	}
 	if code == http.StatusNotFound {
-		// 区分「文件不存在」与「仓库不存在/无权限」：仓库探测一次。
-		repoCode, repoBody, repoErr := g.do(ctx, http.MethodGet, g.apiBase()+"/repos/"+g.Repo, "application/vnd.github+json", nil)
-		if repoErr == nil && repoCode == http.StatusNotFound {
-			return nil, "", false, fmt.Errorf("GitHub 仓库 %s 不存在或当前授权无权访问", g.Repo)
+		// 区分「文件不存在」与「仓库不存在/无权限/限流」：仓库探测一次。
+		// 探测本身失败时必须原样报错——否则会把限流或鉴权失败误当成
+		// 「远端没有文件」，接着走一次注定失败的上传。
+		repoCode, repoHeader, repoBody, repoErr := g.do(ctx, http.MethodGet, g.apiBase()+"/repos/"+g.Repo, "application/vnd.github+json", nil)
+		if repoErr != nil {
+			return nil, "", false, repoErr
 		}
-		_ = repoBody
-		return nil, "", false, nil
+		switch repoCode {
+		case http.StatusNotFound:
+			return nil, "", false, fmt.Errorf("GitHub 仓库 %s 不存在或当前授权无权访问", g.Repo)
+		case http.StatusOK:
+			return nil, "", false, nil
+		default:
+			return nil, "", false, githubAPIError("探测 GitHub 仓库", repoCode, repoBody, repoHeader)
+		}
 	}
 	if code != http.StatusOK {
-		return nil, "", false, githubAPIError("读取远端文件", code, body)
+		return nil, "", false, githubAPIError("读取远端文件", code, body, header)
 	}
 	var meta struct {
 		SHA      string `json:"sha"`
@@ -204,12 +248,12 @@ func (g *GitHubBackend) Pull(ctx context.Context) (content []byte, version strin
 		}
 		return raw, meta.SHA, true, nil
 	}
-	code, body, err = g.do(ctx, http.MethodGet, url, "application/vnd.github.raw+json", nil)
+	code, header, body, err = g.do(ctx, http.MethodGet, url, "application/vnd.github.raw+json", nil)
 	if err != nil {
 		return nil, "", false, err
 	}
 	if code != http.StatusOK {
-		return nil, "", false, githubAPIError("读取远端大文件", code, body)
+		return nil, "", false, githubAPIError("读取远端大文件", code, body, header)
 	}
 	return body, meta.SHA, true, nil
 }
@@ -221,12 +265,12 @@ func (g *GitHubBackend) RemoteModTime(ctx context.Context) (time.Time, error) {
 	if g.Branch != "" {
 		url += "&sha=" + escapePathSeg(g.Branch)
 	}
-	code, body, err := g.do(ctx, http.MethodGet, url, "application/vnd.github+json", nil)
+	code, header, body, err := g.do(ctx, http.MethodGet, url, "application/vnd.github+json", nil)
 	if err != nil {
 		return time.Time{}, err
 	}
 	if code != http.StatusOK {
-		return time.Time{}, githubAPIError("读取远端提交时间", code, body)
+		return time.Time{}, githubAPIError("读取远端提交时间", code, body, header)
 	}
 	var commits []struct {
 		Commit struct {
@@ -248,7 +292,7 @@ func (g *GitHubBackend) RemoteModTime(ctx context.Context) (time.Time, error) {
 // 422「sha 不匹配」都按 ErrSyncConflict 处理，交由同步轮重新 pull。
 func (g *GitHubBackend) Push(ctx context.Context, content []byte, expect string) (string, error) {
 	payload := map[string]any{
-		"message": fmt.Sprintf("sync: update %s from %s", GitHubSyncPath, deviceName()),
+		"message": fmt.Sprintf("sync: update %s from %s", strings.Trim(g.Path, "/"), deviceName()),
 		"content": base64.StdEncoding.EncodeToString(content),
 	}
 	if expect != "" {
@@ -261,7 +305,7 @@ func (g *GitHubBackend) Push(ctx context.Context, content []byte, expect string)
 	if err != nil {
 		return "", err
 	}
-	code, respBody, err := g.do(ctx, http.MethodPut, g.fileURL(), "application/vnd.github+json", body)
+	code, header, respBody, err := g.do(ctx, http.MethodPut, g.fileURL(), "application/vnd.github+json", body)
 	if err != nil {
 		return "", err
 	}
@@ -285,5 +329,5 @@ func (g *GitHubBackend) Push(ctx context.Context, content []byte, expect string)
 		// 远端已被并发修改（或我们以为不存在但远端已出现）：CAS 拒绝。
 		return "", ErrSyncConflict
 	}
-	return "", githubAPIError("上传远端文件", code, respBody)
+	return "", githubAPIError("上传远端文件", code, respBody, header)
 }

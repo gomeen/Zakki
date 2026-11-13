@@ -824,3 +824,43 @@ func TestSyncPostSaveDebounceRepeats(t *testing.T) {
 	// 缺陷形态：首轮触发后 syncTimer 字段残留，第二笔永远不再触发同步。
 	await(t, func() bool { be.mu.Lock(); defer be.mu.Unlock(); return be.pullCalls >= before+2 })
 }
+
+// blockingPullBackend 把一轮同步停在 pull 上，便于观察配置变更时的状态复位。
+type blockingPullBackend struct{ release chan struct{} }
+
+func (b *blockingPullBackend) BackendID() string { return "github" }
+
+func (b *blockingPullBackend) Pull(ctx context.Context) ([]byte, string, bool, error) {
+	select {
+	case <-b.release:
+		return nil, "", false, nil
+	case <-ctx.Done():
+		return nil, "", false, ctx.Err()
+	}
+}
+
+func (b *blockingPullBackend) Push(context.Context, []byte, string) (string, error) { return "v", nil }
+
+// 换后端指向会作废在途轮次，而被作废的轮次不会再更新状态：Running 必须由
+// ConfigureSync 复位，否则设置页永久显示「同步中」、按钮一直禁用。
+func TestConfigureSyncClearsRunningWhenRePointed(t *testing.T) {
+	s, _, stateFile := newSyncStore(t, "本地")
+	blocked := &blockingPullBackend{release: make(chan struct{})}
+	s.ConfigureSync(blocked, "gomeen/a", stateFile, nil)
+	s.SyncNow()
+	deadline := time.Now().Add(2 * time.Second)
+	for !s.SyncRunning() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if !s.SyncRunning() {
+		t.Fatal("同步轮未启动")
+	}
+	next := &blockingPullBackend{release: make(chan struct{})}
+	defer close(next.release)
+	s.ConfigureSync(next, "gomeen/b", stateFile, nil)
+	if st := s.SyncStateSnapshot(); st.Running {
+		t.Fatalf("作废轮次后不应残留运行中状态: %+v", st)
+	}
+	close(blocked.release)
+	waitSyncIdle(t, s)
+}

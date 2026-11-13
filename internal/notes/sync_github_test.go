@@ -11,6 +11,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -377,5 +378,135 @@ func TestGitHubRemoteModTime(t *testing.T) {
 	got, err := be.RemoteModTime(context.Background())
 	if err != nil || !got.Equal(want) {
 		t.Fatalf("RemoteModTime = %v, %v; want %v", got, err, want)
+	}
+}
+
+// 速率限制必须转成可读提示：主限流看 X-RateLimit-Remaining/Reset，二级
+// 限流看 Retry-After；429 与 403 走同一分支。旧实现只把 JSON 原文丢给
+// 用户，P1 真机验证时无法判断「等多久」。
+func TestGitHubRateLimitHint(t *testing.T) {
+	reset := time.Now().Add(90 * time.Second).Unix()
+	cases := []struct {
+		name    string
+		status  int
+		headers map[string]string
+		want    string
+	}{
+		{"主限流用尽", http.StatusForbidden, map[string]string{"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": strconv.FormatInt(reset, 10)}, "额度已用尽"},
+		{"二级限流 Retry-After", http.StatusForbidden, map[string]string{"Retry-After": "30"}, "30 秒后再试"},
+		{"429 同分支", http.StatusTooManyRequests, map[string]string{"Retry-After": "12"}, "12 秒后再试"},
+		{"无速率头保留原文", http.StatusForbidden, nil, "权限不足"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := newGitHubServer(t, func(w http.ResponseWriter, _ *http.Request) {
+				for k, v := range tc.headers {
+					w.Header().Set(k, v)
+				}
+				writeJSON(w, tc.status, map[string]any{"message": "forbidden by policy"})
+			})
+			be := newTestBackend("gomeen/notes", func(context.Context) (string, error) { return "t", nil }, srv)
+			_, _, _, err := be.Pull(context.Background())
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("错误应包含 %q: %v", tc.want, err)
+			}
+			if strings.Contains(err.Error(), "ghp_") {
+				t.Fatalf("错误泄露了凭据: %v", err)
+			}
+		})
+	}
+}
+
+// 文件 404 的仓库探测失败不能被当成「远端没有文件」：否则限流/鉴权失败会
+// 变成一次注定失败的上传，把真实原因掩盖成 PUT 错误。
+func TestGitHubPullRepoProbeErrors(t *testing.T) {
+	cases := []struct {
+		name       string
+		probeCode  int
+		probeBody  string
+		want       string
+		wantExited string
+	}{
+		{"探测被限流", http.StatusForbidden, `{"message":"rate limit"}`, "速率限制", ""},
+		{"探测 500", http.StatusInternalServerError, `{"message":"boom"}`, "HTTP 500", ""},
+		{"仓库不存在", http.StatusNotFound, `{"message":"Not Found"}`, "不存在或当前授权无权访问", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := newGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasPrefix(r.URL.Path, "/repos/gomeen/notes/contents/") {
+					writeJSON(w, http.StatusNotFound, map[string]any{"message": "Not Found"})
+					return
+				}
+				w.Header().Set("X-RateLimit-Remaining", "0")
+				writeJSON(w, tc.probeCode, json.RawMessage(tc.probeBody))
+			})
+			be := newTestBackend("gomeen/notes", func(context.Context) (string, error) { return "t", nil }, srv)
+			_, _, _, err := be.Pull(context.Background())
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("错误应包含 %q: %v", tc.want, err)
+			}
+		})
+	}
+}
+
+// 上传提交说明应写实际配置的路径，而不是硬编码的默认文件名。
+func TestGitHubPushCommitMessageUsesConfiguredPath(t *testing.T) {
+	var putBody map[string]any
+	srv, _ := newGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			_ = json.NewDecoder(r.Body).Decode(&putBody)
+			writeJSON(w, 200, map[string]any{"content": map[string]any{"sha": "new"}})
+			return
+		}
+		writeJSON(w, 404, map[string]any{"message": "Not Found"})
+	})
+	be := NewGitHubBackend("gomeen/notes", "notes/zk.json", func(context.Context) (string, error) { return "t", nil })
+	be.APIBase = srv.URL
+	be.Client = srv.Client()
+	if _, err := be.Push(context.Background(), docBytes("x"), ""); err != nil {
+		t.Fatal(err)
+	}
+	msg, _ := putBody["message"].(string)
+	if !strings.Contains(msg, "notes/zk.json") {
+		t.Fatalf("提交说明应包含配置路径: %q", msg)
+	}
+}
+
+// 刷新令牌失败时错误必须可行动（重新连接），不能只报「状态 0」。
+func TestDeviceFlowRefreshMapsInvalidGrant(t *testing.T) {
+	for _, code := range []string{"bad_refresh_token", "invalid_grant"} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, 200, map[string]any{"error": code, "error_description": "expired"})
+		}))
+		flow := &DeviceFlow{TokenURL: srv.URL}
+		_, err := flow.Refresh(context.Background(), "cid", "ghr_old")
+		srv.Close()
+		if err == nil || !strings.Contains(err.Error(), "重新连接") {
+			t.Fatalf("%s 应提示重新连接: %v", code, err)
+		}
+		if strings.Contains(err.Error(), "状态 0") {
+			t.Fatalf("不应出现内部状态码: %v", err)
+		}
+	}
+}
+
+// 令牌刷新必须跟随调用方 ctx：同步轮被取消/超时后不能再白等 30 秒。
+func TestTokenProviderRefreshHonorsContext(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(150 * time.Millisecond)
+		writeJSON(w, 200, map[string]any{"access_token": "new", "expires_in": 600})
+	}))
+	defer srv.Close()
+	now := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
+	k := &memKeyring{}
+	if err := SaveSyncToken(k, TokenSet{AccessToken: "old", RefreshToken: "r", ExpiresAt: now.Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	provider := TokenProvider(k, "cid", &DeviceFlow{TokenURL: srv.URL}, func() time.Time { return now })
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := provider(ctx); err == nil {
+		t.Fatal("ctx 超时应中止刷新")
 	}
 }

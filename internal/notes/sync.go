@@ -166,6 +166,9 @@ func (s *Store) ConfigureSync(backend SyncBackend, repo, stateFile string, after
 			// 后端指向变化（换仓库或重连）：清掉旧错误，等下一轮刷新。
 			s.syncState.Error = ""
 			s.syncState.Backend, s.syncState.Repo = backend.BackendID(), repo
+			// 在途轮次已被作废，不会再有人把 Running 复位：必须在这里清掉，
+			// 否则设置页会永久停在「同步中」且「立即同步」按钮一直禁用。
+			s.syncState.Running = false
 		}
 		return
 	}
@@ -325,11 +328,11 @@ func (s *Store) syncRun(parent context.Context, gen uint64) {
 			return
 		}
 		ctx, cancel := context.WithCancel(parent)
-		if attempt == 0 {
-			s.mu.Lock()
-			s.syncCancel = cancel
-			s.mu.Unlock()
-		}
+		// 每次尝试都登记取消函数：CAS 重判的后续轮也要能被 Close/FinalSync
+		// 中止，否则退出时可能白躺在 HTTP 超时里。
+		s.mu.Lock()
+		s.syncCancel = cancel
+		s.mu.Unlock()
 		remote, version, existed, err := backend.Pull(ctx)
 		if err != nil {
 			cancel()

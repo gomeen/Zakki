@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -81,22 +82,34 @@ func ClearSyncToken(k Keyring) error {
 // TokenProvider 返回同步轮使用的取令牌闭包：未过期直接返回访问令牌；
 // 已过期且有 refresh token 则刷新一次并回存（轮换后的 refresh token
 // 必须落安全存储）；刷新失败如实报错，由同步轮发布状态。
-func TokenProvider(k Keyring, clientID string, flow *DeviceFlow, now func() time.Time) func(context.Context) (string, error) {
-	return func(_ context.Context) (string, error) {
+// 刷新会轮换 refresh token，用旧令牌重刷必得 invalid_grant，所以
+// 「读取 → 刷新 → 回存」整体串行；刷新请求跟随调用方 ctx，可被同步轮
+// 取消或超时中止。
+func TokenProvider(k Keyring, clientID string, flow *DeviceFlow, nowFn func() time.Time) func(context.Context) (string, error) {
+	if nowFn == nil {
+		nowFn = time.Now
+	}
+	var mu sync.Mutex
+	return func(ctx context.Context) (string, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		mu.Lock()
+		defer mu.Unlock()
 		tok, err := LoadSyncToken(k)
 		if err != nil {
 			return "", err
 		}
-		if now == nil {
-			now = time.Now
-		}
-		if tok.ExpiresAt.IsZero() || now().Before(tok.ExpiresAt.Add(-time.Minute)) {
+		if tok.ExpiresAt.IsZero() || nowFn().Before(tok.ExpiresAt.Add(-time.Minute)) {
 			return tok.AccessToken, nil
 		}
 		if tok.RefreshToken == "" {
 			return "", errors.New("访问令牌已过期且无法刷新，请重新连接 GitHub")
 		}
-		fresh, err := flow.Refresh(context.Background(), clientID, tok.RefreshToken)
+		if flow == nil {
+			return "", errors.New("授权流程不可用，请重新连接 GitHub")
+		}
+		fresh, err := flow.Refresh(ctx, clientID, tok.RefreshToken)
 		if err != nil {
 			return "", fmt.Errorf("刷新 GitHub 令牌失败（请重新连接）：%w", err)
 		}

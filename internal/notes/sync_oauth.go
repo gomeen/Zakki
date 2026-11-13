@@ -151,7 +151,7 @@ func (d *DeviceFlow) Refresh(ctx context.Context, clientID, refreshToken string)
 		return TokenSet{}, err
 	}
 	if state != FlowDone {
-		return TokenSet{}, fmt.Errorf("刷新令牌失败（状态 %d），请重新连接 GitHub", int(state))
+		return TokenSet{}, errors.New("刷新 GitHub 令牌未得到新令牌，请重新连接 GitHub")
 	}
 	return tok, nil
 }
@@ -181,6 +181,9 @@ func (d *DeviceFlow) tokenRequest(ctx context.Context, form url.Values) (TokenSe
 		return TokenSet{}, FlowDenied, errors.New("用户拒绝了 GitHub 授权")
 	case "expired_token":
 		return TokenSet{}, FlowExpired, errors.New("设备码已过期，请重新发起连接")
+	case "bad_refresh_token", "invalid_grant":
+		// 刷新令牌已失效/已被轮换（比如旧令牌被另一处用过）：只能重新授权。
+		return TokenSet{}, FlowExpired, errors.New("GitHub 刷新令牌已失效，请重新连接 GitHub")
 	default:
 		return TokenSet{}, FlowPending, fmt.Errorf("GitHub 授权失败：%s（%s）", resp.Error, resp.ErrorDesc)
 	}
