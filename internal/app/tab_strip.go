@@ -541,7 +541,9 @@ func (a *app) tabContextMenu(i int) func(*ui.Menu) {
 		later := m.Item(locales.TabMoveLater()).Disabled(i >= len(a.tabs)-1)
 		export := m.Item(locales.MenuExportMarkdown())
 		m.Separator()
-		dele := m.Item(locales.MenuDeleteTab()).Disabled(len(a.tabs) <= 1)
+		// Danger 只影响窗口内绘制的菜单（0.8 起）：系统菜单没有该属性，
+		// 删除仍靠独立分组与文字说明保持可识别。
+		dele := m.Item(locales.MenuDeleteTab()).Disabled(len(a.tabs) <= 1).Danger()
 		if b, ok := parsedFixedBinding("deleteTab"); ok {
 			dele.Shortcut(b.mods, b.key)
 		}
