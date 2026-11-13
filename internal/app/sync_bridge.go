@@ -35,9 +35,19 @@ type syncState struct {
 	// flow 是 Device Flow 端点实例（懒创建）；keyring 是系统安全存储。
 	flow    *notes.DeviceFlow
 	keyring notes.Keyring
-	// tokenConnected 缓存「安全存储里有凭据」的判定结果与时间，避免
-	// 每帧调用系统安全存储。
-	tokenCheckedAt time.Time
+	// backend 是当前装配的后端实例与它的装配参数。Store 按指针身份判断
+	// 配置是否变化，所以这里必须复用实例：否则每次偏好变更（改主题、
+	// 改字号）都传入新指针，Store 会当作「换了后端」而作废在途轮次、
+	// 清空错误信息并丢掉保存后的防抖排程。
+	backend         *notes.GitHubBackend
+	backendRepo     string
+	backendClientID string
+	backendBase     string
+	backendKeyring  notes.Keyring
+	// authURI 是进行中的 Device Flow 授权页地址，供设置页重新打开。
+	authURI string
+	// tokenConnected 缓存「安全存储里有凭据」的判定结果，只在打开设置页与
+	// 连接/断开后刷新（取值系统安全存储在 Windows 上要拉起 PowerShell）。
 	tokenConnected bool
 }
 
@@ -105,13 +115,19 @@ func (a *app) configureSync() {
 		a.notes.ConfigureSync(nil, "", "", a.syncRefresh())
 		return
 	}
-	clientID := a.githubClientID()
-	provider := notes.TokenProvider(a.systemKeyring(), clientID, a.deviceFlow(), a.now)
-	backend := notes.NewGitHubBackend(a.prefs.Sync.Repo, "", provider)
-	if base := githubOverrideBase(); base != "" {
-		backend.APIBase = base
+	repo, clientID, base := a.prefs.Sync.Repo, a.githubClientID(), githubOverrideBase()
+	keyring := a.systemKeyring()
+	if a.syncState.backend == nil || a.syncState.backendRepo != repo ||
+		a.syncState.backendClientID != clientID || a.syncState.backendBase != base ||
+		a.syncState.backendKeyring != keyring {
+		provider := notes.TokenProvider(keyring, clientID, a.deviceFlow(), a.now)
+		backend := notes.NewGitHubBackend(repo, "", provider)
+		backend.APIBase = base // 空串表示官方 API（apiBase() 有兜底）
+		a.syncState.backend, a.syncState.backendRepo = backend, repo
+		a.syncState.backendClientID, a.syncState.backendBase = clientID, base
+		a.syncState.backendKeyring = keyring
 	}
-	a.notes.ConfigureSync(backend, a.prefs.Sync.Repo, a.syncStatePath(), a.syncRefresh())
+	a.notes.ConfigureSync(a.syncState.backend, repo, a.syncStatePath(), a.syncRefresh())
 }
 
 // syncRefresh 供 Store 在每轮结束后回调：投递回主线程消化状态
@@ -194,24 +210,24 @@ func (a *app) syncPump() {
 	a.refreshSettingsWindow()
 }
 
-// syncTokenConnected 报告安全存储里是否有可用凭据（带 5 秒缓存；系统
-// 安全存储调用不能进构建帧）。
+// syncTokenConnected 读缓存，不做系统调用：Windows 的凭据读取要拉起
+// PowerShell（数百毫秒），在构建帧里同步执行会让设置页周期性卡顿。
+// 缓存由 refreshSyncTokenState 在确定的主线程时机刷新。
 func (a *app) syncTokenConnected() bool {
-	if a.now().Sub(a.syncState.tokenCheckedAt) < 5*time.Second && a.syncState.tokenCheckedAt != (time.Time{}) {
-		return a.syncState.tokenConnected
-	}
-	connected := a.syncState.tokenConnected
-	if k := a.systemKeyring(); k != nil {
-		_, err := notes.LoadSyncToken(k)
-		connected = err == nil
-	}
-	a.syncState.tokenConnected, a.syncState.tokenCheckedAt = connected, a.now()
-	return connected
+	return a.syncState.tokenConnected
 }
 
-// invalidateTokenState 让凭据缓存立即过期（连接/断开后调用）。
-func (a *app) invalidateTokenState() {
-	a.syncState.tokenCheckedAt = time.Time{}
+// refreshSyncTokenState 在主线程读一次系统安全存储并更新「是否已连接」
+// 缓存（打开设置页、连接/断开之后调用）。读取失败按未连接处理，不阻断
+// 渲染。
+func (a *app) refreshSyncTokenState() {
+	connected := false
+	if k := a.systemKeyring(); k != nil {
+		if _, err := notes.LoadSyncToken(k); err == nil {
+			connected = true
+		}
+	}
+	a.syncState.tokenConnected = connected
 }
 
 // connectGitHubSync 发起 Device Flow：请求设备码 → 展示用户码与打开
@@ -244,6 +260,7 @@ func (a *app) connectGitHubSync() {
 			a.finishConnect(notify, err)
 			return
 		}
+		a.setSyncAuthURI(notify, start.VerificationURI)
 		// 用户码弹层在独立 goroutine 展示：Dialog.Message 阻塞至关闭，
 		// 不能挡住同 goroutine 里的授权轮询。
 		go a.showConnectCodeDialog(notify, start.VerificationURI, start.UserCode)
@@ -281,18 +298,42 @@ func (a *app) connectGitHubSync() {
 // connectFlowTimeout 是连接流程的时效上限（超过后允许重新发起）。
 const connectFlowTimeout = 15 * time.Minute
 
-// showConnectCodeDialog 展示用户码并可选打开授权页（后台线程弹窗，
-// MyGo 对话框自行投递主线程）。
+// showConnectCodeDialog 展示用户码并可按按钮打开授权页（后台线程弹窗，
+// MyGo 对话框自行投递主线程）。按下「打开 GitHub」后浏览器打不开时如实
+// 提示；对话框的 Detail 里始终带完整地址，用户仍可手动打开。
 func (a *app) showConnectCodeDialog(parent *mygo.Window, uri, code string) {
-	_, _ = mygo.Dialog.Message(mygo.MessageOptions{
-		Parent:  parent,
-		Type:    mygo.MessageInfo,
-		Title:   locales.SyncConnectTitle(),
-		Message: locales.SyncConnectCode(code),
-		Detail:  locales.SyncConnectHint(uri),
-		Buttons: []string{locales.SyncConnectOpen(), locales.CommonClose()},
+	res, err := mygo.Dialog.Message(mygo.MessageOptions{
+		Parent:        parent,
+		Type:          mygo.MessageInfo,
+		Title:         locales.SyncConnectTitle(),
+		Message:       locales.SyncConnectCode(code),
+		Detail:        locales.SyncConnectHint(uri),
+		Buttons:       []string{locales.SyncConnectOpen(), locales.CommonClose()},
+		DefaultButton: 0,
 	})
-	// 打开授权页交给设置页按钮，避免对话框阻塞轮询流程。
+	if err != nil || res.Button != 0 {
+		return
+	}
+	if err := openExternalURL(uri); err != nil {
+		a.syncToastOn(parent, locales.SyncOpenAuthFailed(err.Error()))
+	}
+}
+
+// setSyncAuthURI 把授权页地址交给主线程保存（连接流程走后台 goroutine，
+// 直接写 a.syncState 会与设置页渲染构成数据竞争）。
+func (a *app) setSyncAuthURI(win *mygo.Window, uri string) {
+	if win == nil {
+		return
+	}
+	win.Update(func() { a.syncState.authURI = uri })
+}
+
+// syncToastOn 经存活窗口把提示投回主线程。
+func (a *app) syncToastOn(win *mygo.Window, msg string) {
+	if win == nil {
+		return
+	}
+	win.Update(func() { a.showToast(msg) })
 }
 
 // finishConnect 收尾连接流程：经存活窗口回主线程复位状态并展示结果；
@@ -300,7 +341,8 @@ func (a *app) showConnectCodeDialog(parent *mygo.Window, uri, code string) {
 func (a *app) finishConnect(notify *mygo.Window, err error) {
 	deliver := func() {
 		a.syncState.connecting = false
-		a.invalidateTokenState()
+		a.syncState.authURI = ""
+		a.refreshSyncTokenState()
 		if err == nil {
 			a.showToast(locales.SyncConnectedToast())
 		} else {
@@ -328,7 +370,7 @@ func (a *app) disconnectGitHubSync() {
 		a.showToast(locales.SyncDisconnectFailed(err.Error()))
 		return
 	}
-	a.invalidateTokenState()
+	a.refreshSyncTokenState()
 	a.showToast(locales.SyncDisconnectedToast())
 	a.refreshSettingsWindow()
 }

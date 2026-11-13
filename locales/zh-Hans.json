@@ -562,6 +562,7 @@
   "syncConnectCode": "在 github.com/login/device 输入此代码：{code}",
   "syncConnectHint": "或打开 {url} 并输入上方代码。Zakki 会持续等待，直到你完成授权或代码过期。",
   "syncConnectOpen": "打开 GitHub",
+  "syncOpenAuthFailed": "无法打开浏览器：{err}",
   "syncConnectTimeout": "设备码在授权完成前已过期，请重新连接。",
   "syncConnectedToast": "已连接 GitHub；同步凭据保存在系统安全存储中。",
   "syncConnectFailed": "连接 GitHub 失败：{err}",
@@ -575,6 +576,9 @@
   },
   "@syncConnectHint": {
     "description": "url is the verification page"
+  },
+  "@syncOpenAuthFailed": {
+    "description": "err is why the browser could not be opened"
   },
   "@syncConnectFailed": {
     "description": "err is the failure reason"

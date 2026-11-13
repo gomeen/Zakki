@@ -212,6 +212,11 @@ func floatText(v float32) string {
 // 事件循环未启动（测试）时只路由状态，不创建原生窗口。
 func (a *app) openSettings(page string) {
 	a.settingsPage = page
+	if page == pageStorage {
+		// 云同步分区要在首帧就显示正确的连接状态：安全存储读取只在
+		// 这里与页面切换时做，不进构建帧。
+		a.refreshSyncTokenState()
+	}
 	if !a.ready {
 		if a.settingsWin == nil {
 			a.settingsUI.syncDraftFromPrefs(a.prefs)
@@ -289,6 +294,9 @@ func (a *app) settingsView(c *ui.Context) {
 		}).Width(200).FillHeight().Changed() {
 			a.settingsUI.syncDraftFromPrefs(a.prefs)
 			a.setKeymapRecording("")
+			if a.settingsPage == pageStorage {
+				a.refreshSyncTokenState()
+			}
 		}
 		ui.Column(c).Fill().Grow(1).Padding(28, 12, 28, 24).Gap(18).Children(func() {
 			switch a.settingsPage {

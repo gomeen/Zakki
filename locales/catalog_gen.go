@@ -5810,6 +5810,20 @@ func (msgs Messages) SyncConnectOpen() string {
 	return Catalog.Format(msgs.locale, "syncConnectOpen", nil)
 }
 
+// SyncOpenAuthFailed says "Could not open the browser: {err}"
+// in the language the app shows.
+//
+// err is why the browser could not be opened
+func SyncOpenAuthFailed(err string) string { return In(i18n.Locale()).SyncOpenAuthFailed(err) }
+
+// SyncOpenAuthFailed says "Could not open the browser: {err}"
+// in the language of msgs.
+//
+// err is why the browser could not be opened
+func (msgs Messages) SyncOpenAuthFailed(err string) string {
+	return Catalog.Format(msgs.locale, "syncOpenAuthFailed", map[string]any{"err": err})
+}
+
 // SyncConnectTimeout says "The device code expired before authorization finished; try connecting again."
 // in the language the app shows.
 func SyncConnectTimeout() string { return In(i18n.Locale()).SyncConnectTimeout() }

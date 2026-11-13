@@ -663,6 +663,7 @@
   "syncConnectCode": "On github.com/login/device enter this code: {code}",
   "syncConnectHint": "Or open {url} and enter the code above. Zakki keeps polling until you finish or the code expires.",
   "syncConnectOpen": "Open GitHub",
+  "syncOpenAuthFailed": "Could not open the browser: {err}",
   "syncConnectTimeout": "The device code expired before authorization finished; try connecting again.",
   "syncConnectedToast": "GitHub connected; sync credentials are stored in the system keychain.",
   "syncConnectFailed": "Connecting GitHub failed: {err}",
@@ -679,6 +680,9 @@
   },
   "@syncConnectFailed": {
     "description": "err is the failure reason"
+  },
+  "@syncOpenAuthFailed": {
+    "description": "err is why the browser could not be opened"
   },
   "@syncDisconnectFailed": {
     "description": "err is the failure reason"

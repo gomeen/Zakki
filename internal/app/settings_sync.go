@@ -70,6 +70,14 @@ func (a *app) syncSection(c *ui.Context) {
 		}
 		if a.syncState.connecting {
 			ui.Text(c, locales.SyncConnectWaiting()).FontSize(12).TextColor(tMuted(c))
+			// 弹层被关掉也能再打开授权页；连接结束后清空地址。
+			if uri := a.syncState.authURI; uri != "" {
+				if ui.Button(c, locales.SyncOpenAuthPage()).Clicked() {
+					if err := openExternalURL(uri); err != nil {
+						a.showToast(locales.SyncOpenAuthFailed(err.Error()))
+					}
+				}
+			}
 		}
 		if a.prefs.Sync.Enabled {
 			if ui.Button(c, locales.SyncNow()).Disabled(st.Running).Clicked() {
@@ -77,6 +85,11 @@ func (a *app) syncSection(c *ui.Context) {
 			}
 		}
 	})
+	// 缺少 Client ID 时连接按钮是禁用的：必须给出原因，否则用户只看到一个
+	// 点不动的按钮（常见于从 Finder 启动、拿不到 shell 环境变量的场景）。
+	if !a.syncTokenConnected() && a.githubClientID() == "" {
+		ui.Text(c, locales.SyncClientIDMissing()).FontSize(12).TextColor(tMuted(c))
+	}
 }
 
 // normalizeSyncRepo 清理仓库输入：去空白；空串原样返回（交由偏好校验）。

@@ -8,6 +8,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -446,5 +447,57 @@ func TestSyncFinalPushOnQuit(t *testing.T) {
 	be.mu.Unlock()
 	if !strings.Contains(remote, "退出前最后一笔") {
 		t.Fatalf("退出时应推送最后的修改: %s", remote)
+	}
+}
+
+// 无关偏好变更不能重建同步后端：Store 按指针身份判断配置是否变化，新指针
+// 会被当成「换了后端」，从而作废在途轮次、清空错误信息并丢掉保存后的防抖
+// 排程——改主题、改字号都会踩到。只有影响后端的配置（仓库、Client ID、
+// 端点、安全存储）才允许重建。
+func TestConfigureSyncReusesBackendAcrossUnrelatedPrefs(t *testing.T) {
+	a := newTestApp(t)
+	t.Cleanup(a.shutdown)
+	enableSyncPrefs(t, a)
+	first := a.syncState.backend
+	if first == nil {
+		t.Fatal("开启同步后应装配后端实例")
+	}
+	if err := a.updatePreferences(func(p *preferences) { p.Window.HideOnEscape = !p.Window.HideOnEscape }); err != nil {
+		t.Fatal(err)
+	}
+	if a.syncState.backend != first {
+		t.Fatal("无关偏好变更重建了同步后端")
+	}
+	if st := a.notes.SyncStateSnapshot(); !st.Enabled || st.Backend != "github" {
+		t.Fatalf("同步状态被重置: %+v", st)
+	}
+	if err := a.updatePreferences(func(p *preferences) { p.Sync.Repo = "gomeen/other" }); err != nil {
+		t.Fatal(err)
+	}
+	if a.syncState.backend == first {
+		t.Fatal("换仓库应重建后端")
+	}
+	if got := a.syncState.backend.Repo; got != "gomeen/other" {
+		t.Fatalf("新后端仓库 = %q", got)
+	}
+}
+
+// 打开授权页只接受 https 地址：命令行参数里塞入 '-' 开头的字符串会被 open /
+// rundll32 当成选项解析，必须先由 url.Parse 约束 scheme 与 host。
+func TestOpenURLCommandOnlyAcceptsHTTPS(t *testing.T) {
+	for _, bad := range []string{"", "   ", "http://github.com/login/device", "file:///etc/passwd", "--help", "javascript:alert(1)", "https://"} {
+		if _, err := openURLCommand(bad); err == nil {
+			t.Fatalf("%q 应被拒绝", bad)
+		}
+	}
+	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
+		return
+	}
+	cmd, err := openURLCommand(" https://github.com/login/device ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last := cmd.Args[len(cmd.Args)-1]; last != "https://github.com/login/device" {
+		t.Fatalf("最后参数应为授权页地址: %v", cmd.Args)
 	}
 }
