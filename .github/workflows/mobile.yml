@@ -1,5 +1,7 @@
 # Zakki 移动端 CI：绑定产物重建 + iOS 工程单测；只有 mobile/ 或 core/ 变动才触发，
 # 桌面改动走 ci.yml（其 paths-ignore 掉 mobile/**，两个工作流不重叠跑全量 macOS）。
+# 移动端已于 2026-11-11 暂停（docs/mobile-archive.md）：本工作流保留，作用降为
+# 「core/ 改动后绑定仍可编译」的守护，不再代表功能开发在推进。
 name: mobile
 
 on:

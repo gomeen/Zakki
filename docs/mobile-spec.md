@@ -1,6 +1,11 @@
 # Zakki 移动客户端规格（iOS 先行 + Android 对齐）
 
-> 状态：**规格已确认；移动端尚未实现**。本文是
+> 状态：**移动端已暂停（2026-11-11），本文作为目标规格冻结保留**。M1–M4 代码已落地但
+> 出口清单未收口，M5 未开工；决策见 [ADR-0003](adr/0003-pause-mobile-client.md)，进度、
+> 未完成项与恢复路径见 [mobile-archive.md](mobile-archive.md)。§7 里程碑表与 §8 验证清单
+> 仍是恢复时的出口标准，不再随桌面演进更新。
+>
+> 历史：本文是
 > [#1「手机提醒与 iOS 客户端路线」](https://github.com/gomeen/Zakki/issues/1) 的目的地产物，
 > 汇总 #3–#12 研究与定案，并按 [2026-10-28 review](reports/2026-10-28-reminders-mobile-review.md)
 > 与 [#16](https://github.com/gomeen/Zakki/issues/16) 校正；D11、D13、D17、D21 已定案，见 §10。
@@ -258,6 +263,10 @@ UI 区分「已排定」「待同步／待续排」「权限受限」，不将�
 每个里程碑开实施票；未决决策阻塞相应出口，不能由实现者擅自选定。共享语义缺口回 core 修。
 
 ## 8. 实施验证清单
+
+> **2026-11-11 暂停**：下表未勾项由「未完成」改述为「暂停待验」，不再作为当前工作队列；
+> 逐项说明与恢复顺序见 [mobile-archive.md](mobile-archive.md) §3.1、§5。已勾项的代码与证据
+> 保持有效。
 
 - [x] M1：同仓 mobile/binding + replace 可复现（replace 相对 `mobile/binding/go.mod` 解析），x/mobile 版本由其 go.mod tool directive 固定；绑定构建进 `make mobile-framework` 与 mobile.yml，干净 runner 可复现（[#25](https://github.com/gomeen/Zakki/pull/25)）；Go／gomobile 升级回归随未来升级动作执行。
 - [x] M1：高版本写保护；未知字段嵌套往返；桌面专属 settings 原值保留；超过 9 标签不丢数据——core/model 与 zakkicore 契约测试、iOS XCTest 与模拟器实测覆盖（[#25](https://github.com/gomeen/Zakki/pull/25)，记录见 [2026-10-28-m1-scaffold-verification](reports/2026-10-28-m1-scaffold-verification.md)）。
