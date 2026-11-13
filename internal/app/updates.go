@@ -10,9 +10,14 @@ import (
 	"zakki/locales"
 )
 
+// updateOptions 让更新窗口跟随应用当前语言：Language 留空时插件在每次开窗时取
+// mygo.App.Locale()，切换界面语言后下一个窗口立即跟着变。写死一种语言会让另一种
+// 界面的用户看到不同语言的发布说明与按钮。
+//
+// 只开手动检查：失败重试与发布说明渲染都在插件内部（重试只影响自动检查的调度），
+// 安装完成后的重启走退出钩子 finishQuit，保存失败会取消重启，无需 OnInstalled。
 func updateOptions() updater.Options {
 	return updater.Options{
-		Language:               "zh-Hans",
 		DisableAutomaticChecks: true,
 	}
 }

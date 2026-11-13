@@ -50,8 +50,9 @@ func TestUpdateMenuAndNativePlugin(t *testing.T) {
 	if p := updatePlugin(); p.Name != "updater" || p.Setup == nil {
 		t.Fatal("必须安装 MyGo 原生更新插件")
 	}
-	if opts := updateOptions(); opts.Language != "zh-Hans" || !opts.DisableAutomaticChecks {
-		t.Fatalf("首版只提供中文手动检查，不默认联网检查: %+v", opts)
+	// Language 留空 = 跟随 mygo.App.Locale()，中英文界面各自看到同语言的更新窗口。
+	if opts := updateOptions(); opts.Language != "" || !opts.DisableAutomaticChecks {
+		t.Fatalf("更新窗口必须跟随应用语言，且不默认联网检查: %+v", opts)
 	}
 }
 
