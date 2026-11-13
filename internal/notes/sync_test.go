@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -118,7 +117,8 @@ func readBaseline(t *testing.T, s *Store) syncBaselineV1 {
 	return base
 }
 
-// TestSyncDecisionTable D13 判定表逐条：基线比较只看内容指纹与存在性。
+// TestSyncDecisionTable 判定表逐条：基线比较只看内容指纹与存在性；双方都改
+// 进合并；从未同步过的设备以云端为准（ADR-0004）。
 func TestSyncDecisionTable(t *testing.T) {
 	local, remote := "h-local", "h-remote"
 	synced := syncBaselineV1{Version: 1, Backend: "github", ContentSHA256: "base", RemoteVersion: "r1"}
@@ -130,26 +130,26 @@ func TestSyncDecisionTable(t *testing.T) {
 		remExist   bool
 		remHash    string
 		base       syncBaselineV1
-		directive  *syncDirective
 		want       syncDecision
 	}{
-		{"双方未变", true, "base", true, "base", synced, nil, syncNone},
-		{"本地等于基线远端已变→采用远端", true, "base", true, remote, synced, nil, syncAdoptRemote},
-		{"本地已变远端等于基线→上传", true, local, true, "base", synced, nil, syncUploadLocal},
-		{"双方已变内容相同→只更基线", true, local, true, local, synced, nil, syncUpdateBaseline},
-		{"双方已变内容不同→冲突", true, local, true, remote, synced, nil, syncNeedResolve},
-		{"首同步本地远端都有→冲突", true, local, true, remote, never, nil, syncNeedResolve},
-		{"首同步远端缺失→上传", true, local, false, "", never, nil, syncUploadLocal},
-		{"首同步本地缺失→采用远端", false, "", true, remote, never, nil, syncAdoptRemote},
-		{"首同步双方都无→无动作", false, "", false, "", never, nil, syncNone},
-		{"基线后远端丢失→采用远端(删除)", true, "base", false, "", synced, nil, syncAdoptRemote},
-		{"裁决保留本机→上传", true, local, true, remote, synced, &syncDirective{keepLocal: true}, syncUploadLocal},
-		{"裁决保留远端→采用远端", true, local, true, remote, synced, &syncDirective{keepLocal: false}, syncAdoptRemote},
-		{"本地丢失远端未变→恢复远端", false, "", true, "base", synced, nil, syncAdoptRemote},
+		{"双方未变", true, "base", true, "base", synced, syncNone},
+		{"本地等于基线远端已变→采用远端", true, "base", true, remote, synced, syncAdoptRemote},
+		{"本地已变远端等于基线→上传", true, local, true, "base", synced, syncUploadLocal},
+		{"双方已变内容相同→只更基线", true, local, true, local, synced, syncUpdateBaseline},
+		{"双方已变内容不同→合并", true, local, true, remote, synced, syncMerge},
+		{"本地改远端删→保留本地上传", true, local, false, "", synced, syncUploadLocal},
+		{"本地删远端改→保留远端", false, "", true, remote, synced, syncAdoptRemote},
+		{"首同步本地远端都有→以云端为准", true, local, true, remote, never, syncAdoptRemote},
+		{"首同步内容相同→只更基线", true, local, true, local, never, syncUpdateBaseline},
+		{"首同步远端缺失→上传", true, local, false, "", never, syncUploadLocal},
+		{"首同步本地缺失→采用远端", false, "", true, remote, never, syncAdoptRemote},
+		{"首同步双方都无→无动作", false, "", false, "", never, syncNone},
+		{"基线后远端丢失→采用远端(删除)", true, "base", false, "", synced, syncAdoptRemote},
+		{"本地丢失远端未变→恢复远端", false, "", true, "base", synced, syncAdoptRemote},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := decideSync(tc.localExist, tc.localHash, tc.remExist, tc.remHash, tc.base, tc.directive)
+			got := decideSync(tc.localExist, tc.localHash, tc.remExist, tc.remHash, tc.base)
 			if got != tc.want {
 				t.Fatalf("decideSync = %v, want %v", got, tc.want)
 			}
@@ -320,8 +320,8 @@ func TestSyncBothChangedSameContent(t *testing.T) {
 	be.mu.Lock()
 	be.remote, be.version = docBytes("同内容 v2"), "r2"
 	be.mu.Unlock()
-	if st := startSync(t, s, be); st.Error != "" || st.Conflict != nil {
-		t.Fatalf("内容相同不应冲突: %+v", st)
+	if st := startSync(t, s, be); st.Error != "" || !st.LastMerge.IsZero() {
+		t.Fatalf("内容相同不应合并: %+v", st)
 	}
 	if _, _, _, _, pushes := be.snapshot(); pushes != 0 {
 		t.Fatalf("只更新基线不应上传: pushes=%d", pushes)
@@ -331,69 +331,107 @@ func TestSyncBothChangedSameContent(t *testing.T) {
 	}
 }
 
-// TestSyncConflictResolve 情况四：双向分叉 → 冲突挂起；二选一后落选方
-// 留档 conflicts/zakki-YYYYMMDD-HHmmss-<设备名>.json。
-func TestSyncConflictResolve(t *testing.T) {
-	for _, keepLocal := range []bool{true, false} {
-		t.Run(map[bool]string{true: "保留本机", false: "保留远端"}[keepLocal], func(t *testing.T) {
-			s, be, _ := newSyncStore(t, "基线")
-			be.existed, be.remote, be.version = true, docBytes("基线"), "r1"
-			if st := startSync(t, s, be); st.Error != "" {
-				t.Fatal(st.Error)
-			}
-			if err := s.SaveNow(doc("本机修改")); err != nil {
+// newerClock 是能报告远端修改时间的假后端包装。
+type newerClock struct {
+	*fakeSyncBackend
+	at time.Time
+}
+
+func (n newerClock) RemoteModTime(context.Context) (time.Time, error) { return n.at, nil }
+
+// tabsDoc 构造多标签文件：第 i 个文本放进 ID=i+1 的标签。
+func tabsDoc(texts ...string) File {
+	f := doc("")
+	f.Tabs = defaultTabs(texts...)
+	return f
+}
+
+func tabsDocBytes(texts ...string) []byte {
+	raw, _ := encodeForTest(tabsDoc(texts...))
+	return raw
+}
+
+// TestSyncBothChangedMerges 情况四：双方都改 → 不弹窗、不留档，逐标签合并；
+// 合并结果落盘、上传，基线指向合并结果。
+func TestSyncBothChangedMerges(t *testing.T) {
+	s, be, _ := newSyncStore(t, "")
+	if err := s.SaveNow(tabsDoc("一", "二")); err != nil {
+		t.Fatal(err)
+	}
+	be.existed, be.remote, be.version = true, tabsDocBytes("一", "二"), "r1"
+	if st := startSync(t, s, be); st.Error != "" {
+		t.Fatal(st.Error)
+	}
+	if base := readBaseline(t, s); !bytes.Equal(base.Content, tabsDocBytes("一", "二")) {
+		t.Fatalf("基线应保存原文作为合并祖先: %q", base.Content)
+	}
+	if err := s.SaveNow(tabsDoc("一（本机）", "二")); err != nil {
+		t.Fatal(err)
+	}
+	be.mu.Lock()
+	be.remote, be.version = tabsDocBytes("一", "二（远端）"), "r2"
+	be.mu.Unlock()
+	st := startSync(t, s, be)
+	if st.Error != "" || st.LastMerge.IsZero() {
+		t.Fatalf("应自动合并: %+v", st)
+	}
+	want := tabsDocBytes("一（本机）", "二（远端）")
+	if got, _ := os.ReadFile(s.DataPath()); !bytes.Equal(got, want) {
+		t.Fatalf("合并结果应落盘: %s", got)
+	}
+	if !s.SyncNeedsReload() {
+		t.Fatal("合并写入本地后应请求界面重载")
+	}
+	if remote, v, _, _, _ := be.snapshot(); !bytes.Equal(remote, want) || v == "r2" {
+		t.Fatalf("合并结果应上传: v=%q %s", v, remote)
+	}
+	if base := readBaseline(t, s); base.ContentSHA256 != contentHash(want) || !bytes.Equal(base.Content, want) {
+		t.Fatalf("基线应指向合并结果: %+v", base)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(s.DataPath()), "conflicts")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("不应生成冲突留档: %v", err)
+	}
+}
+
+// TestSyncSameTabNewerWins 同一标签两边都改：按修改时间较新者胜，其余标签照常合并。
+func TestSyncSameTabNewerWins(t *testing.T) {
+	for _, remoteNewer := range []bool{true, false} {
+		t.Run(map[bool]string{true: "远端较新", false: "本机较新"}[remoteNewer], func(t *testing.T) {
+			s, fb, _ := newSyncStore(t, "")
+			if err := s.SaveNow(tabsDoc("一", "二")); err != nil {
 				t.Fatal(err)
 			}
-			be.mu.Lock()
-			be.remote, be.version = docBytes("远端修改"), "r2"
-			be.mu.Unlock()
-			if st := startSync(t, s, be); st.Conflict == nil {
-				t.Fatalf("双向分叉应挂起冲突: %+v", st)
+			fb.existed, fb.remote, fb.version = true, tabsDocBytes("一", "二"), "r1"
+			if st := startSync(t, s, fb); st.Error != "" {
+				t.Fatal(st.Error)
 			}
-			// 冲突期间不再重复进入判定（同一轮已经挂起）。
-			if _, _, _, _, pushes := be.snapshot(); pushes != 0 {
-				t.Fatal("冲突轮不应上传")
+			if err := s.SaveNow(tabsDoc("一（本机）", "二", "")); err != nil {
+				t.Fatal(err)
 			}
-			s.ResolveSyncConflict(keepLocal)
-			waitSyncIdle(t, s)
-			st := s.SyncStateSnapshot()
-			if st.Conflict != nil || st.Error != "" {
-				t.Fatalf("裁决后冲突应解除: %+v", st)
-			}
-			// 留档：命名 zakki-YYYYMMDD-HHmmss-<设备名>.json，内容为落选方。
-			entries, err := os.ReadDir(s.ConflictsDir())
-			if err != nil || len(entries) != 1 {
-				t.Fatalf("conflicts/ 应有一个留档: %v", err)
-			}
-			nameRe := regexp.MustCompile(`^zakki-\d{8}-\d{6}-[^/]+\.json$`)
-			if !nameRe.MatchString(entries[0].Name()) {
-				t.Fatalf("留档命名不符: %q", entries[0].Name())
-			}
-			archived, err := os.ReadFile(filepath.Join(s.ConflictsDir(), entries[0].Name()))
+			info, err := os.Stat(s.DataPath())
 			if err != nil {
 				t.Fatal(err)
 			}
-			wantLoser := docBytes("远端修改")
-			if !keepLocal {
-				wantLoser = docBytes("本机修改")
+			at := info.ModTime().Add(-time.Hour)
+			if remoteNewer {
+				at = info.ModTime().Add(time.Hour)
 			}
-			if !bytes.Equal(archived, wantLoser) {
-				t.Fatalf("留档应为落选版本: got %q want %q", archived, wantLoser)
+			fb.mu.Lock()
+			fb.remote, fb.version = tabsDocBytes("一（远端）", "二", "三（远端）"), "r2"
+			fb.mu.Unlock()
+			if st := startSync(t, s, newerClock{fb, at}); st.Error != "" {
+				t.Fatal(st.Error)
 			}
-			// 胜出版本落盘且基线一致。
-			got, _ := os.ReadFile(s.DataPath())
-			wantWinner := docBytes("本机修改")
-			if !keepLocal {
-				wantWinner = docBytes("远端修改")
+			first := "一（本机）"
+			if remoteNewer {
+				first = "一（远端）"
 			}
-			if !bytes.Equal(got, wantWinner) {
-				t.Fatalf("胜出版本应落盘: got %q want %q", got, wantWinner)
+			f, _, _, err := s.Load()
+			if err != nil {
+				t.Fatal(err)
 			}
-			if keepLocal && s.SyncNeedsReload() {
-				t.Fatal("保留本机=上传远端，本地内容不变，不应请求重载")
-			}
-			if !keepLocal && !s.SyncNeedsReload() {
-				t.Fatal("保留远端=远端落盘，应请求重载")
+			if f.Tabs[0].Text != first || f.Tabs[2].Text != "三（远端）" {
+				t.Fatalf("同处较新者胜、其余合并: %q / %q", f.Tabs[0].Text, f.Tabs[2].Text)
 			}
 		})
 	}
@@ -440,7 +478,7 @@ func TestSyncCASConflictRepull(t *testing.T) {
 			t.Fatalf("基线应指向 r3: %+v", base)
 		}
 	})
-	t.Run("远端变成不同内容：重判落入冲突", func(t *testing.T) {
+	t.Run("远端变成不同内容：重判后合并再上传", func(t *testing.T) {
 		s, be, _ := newSyncStore(t, "基线")
 		be.existed, be.remote, be.version = true, docBytes("基线"), "r1"
 		if st := startSync(t, s, be); st.Error != "" {
@@ -451,18 +489,24 @@ func TestSyncCASConflictRepull(t *testing.T) {
 		}
 		be.mu.Lock()
 		first := true
-		be.pushFn = func([]byte, string) (string, error) {
+		be.pushFn = func(content []byte, expect string) (string, error) {
 			if first {
 				first = false
 				be.remote, be.version = docBytes("别人的内容"), "r2"
 				return "", ErrSyncConflict
 			}
-			t.Error("重判发现双向分叉后不应再次上传")
-			return "", ErrSyncConflict
+			if expect != "r2" {
+				t.Errorf("合并后应带最新版本号上传, got %q", expect)
+			}
+			be.remote, be.version = append([]byte(nil), content...), "r3"
+			return "r3", nil
 		}
 		be.mu.Unlock()
-		if st := startSync(t, s, be); st.Conflict == nil {
-			t.Fatalf("重判后双向分叉应挂起冲突: %+v", st)
+		if st := startSync(t, s, be); st.Error != "" || st.LastMerge.IsZero() {
+			t.Fatalf("重判后双向分叉应合并: %+v", st)
+		}
+		if base := readBaseline(t, s); base.RemoteVersion != "r3" {
+			t.Fatalf("基线应指向合并后的上传版本: %+v", base)
 		}
 	})
 }
@@ -492,7 +536,7 @@ func TestSyncCASExhausted(t *testing.T) {
 	}
 }
 
-// TestSyncFirstSync 空基线：远端缺失直接上传；双方都有内容保守进冲突。
+// TestSyncFirstSync 空基线：远端缺失直接上传；双方都有内容以云端为准。
 func TestSyncFirstSync(t *testing.T) {
 	t.Run("远端缺失上传", func(t *testing.T) {
 		s, be, _ := newSyncStore(t, "首次内容")
@@ -503,11 +547,17 @@ func TestSyncFirstSync(t *testing.T) {
 			t.Fatalf("首同步后基线应建立: %+v", base)
 		}
 	})
-	t.Run("双方都有内容冲突", func(t *testing.T) {
-		s, be, _ := newSyncStore(t, "本地已有")
-		be.existed, be.remote, be.version = true, docBytes("远端已有"), "r0"
-		if st := startSync(t, s, be); st.Conflict == nil {
-			t.Fatalf("首同步双向有内容应冲突: %+v", st)
+	t.Run("双方都有内容以云端为准", func(t *testing.T) {
+		s, be, _ := newSyncStore(t, "新设备的欢迎文本")
+		be.existed, be.remote, be.version = true, docBytes("云端真实笔记"), "r0"
+		if st := startSync(t, s, be); st.Error != "" || !s.SyncNeedsReload() {
+			t.Fatalf("首同步应采用云端: %+v", st)
+		}
+		if got, _ := os.ReadFile(s.DataPath()); !bytes.Equal(got, docBytes("云端真实笔记")) {
+			t.Fatalf("本地应为云端内容: %s", got)
+		}
+		if _, _, _, _, pushes := be.snapshot(); pushes != 0 {
+			t.Fatal("首同步不应覆盖云端")
 		}
 	})
 }
@@ -578,36 +628,6 @@ func TestSyncRemoteMissingAfterBaseline(t *testing.T) {
 	}
 	if base := readBaseline(t, s); !base.RemoteNil {
 		t.Fatalf("基线应记录远端不存在: %+v", base)
-	}
-}
-
-// TestSyncConflictArchiveNameCollisions 同秒多次留档追加序号；设备名
-// 清洗保证跨平台合法。
-func TestSyncConflictArchiveName(t *testing.T) {
-	s, _, _ := newSyncStore(t, "x")
-	for i := 0; i < 3; i++ {
-		if _, err := s.writeConflictArchive([]byte("落选")); err != nil {
-			t.Fatal(err)
-		}
-	}
-	entries, err := os.ReadDir(s.ConflictsDir())
-	if err != nil || len(entries) != 3 {
-		t.Fatalf("应生成 3 个留档: %v", err)
-	}
-	names := map[string]bool{}
-	for _, e := range entries {
-		names[e.Name()] = true
-	}
-	if len(names) != 3 {
-		t.Fatalf("留档命名应唯一: %v", names)
-	}
-	for _, bad := range []string{"", "a/b", `a\b`, strings.Repeat("长", 100)} {
-		if got := sanitizeDeviceName(bad); strings.ContainsAny(got, `/\`) || len(got) > 60 {
-			t.Fatalf("设备名清洗失败: %q -> %q", bad, got)
-		}
-	}
-	if got := sanitizeDeviceName("机器/A:B"); got != "机器-A-B" {
-		t.Fatalf("非法字符应替换: %q", got)
 	}
 }
 
@@ -785,14 +805,22 @@ func TestSyncPostSaveDebounceRepeats(t *testing.T) {
 
 	s, be, _ := newSyncStore(t, "基线")
 	be.existed, be.remote, be.version = true, docBytes("基线"), "r1"
-	s.ConfigureSync(be, "gomeen/notes", filepath.Join(filepath.Dir(s.DataPath()), "sync-state.json"), nil)
+	// 先建立基线：之后的保存都是「本机已变、远端未变」的上传轮，不会因为
+	// 采用远端而冻结保存。
+	if st := startSync(t, s, be); st.Error != "" {
+		t.Fatal(st.Error)
+	}
+	be.mu.Lock()
+	before := be.pullCalls
+	be.mu.Unlock()
 	if err := s.SaveNow(doc("第一笔")); err != nil {
 		t.Fatal(err)
 	}
-	await(t, func() bool { be.mu.Lock(); defer be.mu.Unlock(); return be.pullCalls >= 1 })
+	await(t, func() bool { be.mu.Lock(); defer be.mu.Unlock(); return be.pullCalls >= before+1 })
+	waitSyncIdle(t, s)
 	if err := s.SaveNow(doc("第二笔")); err != nil {
 		t.Fatal(err)
 	}
 	// 缺陷形态：首轮触发后 syncTimer 字段残留，第二笔永远不再触发同步。
-	await(t, func() bool { be.mu.Lock(); defer be.mu.Unlock(); return be.pullCalls >= 2 })
+	await(t, func() bool { be.mu.Lock(); defer be.mu.Unlock(); return be.pullCalls >= before+2 })
 }

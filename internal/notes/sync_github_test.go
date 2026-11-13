@@ -363,3 +363,19 @@ func TestSyncTokenEnvelope(t *testing.T) {
 		t.Fatalf("重复删除应成功: %v", err)
 	}
 }
+
+// RemoteModTime 取文件最近一次提交的 committer 时间；只查一条，路径参数指向笔记文件。
+func TestGitHubRemoteModTime(t *testing.T) {
+	want := time.Date(2026, 11, 13, 4, 5, 6, 0, time.UTC)
+	srv, _ := newGitHubServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/gomeen/notes/commits" || r.URL.Query().Get("path") != "zakki.json" || r.URL.Query().Get("per_page") != "1" {
+			t.Errorf("请求错误: %s?%s", r.URL.Path, r.URL.RawQuery)
+		}
+		writeJSON(w, 200, []map[string]any{{"commit": map[string]any{"committer": map[string]any{"date": want.Format(time.RFC3339)}}}})
+	})
+	be := newTestBackend("gomeen/notes", func(context.Context) (string, error) { return "tok", nil }, srv)
+	got, err := be.RemoteModTime(context.Background())
+	if err != nil || !got.Equal(want) {
+		t.Fatalf("RemoteModTime = %v, %v; want %v", got, err, want)
+	}
+}

@@ -68,8 +68,9 @@ type Store struct {
 	syncDone                chan struct{}
 	syncCancel              func()
 	syncAfter               func()
-	syncDirective           *syncDirective
-	syncState               SyncState
+	// syncFinal 标记 FinalSync 的最终轮：它在 Shutdown 置 stopped 之后运行。
+	syncFinal bool
+	syncState SyncState
 }
 
 // NewStore 创建单文件存储；缺省时钟使用 time.Now。

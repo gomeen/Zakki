@@ -214,6 +214,36 @@ func (g *GitHubBackend) Pull(ctx context.Context) (content []byte, version strin
 	return body, meta.SHA, true, nil
 }
 
+// RemoteModTime 返回远端文件最近一次提交的时间（committer 时间，由 GitHub
+// 在接收提交时记录）。只在合并需要「较新者胜」时调用；没有提交记录返回零值。
+func (g *GitHubBackend) RemoteModTime(ctx context.Context) (time.Time, error) {
+	url := fmt.Sprintf("%s/repos/%s/commits?per_page=1&path=%s", g.apiBase(), g.Repo, escapePathSeg(strings.Trim(g.Path, "/")))
+	if g.Branch != "" {
+		url += "&sha=" + escapePathSeg(g.Branch)
+	}
+	code, body, err := g.do(ctx, http.MethodGet, url, "application/vnd.github+json", nil)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if code != http.StatusOK {
+		return time.Time{}, githubAPIError("读取远端提交时间", code, body)
+	}
+	var commits []struct {
+		Commit struct {
+			Committer struct {
+				Date time.Time `json:"date"`
+			} `json:"committer"`
+		} `json:"commit"`
+	}
+	if err := json.Unmarshal(body, &commits); err != nil {
+		return time.Time{}, fmt.Errorf("解析 GitHub 提交记录失败：%w", err)
+	}
+	if len(commits) == 0 {
+		return time.Time{}, nil
+	}
+	return commits[0].Commit.Committer.Date, nil
+}
+
 // Push 以 CAS 语义上传文件；expect 为空表示远端应当不存在。409 与
 // 422「sha 不匹配」都按 ErrSyncConflict 处理，交由同步轮重新 pull。
 func (g *GitHubBackend) Push(ctx context.Context, content []byte, expect string) (string, error) {

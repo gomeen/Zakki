@@ -1,12 +1,14 @@
 package notes
 
-// 唯一笔记文件的云同步循环（规格 §2.2 / D12 / D13）：
-// 每轮先 pull（读取远端内容与版本号）、flush 本地待保存、按 D13 判定表
-// 处理，再 commit（CAS 带远端版本号上传）；CAS 失败重新 pull 重判，
-// 不盲重试旧版本号。本地落盘与上传串行（D12）：本地阶段持有写锁与
-// Git 门闩（与迁址、写保护互斥），网络阶段不占锁。
-// 基线是每台设备本地的「上次同步成功」内容 sha256 与后端版本号，存应用
-// 数据目录的独立状态文件，不写入 zakki.json、偏好文件或 Git。
+// 唯一笔记文件的云同步循环（规格 §2.2 / D12 / ADR-0004）：
+// 每轮先 pull（读取远端内容与版本号）、flush 本地待保存、按判定表处理，
+// 再 commit（CAS 带远端版本号上传）；CAS 失败重新 pull 重判，不盲重试
+// 旧版本号。本地落盘与上传串行（D12）：本地阶段持有写锁与 Git 门闩
+// （与迁址、写保护互斥），网络阶段不占锁。
+// 双方都改时不弹窗、不留档：以基线原文逐标签三方合并，同一标签两边都改
+// 按较新者胜（sync_merge.go）；从未同步过的设备以云端为准。
+// 基线是每台设备本地的「上次同步成功」内容（指纹、原文）与后端版本号，存
+// 应用数据目录的独立状态文件，不写入 zakki.json、偏好文件或 Git。
 
 import (
 	"context"
@@ -17,8 +19,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -34,8 +34,9 @@ var ErrSyncConflict = errors.New("远端文件已被其他设备更新")
 var ErrSyncHold = errors.New("正在应用远端同步内容，请稍后重试")
 
 // syncSaveDebounce 是保存成功后的同步防抖：连续输入时只跟最后一笔。
+// 改动要尽快离开本机，换设备时另一端才拉得到（ADR-0004）。
 // var 以便测试注入短周期（notes 包测试串行执行）。
-var syncSaveDebounce = 10 * time.Second
+var syncSaveDebounce = 3 * time.Second
 
 // syncMaxAttempts 是单轮内「pull → 判定 → commit」的最大重判次数；
 // 只用于 CAS 冲突重拉，绝不盲重试旧版本号。
@@ -54,13 +55,11 @@ type SyncBackend interface {
 	Push(ctx context.Context, content []byte, expect string) (newVersion string, err error)
 }
 
-// SyncConflict 是 D13 第 4 情况的冲突现场：本地与远端都相对基线变化且
-// 内容不同，等待用户二选一。两个内容都是完整文件字节（可为 nil 表示该
-// 侧文件不存在）。
-type SyncConflict struct {
-	LocalContent  []byte
-	RemoteContent []byte
-	RemoteVersion string
+// SyncModTimer 由能报告远端文件最近修改时间的后端实现；只在双方都改了
+// 同一处、需要「较新者胜」时调用一次。未实现的后端按远端时间未知处理
+// （本机胜出）。
+type SyncModTimer interface {
+	RemoteModTime(ctx context.Context) (time.Time, error)
 }
 
 // SyncState 发布给 UI 的同步状态快照。
@@ -71,11 +70,13 @@ type SyncState struct {
 	Running bool
 	// LastSync 是最近一次成功完成的轮次时间（含无可做动作的轮）。
 	LastSync time.Time
-	// LastRemoteApply 是最近一次把远端内容写入本地磁盘的时间；非零表示
-	// 界面需要重载磁盘内容（SyncNeedsReload）。
+	// LastRemoteApply 是最近一次把远端（或合并）内容写入本地磁盘的时间；
+	// 非零表示界面需要重载磁盘内容（SyncNeedsReload）。
 	LastRemoteApply time.Time
-	Error           string
-	Conflict        *SyncConflict
+	// LastMerge 是最近一次合并两端修改的时间；与 LastRemoteApply 相同表示
+	// 这次写入本地的是合并结果。
+	LastMerge time.Time
+	Error     string
 }
 
 // syncDecision 是 D13 判定表的结论。
@@ -91,8 +92,8 @@ func (d syncDecision) String() string {
 		return "upload-local"
 	case syncUpdateBaseline:
 		return "update-baseline"
-	case syncNeedResolve:
-		return "need-resolve"
+	case syncMerge:
+		return "merge"
 	}
 	return fmt.Sprintf("unknown(%d)", int(d))
 }
@@ -102,11 +103,12 @@ const (
 	syncAdoptRemote                        // 采用远端（以没有未保存本地修改为前提）
 	syncUploadLocal                        // 上传本地
 	syncUpdateBaseline                     // 内容相同，只更新基线
-	syncNeedResolve                        // 双向分叉，挂起冲突等待用户裁决
+	syncMerge                              // 双方都改且内容不同：逐标签合并，同处较新者胜
 )
 
-// syncBaselineV1 是基线状态文件的磁盘格式。ContentSHA256 为空表示从未
-// 同步；只存内容指纹与后端版本号，绝不包含 token 等凭据（R7）。
+// syncBaselineV1 是基线状态文件的磁盘格式。Backend 为空表示从未同步；
+// Content 是上次同步成功时的完整原文（合并的公共祖先，旧基线可能没有）。
+// 绝不包含 token 等凭据（R7）。
 type syncBaselineV1 struct {
 	Version       int    `json:"version"`
 	Backend       string `json:"backend"`
@@ -115,6 +117,7 @@ type syncBaselineV1 struct {
 	// RemoteNil / LocalNil 区分「内容为空」与「文件不存在」。
 	RemoteNil bool   `json:"remoteNil,omitempty"`
 	LocalNil  bool   `json:"localNil,omitempty"`
+	Content   []byte `json:"content,omitempty"`
 	Device    string `json:"device,omitempty"`    // 写入基线的设备（诊断用）
 	UpdatedAt string `json:"updatedAt,omitempty"` // RFC3339（诊断用）
 }
@@ -122,11 +125,6 @@ type syncBaselineV1 struct {
 // neverSynced 报告基线是否为空：只看 Backend 是否被写入。内容指纹
 // 允许为空串（远端文件被删除后采用的基线），不能作为「从未同步」的判据。
 func (b syncBaselineV1) neverSynced() bool { return b.Backend == "" }
-
-// syncDirective 是冲突裁决后的定向轮策略：本轮无视判定表，按用户选择处置。
-type syncDirective struct {
-	keepLocal bool
-}
 
 // syncPushRequest 从持锁本地阶段带出的网络上传任务；本地锁已释放后才执行。
 type syncPushRequest struct {
@@ -200,7 +198,7 @@ func (s *Store) SyncNow() {
 	s.syncState.Running = true
 	s.mu.Unlock()
 	go func() {
-		s.syncRun(gen)
+		s.syncRun(context.Background(), gen)
 		s.mu.Lock()
 		s.syncRunning = false
 		close(s.syncDone)
@@ -211,6 +209,66 @@ func (s *Store) SyncNow() {
 			s.SyncNow()
 		}
 	}()
+}
+
+// SyncHasLocalChanges 报告本机是否有尚未推送的修改迹象（待保存快照，或
+// 保存后的防抖同步还没触发）。只看内存状态，不碰磁盘与网络，供窗口失焦
+// 时决定要不要立即推送。
+func (s *Store) SyncHasLocalChanges() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.syncBackend != nil && (s.pending != nil || s.syncTimer != nil)
+}
+
+// FinalSync 在退出最终保存（Shutdown）之后、Close 之前尽力推送一轮，最多
+// 等 timeout。本机内容与基线一致时直接返回，不碰网络；超时或失败只返回
+// 错误，不阻止退出——下次启动按「本机已变、远端未变」自动补推。
+func (s *Store) FinalSync(timeout time.Duration) error {
+	s.mu.Lock()
+	if s.syncBackend == nil || s.closed || s.syncHold || !s.diskKnown {
+		s.mu.Unlock()
+		return nil
+	}
+	localHash, localExisted := contentHash(s.savedContent), s.diskExists
+	// 作废在途轮次并中止它的网络请求，最终轮不排在它后面等 HTTP 超时。
+	s.syncGen++
+	s.syncQueued = false
+	s.stopSyncTimerLocked()
+	if s.syncCancel != nil {
+		s.syncCancel()
+		s.syncCancel = nil
+	}
+	s.mu.Unlock()
+	base, err := s.loadSyncBaseline()
+	if err != nil {
+		return err
+	}
+	if !base.neverSynced() && localExisted == !base.LocalNil && localHash == base.ContentSHA256 {
+		return nil
+	}
+	s.WaitSyncIdle()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	s.mu.Lock()
+	if s.syncBackend == nil || s.closed || s.syncRunning {
+		s.mu.Unlock()
+		return nil
+	}
+	s.syncRunning, s.syncFinal = true, true
+	s.syncDone = make(chan struct{})
+	gen := s.syncGen + 1
+	s.syncGen = gen
+	s.mu.Unlock()
+	s.syncRun(ctx, gen)
+	s.mu.Lock()
+	s.syncRunning, s.syncFinal = false, false
+	close(s.syncDone)
+	syncErr := s.syncState.Error
+	s.mu.Unlock()
+	if syncErr != "" {
+		return errors.New(syncErr)
+	}
+	return nil
 }
 
 // SyncRunning 报告是否有同步轮在途。
@@ -236,64 +294,6 @@ func (s *Store) SyncStateSnapshot() SyncState { s.mu.Lock(); defer s.mu.Unlock()
 // SyncNeedsReload 报告远端内容已落盘、界面尚未重载。
 func (s *Store) SyncNeedsReload() bool { s.mu.Lock(); defer s.mu.Unlock(); return s.syncHold }
 
-// ConflictsDir 返回冲突留档目录（与 zakki.json 同目录的 conflicts/）。
-// 留档文件不进标签、不参与任何调度、不计标签上限；旧 Git 调度器只
-// add/commit zakki.json 的精确路径，留档与基线都不会被 Git 备份收录。
-func (s *Store) ConflictsDir() string {
-	return filepath.Join(filepath.Dir(s.DataPath()), "conflicts")
-}
-
-// ResolveSyncConflict 按 D13 处置挂起的冲突：keepLocal=true 保留本机
-// （远端版本留档后上传本地），否则采用远端（本地版本留档后落盘重载）。
-// 留档失败不推进裁决：保留冲突现场并如实上报，用户可重试。
-func (s *Store) ResolveSyncConflict(keepLocal bool) {
-	s.mu.Lock()
-	cf := s.syncState.Conflict
-	configured := s.syncBackend != nil && !s.closed
-	s.mu.Unlock()
-	if cf == nil || !configured {
-		return
-	}
-	loser := cf.LocalContent
-	if keepLocal {
-		loser = cf.RemoteContent
-	}
-	if _, err := s.writeConflictArchive(loser); err != nil {
-		s.mu.Lock()
-		s.syncState.Error = "冲突留档失败：" + err.Error()
-		s.mu.Unlock()
-		s.notifySyncAfter()
-		return
-	}
-	s.mu.Lock()
-	s.syncState.Conflict = nil
-	s.syncState.Error = ""
-	s.syncDirective = &syncDirective{keepLocal: keepLocal}
-	if s.syncRunning { // 已有轮在途：让排队机制接手，保留定向策略
-		s.syncQueued = true
-		s.mu.Unlock()
-		return
-	}
-	s.syncRunning = true
-	s.syncDone = make(chan struct{})
-	gen := s.syncGen + 1
-	s.syncGen = gen
-	s.syncState.Running = true
-	s.mu.Unlock()
-	go func() {
-		s.syncRun(gen)
-		s.mu.Lock()
-		s.syncRunning = false
-		close(s.syncDone)
-		again := s.syncQueued && s.syncBackend != nil && !s.closed && !s.stopped
-		s.syncQueued = false
-		s.mu.Unlock()
-		if again {
-			s.SyncNow()
-		}
-	}()
-}
-
 // notifySyncAfter 在轮次结束后回调 UI（不占任何锁）。
 func (s *Store) notifySyncAfter() {
 	s.mu.Lock()
@@ -304,13 +304,16 @@ func (s *Store) notifySyncAfter() {
 	}
 }
 
+// syncValidLocked 校验轮次仍有效；FinalSync 的最终轮在 Shutdown 之后运行，
+// 不受 stopped 约束。
 func (s *Store) syncValidLocked(gen uint64) bool {
-	return gen == s.syncGen && !s.closed && !s.stopped && s.syncBackend != nil
+	return gen == s.syncGen && !s.closed && (!s.stopped || s.syncFinal) && s.syncBackend != nil
 }
 
 // syncRun 执行一轮同步：pull → 本地判定与落盘 → CAS commit。CAS 冲突
-// 重新 pull 重判（上限 syncMaxAttempts），不盲重试旧版本号。
-func (s *Store) syncRun(gen uint64) {
+// 重新 pull 重判（上限 syncMaxAttempts），不盲重试旧版本号。parent 的
+// 取消或超时会中止在途网络请求。
+func (s *Store) syncRun(parent context.Context, gen uint64) {
 	var lastErr error
 	lastWasRetry := false
 	for attempt := 0; attempt < syncMaxAttempts; attempt++ {
@@ -321,7 +324,7 @@ func (s *Store) syncRun(gen uint64) {
 		if !valid {
 			return
 		}
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(parent)
 		if attempt == 0 {
 			s.mu.Lock()
 			s.syncCancel = cancel
@@ -349,7 +352,7 @@ func (s *Store) syncRun(gen uint64) {
 			break
 		}
 		if !retry {
-			// 本轮已收敛（完成或挂起冲突）：清除重判标记。
+			// 本轮已收敛：清除重判标记。
 			lastErr = nil
 			lastWasRetry = false
 			break
@@ -386,16 +389,23 @@ func (s *Store) syncRun(gen uint64) {
 }
 
 // syncRound 编排单次「pull 后的本地阶段 + commit」：持锁完成 flush、
-// 判定与本地落盘，网络上传在不持锁状态下进行（D12：本地落盘与上传
-// 串行，但网络不阻塞新的本地保存）。retry=true 表示 CAS 冲突需重拉。
+// 判定与本地落盘，网络（上传、查远端修改时间）在不持锁状态下进行（D12：
+// 本地落盘与上传串行，但网络不阻塞新的本地保存）。retry=true 表示 CAS 冲突需重拉。
 func (s *Store) syncRound(gen uint64, backend SyncBackend, remote []byte, version string, existed bool, ctx context.Context) (retry bool, err error) {
 	s.writeMu.Lock()
 	s.gitGate.Lock()
-	push, retry, err := s.syncLocalPhase(gen, backend, remote, version, existed)
+	plan, err := s.syncLocalPhase(gen, backend, remote, version, existed)
 	s.gitGate.Unlock()
 	s.writeMu.Unlock()
-	if err != nil || retry || push == nil {
-		return retry, err
+	if err != nil || plan == nil {
+		return false, err
+	}
+	push := plan.push
+	if plan.merge != nil {
+		push, err = s.syncMergeRound(ctx, gen, backend, plan.merge)
+		if err != nil || push == nil {
+			return false, err
+		}
 	}
 	newVersion, err := backend.Push(ctx, push.content, push.expect)
 	if err != nil {
@@ -414,42 +424,41 @@ func (s *Store) syncRound(gen uint64, backend SyncBackend, remote []byte, versio
 }
 
 // syncLocalPhase 是判定表的持锁实现（写锁顺序沿用 SetSaveBlocked：
-// writeMu → gitGate → mu）。返回待执行的上传任务（如有）。
-func (s *Store) syncLocalPhase(gen uint64, backend SyncBackend, remote []byte, version string, existed bool) (push *syncPushRequest, retry bool, err error) {
+// writeMu → gitGate → mu）。
+func (s *Store) syncLocalPhase(gen uint64, backend SyncBackend, remote []byte, version string, existed bool) (*syncPlan, error) {
 	s.mu.Lock()
 	valid := s.syncValidLocked(gen)
 	blocked := s.saveBlocked || s.invalid
 	hold := s.syncHold
 	s.mu.Unlock()
 	if !valid {
-		return nil, false, nil
+		return nil, nil
 	}
 	if hold {
-		// 上一轮的远端内容还没被界面重载：不再叠加动作，等 UI 消化。
-		return nil, false, nil
+		// 上一轮写入本地的内容还没被界面重载：不再叠加动作，等 UI 消化。
+		return nil, nil
 	}
 	if blocked {
 		// 写保护（损坏/高版本/外部改动/用户暂停）：绝不覆盖原文件。
-		return nil, false, errors.New("笔记文件处于写保护状态，同步已暂停；请先处理文件问题或重新读取")
+		return nil, errors.New("笔记文件处于写保护状态，同步已暂停；请先处理文件问题或重新读取")
 	}
 	// 处理本地待保存（D12）：先把内存中的未保存快照串行落盘，
 	// 让磁盘内容成为「本地状态」的唯一事实。
 	if err := s.flushPendingNow(); err != nil {
-		return nil, false, fmt.Errorf("同步前保存本地修改失败：%w", err)
+		return nil, fmt.Errorf("同步前保存本地修改失败：%w", err)
 	}
 	// 核对磁盘指纹（与 Git 提交同一门禁）：文件被外部改动、移动或删除
 	// 时拒绝同步，不用内存旧内容盲判（R11/R12 语义不回退）。
 	if err := s.verifyDisk(); err != nil {
-		return nil, false, fmt.Errorf("同步前校验磁盘状态失败：%w", err)
+		return nil, fmt.Errorf("同步前校验磁盘状态失败：%w", err)
 	}
 	s.mu.Lock()
 	rev0 := s.saveCompleted
 	s.mu.Unlock()
 	base, err := s.loadSyncBaseline()
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	directive := s.takeSyncDirective()
 
 	s.mu.Lock()
 	local, localExisted := s.savedContent, s.diskExists
@@ -457,9 +466,9 @@ func (s *Store) syncLocalPhase(gen uint64, backend SyncBackend, remote []byte, v
 	s.mu.Unlock()
 	localHash := contentHash(local)
 	remoteHash := contentHash(remote)
-	decision := decideSync(localExisted, localHash, existed, remoteHash, base, directive)
-	// 触发源、判定与三方指纹进日志：双实例排查时能对出「哪一端、哪一轮、
-	// 按什么判据」落的动作（离线慢失败/恢复延迟的 E2E 现场同理）。
+	decision := decideSync(localExisted, localHash, existed, remoteHash, base)
+	// 判定与三方指纹进日志：双实例排查时能对出「哪一端、哪一轮、按什么
+	// 判据」落的动作。
 	slog.Info("同步轮判定",
 		"decision", decision,
 		"local", contentHashPrefix(localHash),
@@ -468,69 +477,62 @@ func (s *Store) syncLocalPhase(gen uint64, backend SyncBackend, remote []byte, v
 
 	switch decision {
 	case syncNone:
-		return nil, false, nil
+		return nil, nil
 	case syncUpdateBaseline:
-		return nil, false, s.saveSyncBaseline(s.baselineUpdated(base, backend, remoteHash, version, existed, localExisted))
+		return nil, s.saveSyncBaseline(s.baselineUpdated(backend, remote, version, existed, localExisted))
 	case syncAdoptRemote:
-		return nil, false, s.syncAdopt(remote, version, existed, rev0)
-	case syncNeedResolve:
-		s.mu.Lock()
-		s.syncState.Conflict = &SyncConflict{
-			LocalContent:  local,
-			RemoteContent: append([]byte(nil), remote...),
-			RemoteVersion: version,
+		return nil, s.syncAdopt(remote, version, existed, rev0, false)
+	case syncMerge:
+		var modAt time.Time
+		if info, err := os.Stat(s.DataPath()); err == nil {
+			modAt = info.ModTime()
 		}
-		s.mu.Unlock()
-		return nil, false, nil
+		return &syncPlan{merge: &syncMergeInput{
+			base: base, local: local, remote: append([]byte(nil), remote...),
+			version: version, rev0: rev0, localModifiedAt: modAt,
+		}}, nil
 	case syncUploadLocal:
 		if !localExisted {
-			return nil, false, errors.New("本地笔记文件不存在，无法上传；请重新读取或检查保存位置")
+			return nil, errors.New("本地笔记文件不存在，无法上传；请重新读取或检查保存位置")
 		}
 		// 上传的 CAS 期望用本轮刚 pull 到的版本号：能走到上传分支，说明
-		// 远端内容与基线一致（或按裁决允许覆盖）；用最新版本号可避免
-		// 「内容相同但版本号漂移」造成的无意义 CAS 失败；远端缺失时期望
-		// 为空（远端应当不存在）。
+		// 远端内容与基线一致；用最新版本号可避免「内容相同但版本号漂移」
+		// 造成的无意义 CAS 失败；远端缺失时期望为空（远端应当不存在）。
 		expect := ""
-		if directive != nil && directive.keepLocal || existed {
+		if existed {
 			expect = version
 		}
-		return &syncPushRequest{
+		return &syncPlan{push: &syncPushRequest{
 			content: local,
 			expect:  expect,
-			basic:   s.baselineUpdated(base, backend, localHash, "", existed, localExisted),
-		}, false, nil
+			basic:   s.baselineUpdated(backend, local, "", existed, localExisted),
+		}}, nil
 	}
-	return nil, false, nil
+	return nil, nil
 }
 
-// baselineUpdated 生成动作完成后的基线（版本号在 upload 成功后补）。
-func (s *Store) baselineUpdated(base syncBaselineV1, backend SyncBackend, hash, version string, remoteExisted, localExisted bool) syncBaselineV1 {
-	id := base.Backend
-	if backend != nil {
-		id = backend.BackendID()
-	}
+// baselineUpdated 生成动作完成后的基线（版本号在 upload 成功后补）。content 是
+// 双方此刻一致的内容，作为下次合并的公共祖先。
+func (s *Store) baselineUpdated(backend SyncBackend, content []byte, version string, remoteExisted, localExisted bool) syncBaselineV1 {
 	return syncBaselineV1{
-		Version: 1, Backend: id, ContentSHA256: hash, RemoteVersion: version,
-		RemoteNil: !remoteExisted, LocalNil: !localExisted,
+		Version: 1, Backend: backend.BackendID(), ContentSHA256: contentHash(content), RemoteVersion: version,
+		RemoteNil: !remoteExisted, LocalNil: !localExisted, Content: content,
 		Device: deviceName(), UpdatedAt: s.now().Format(time.RFC3339),
 	}
 }
 
 // syncAdopt 把远端内容写入本地磁盘（校验通过才跟随，R8）：verifyDisk →
 // 原子替换 → 更新磁盘指纹 → 基线 → 冻结未重载期间的保存并请求界面重载。
-func (s *Store) syncAdopt(remote []byte, version string, remoteExisted bool, rev0 uint64) error {
+// merged 表示这是合并后恰好等于远端的结果（界面提示用）。
+func (s *Store) syncAdopt(remote []byte, version string, remoteExisted bool, rev0 uint64, merged bool) error {
 	if err := s.verifyDisk(); err != nil {
 		// 磁盘与记录指纹不符（外部改动/移动/删除）：不安全跟随。
 		return fmt.Errorf("远端内容未能安全落盘：%w", err)
 	}
-	s.mu.Lock()
-	// 判定与写入之间又出现新的本地快照：中止本轮（不丢输入），下一轮按
-	// 「本地已变、远端未变」走上传路径。
-	if s.pending != nil || s.saveRevision != rev0 {
-		s.mu.Unlock()
-		return errors.New("同步期间出现新的本地修改，本轮已跳过，稍后自动重试")
+	// 判定与写入之间又出现新的本地快照：中止本轮（不丢输入），下一轮重判。
+	if err := s.syncCheckNoNewSaves(rev0); err != nil {
+		return err
 	}
-	s.mu.Unlock()
 	if remoteExisted {
 		if err := s.stateWrite(s.dataPath, remote); err != nil && !atomicfile.IsCommitted(err) {
 			return fmt.Errorf("写入远端内容失败：%w", err)
@@ -550,11 +552,19 @@ func (s *Store) syncAdopt(remote []byte, version string, remoteExisted bool, rev
 	// 已接受但未写入的请求全部过期：内存状态由界面重载磁盘内容接管。
 	s.resetLoadedSaveLocked()
 	s.syncHold = true
-	s.syncState.LastRemoteApply = s.now()
+	now := s.now()
+	s.syncState.LastRemoteApply = now
+	if merged {
+		s.syncState.LastMerge = now
+	}
 	s.mu.Unlock()
+	var content []byte
+	if remoteExisted {
+		content = remote
+	}
 	return s.saveSyncBaseline(syncBaselineV1{
-		Version: 1, Backend: s.backendIDForBase(), ContentSHA256: contentHash(remote),
-		RemoteVersion: version, RemoteNil: !remoteExisted, LocalNil: false,
+		Version: 1, Backend: s.backendIDForBase(), ContentSHA256: contentHash(content),
+		RemoteVersion: version, RemoteNil: !remoteExisted, LocalNil: !remoteExisted, Content: content,
 		Device: deviceName(), UpdatedAt: s.now().Format(time.RFC3339),
 	})
 }
@@ -567,15 +577,6 @@ func (s *Store) removeLocalForSync() error {
 	return nil
 }
 
-// takeSyncDirective 取走挂起的裁决策略（一次性）。
-func (s *Store) takeSyncDirective() *syncDirective {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	d := s.syncDirective
-	s.syncDirective = nil
-	return d
-}
-
 func (s *Store) backendIDForBase() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -585,25 +586,25 @@ func (s *Store) backendIDForBase() string {
 	return s.syncBackend.BackendID()
 }
 
-// decideSync 是 D13 判定表的纯函数（「已变」指与本地基线比较；冲突按
-// 整个文件处理）。空基线（从未同步）时：本地有文件即本地已变，远端
-// 存在即远端已变——全新空仓库直接上传，双方都有内容则保守进冲突。
+// decideSync 是判定表的纯函数（「已变」指与本地基线比较）。从未同步过的
+// 设备：远端有文件就以云端为准（新设备上的欢迎文本不应覆盖云端笔记），
+// 远端没有就上传本机。双方都改且内容不同则合并（ADR-0004）。
 func decideSync(
 	localExisted bool, localHash string,
 	remoteExisted bool, remoteHash string,
 	base syncBaselineV1,
-	directive *syncDirective,
 ) syncDecision {
-	if directive != nil {
-		if directive.keepLocal {
-			return syncUploadLocal
-		}
-		return syncAdoptRemote
-	}
 	var localChanged, remoteChanged bool
 	if base.neverSynced() {
-		localChanged = localExisted
-		remoteChanged = remoteExisted
+		switch {
+		case remoteExisted && localExisted && localHash == remoteHash:
+			return syncUpdateBaseline
+		case remoteExisted:
+			return syncAdoptRemote
+		case localExisted:
+			return syncUploadLocal
+		}
+		return syncNone
 	} else {
 		baseLocal := !base.LocalNil
 		baseRemote := !base.RemoteNil
@@ -626,14 +627,20 @@ func decideSync(
 		if localExisted == remoteExisted && localHash == remoteHash {
 			return syncUpdateBaseline
 		}
-		return syncNeedResolve
+		// 一边删了整个文件、另一边改了：保留有内容的一边，不静默丢内容。
+		if !remoteExisted {
+			return syncUploadLocal
+		}
+		if !localExisted {
+			return syncAdoptRemote
+		}
+		return syncMerge
 	}
 	return syncNone
 }
 
-// loadSyncBaseline 读取基线状态文件；缺失按「从未同步」处理；损坏按
-// 「从未同步」降级并记录日志——损坏基线只会让判定走向保守的冲突路径，
-// 不会静默覆盖任何一侧。
+// loadSyncBaseline 读取基线状态文件；缺失或损坏按「从未同步」处理（以云端
+// 为准），损坏时记录日志。
 func (s *Store) loadSyncBaseline() (syncBaselineV1, error) {
 	s.mu.Lock()
 	path := s.syncStateFile
@@ -711,33 +718,6 @@ func (s *Store) flushPendingNow() error {
 	return s.saveRequest(req)
 }
 
-// writeConflictArchive 把落选版本完整写入 conflicts/（D13 命名：
-// zakki-YYYYMMDD-HHmmss-<设备名>.json，与 zakki.json 同目录），同秒冲突
-// 追加序号。留档不进标签、不参与调度、不计标签上限，也不自动清理。
-func (s *Store) writeConflictArchive(content []byte) (string, error) {
-	if content == nil {
-		return "", errors.New("留档内容为空")
-	}
-	dir := s.ConflictsDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	stem := fmt.Sprintf("zakki-%s-%s", s.now().Format("20060102-150405"), sanitizeDeviceName(deviceName()))
-	path := filepath.Join(dir, stem+".json")
-	for i := 2; ; i++ {
-		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
-			break
-		} else if err != nil {
-			return "", err
-		}
-		path = filepath.Join(dir, fmt.Sprintf("%s-%d.json", stem, i))
-	}
-	if err := s.stateWrite(path, content); err != nil {
-		return "", err
-	}
-	return path, nil
-}
-
 // contentHash 返回内容的 sha256 hex；nil 表示无文件，返回空串。
 func contentHash(content []byte) string {
 	if content == nil {
@@ -755,61 +735,11 @@ func contentHashPrefix(hash string) string {
 	return hash
 }
 
-// ConflictInfo 是 conflicts/ 留档的列表条目（设置页查看与删除用）。
-type ConflictInfo struct {
-	Name    string
-	Size    int64
-	ModTime time.Time
-}
-
-// ListConflictArchives 枚举留档目录中的 JSON 留档；目录不存在返回空
-// 列表（不报错）。条目按修改时间倒序（新的在前）。
-func ListConflictArchives(dir string) []ConflictInfo {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-	out := make([]ConflictInfo, 0, len(entries))
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		out = append(out, ConflictInfo{Name: e.Name(), Size: info.Size(), ModTime: info.ModTime()})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ModTime.After(out[j].ModTime) })
-	return out
-}
-
-// deviceName 返回本机名（留档与基线诊断用）；失败回退 unknown。
+// deviceName 返回本机名（基线诊断与提交说明用）；失败回退 unknown。
 func deviceName() string {
 	name, err := os.Hostname()
 	if err != nil || strings.TrimSpace(name) == "" {
 		return "unknown"
 	}
 	return strings.TrimSpace(name)
-}
-
-// sanitizeDeviceName 把设备名变成跨平台安全的文件名片段：替换路径分隔符
-// 与控制字符，限制长度；空结果回退 unknown。
-func sanitizeDeviceName(name string) string {
-	var b strings.Builder
-	for _, r := range name {
-		if r < 0x20 || r == 0x7f || strings.ContainsRune(`\/:*?"<>|`, r) {
-			b.WriteRune('-')
-			continue
-		}
-		b.WriteRune(r)
-	}
-	out := strings.Trim(strings.TrimSpace(b.String()), "-.")
-	if out == "" {
-		return "unknown"
-	}
-	if len(out) > 60 {
-		out = out[:60]
-	}
-	return out
 }
