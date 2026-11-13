@@ -30,7 +30,7 @@ func validateStorageDir(path string) (string, error) {
 	if err != nil || !info.IsDir() {
 		return "", errors.New(locales.StorageInvalidFolder())
 	}
-	probe, err := os.CreateTemp(abs, ".zakki-write-probe-*")
+	probe, err := os.CreateTemp(abs, writeProbeTempPrefix+"*")
 	if err != nil {
 		return "", errors.New(locales.StorageNotWritable())
 	}

@@ -43,7 +43,7 @@ func writeBytes(path string, data []byte, syncDir func(string) error) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	tmp, err := os.CreateTemp(dir, TempPrefix(path)+"*")
 	if err != nil {
 		return err
 	}

@@ -148,6 +148,7 @@ func writeExclusiveWithLink(path string, raw []byte, link func(string, string) e
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
+	// 前缀与 internal/app 启动清扫（relocateTempPrefix）一致，改名须同步。
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".zakki-relocate-*")
 	if err != nil {
 		return err
