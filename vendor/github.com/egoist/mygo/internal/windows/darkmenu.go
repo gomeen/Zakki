@@ -12,13 +12,16 @@ import (
 // preferred app mode of uxtheme, which Windows exports by ordinal only
 // (since Windows 10 1903, build 18362). The menu bar follows nothing: the
 // window draws it, and the line below it, when the system asks through the
-// messages UAH ("user API hook") menus send to their window.
+// messages UAH ("user API hook") menus send to their window. On Windows 11
+// the window draws the bar in either appearance, in Windows 11's style
+// (menudraw.go): taller, its items wider, with rounded backplates.
 
 const (
 	wmNCPaint         = 0x0085
 	wmNCActivate      = 0x0086
 	wmUAHDrawMenu     = 0x0091
 	wmUAHDrawMenuItem = 0x0092
+	wmUAHMeasureItem  = 0x0094
 	objidMenu         = 0xFFFFFFFD // OBJID_MENU
 	dtHidePrefix      = 0x00100000
 	rdwFrame          = 0x0400
@@ -35,8 +38,9 @@ const (
 )
 
 var (
-	procGetMenuBarInfo = user32.NewProc("GetMenuBarInfo")
-	procGetWindowDC    = user32.NewProc("GetWindowDC")
+	procGetMenuBarInfo   = user32.NewProc("GetMenuBarInfo")
+	procGetWindowDC      = user32.NewProc("GetWindowDC")
+	procGetCurrentObject = gdi32.NewProc("GetCurrentObject")
 )
 
 // The colors of a dark menu bar, those of the dark title bar above it and,
@@ -112,10 +116,25 @@ type menuBarInfo struct {
 	FocusedBits int32
 }
 
-// darkMenuBar reports whether the window draws its menu bar dark. A
-// contrast theme keeps the system's colors, as it does for popup menus.
-func (w *window) darkMenuBar() bool {
-	return w.menuShown() && w.b.isDark() && !highContrastOn()
+// drawsMenuBar reports whether the window draws its menu bar: on Windows
+// 11 always, on Windows 10 when dark. A contrast theme keeps the system's
+// colors, as it does for popup menus.
+func (w *window) drawsMenuBar() bool {
+	return w.menuShown() && !highContrastOn() && (fluentMenus() || w.b.isDark())
+}
+
+// menuBarColors returns the colors of the bar: its background, the
+// backplates of an item hovered and of one open, and the text of an item
+// and of a disabled one. Windows 11's backplates are WinUI's, over the
+// title bar's colors.
+func (b *Backend) menuBarColors() (back, hot, open, text, disabled uint32) {
+	switch dark := b.isDark(); {
+	case !fluentMenus():
+		return darkMenuBar, darkMenuHot, darkMenuOpen, darkMenuText, darkMenuDisabled
+	case dark:
+		return darkMenuBar, 0x2D2D2D, 0x333333, darkMenuText, darkMenuDisabled
+	}
+	return 0xFFFFFF, 0xF0F0F0, 0xEAEAEA, 0x1A1A1A, 0x9F9F9F
 }
 
 // menuBarRect is the menu bar in window coordinates, which the DCs of
@@ -142,34 +161,65 @@ func fillColor(dc uintptr, r *rect, color uint32) {
 // drawMenuBar paints the background of the bar.
 func (w *window) drawMenuBar(lp uintptr) {
 	um := (*uahMenu)(native(lp))
+	back, _, _, _, _ := w.b.menuBarColors()
 	if r, ok := w.menuBarRect(); ok {
-		fillColor(um.DC, &r, darkMenuBar)
+		fillColor(um.DC, &r, back)
 	}
 }
 
+// measureMenuBarItem makes an item of the bar, measured by Windows, as
+// tall as Windows 11's bar and wider, for its backplate.
+func (w *window) measureMenuBarItem(lp uintptr) {
+	mis := (*measureItemStruct)(native(lp)) // UAHMEASUREMENUITEM starts with it
+	dpi := dpiOf(w.hwnd)
+	mis.ItemWidth += uint32(toPx(menuBarExtra, dpi))
+	mis.ItemHeight = max(mis.ItemHeight, uint32(toPx(menuBarHeight, dpi)))
+}
+
 // drawMenuBarItem paints an item of the bar: its backplate and its label.
+// On Windows 11 the backplate is inset, with rounded corners.
 func (w *window) drawMenuBarItem(lp uintptr) {
 	d := (*uahDrawMenuItem)(native(lp))
 	dc, r, state := d.Draw.DC, d.Draw.Item, d.Draw.ItemState
-	back, fore := uint32(darkMenuBar), uint32(darkMenuText)
+	back, hot, open, fore, disabled := w.b.menuBarColors()
+	plate := back
 	switch {
 	case state&(odsGrayed|odsDisabled) != 0:
-		fore = darkMenuDisabled
+		fore = disabled
 	case state&odsSelected != 0:
-		back = darkMenuOpen
+		plate = open
 	case state&odsHotLight != 0:
-		back = darkMenuHot
+		plate = hot
 	}
-	fillColor(dc, &r, back)
 	buf := make([]uint16, 256)
 	n, _, _ := procGetMenuStringW.Call(d.Menu.Menu, uintptr(d.Position), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)), mfByPosition)
 	flags := uintptr(dtCenter | dtVCenter | dtSingleLine)
 	if state&odsNoAccel != 0 {
 		flags |= dtHidePrefix
 	}
-	procSetBkMode.Call(dc, 1) // TRANSPARENT
-	procSetTextColor.Call(dc, uintptr(fore))
-	procDrawTextW.Call(dc, uintptr(unsafe.Pointer(&buf[0])), n, uintptr(unsafe.Pointer(&r)), flags)
+	label := func(dc uintptr, r rect) {
+		procSetBkMode.Call(dc, 1) // TRANSPARENT
+		procSetTextColor.Call(dc, uintptr(fore))
+		procDrawTextW.Call(dc, uintptr(unsafe.Pointer(&buf[0])), n, uintptr(unsafe.Pointer(&r)), flags)
+	}
+	if !fluentMenus() {
+		fillColor(dc, &r, plate)
+		label(dc, r)
+		return
+	}
+	const objFont = 6
+	font, _, _ := procGetCurrentObject.Call(dc, objFont)
+	dpi := dpiOf(w.hwnd)
+	x, y := toPx(menuBarInsetX, dpi), toPx(menuBarInsetY, dpi)
+	box := &rect{x, y, r.Right - r.Left - x, r.Bottom - r.Top - y}
+	if plate == back {
+		box = nil
+	}
+	paintItem(dc, r, itemFill{back: back, plate: plate, alpha: 1}, box, float64(toPx(menuRadius, dpi)), func(img *bitmap, r rect) {
+		old, _, _ := procSelectObject.Call(img.dc, font)
+		label(img.dc, r)
+		procSelectObject.Call(img.dc, old)
+	})
 }
 
 // coverMenuLine paints over the light line the frame draws below the menu
@@ -188,15 +238,15 @@ func (w *window) coverMenuLine() {
 	procReleaseDC.Call(w.hwnd, dc)
 }
 
-// darkMenuMessage draws the menu bar dark. It handles the messages only
-// while the bar shows in the dark appearance.
-func (w *window) darkMenuMessage(m uint32, wp, lp uintptr) (uintptr, bool) {
+// menuBarMessage draws the menu bar. It handles the messages only while
+// the window draws the bar (drawsMenuBar), and the frame's only while dark.
+func (w *window) menuBarMessage(m uint32, wp, lp uintptr) (uintptr, bool) {
 	switch m {
-	case wmUAHDrawMenu, wmUAHDrawMenuItem, wmNCPaint, wmNCActivate:
+	case wmUAHDrawMenu, wmUAHDrawMenuItem, wmUAHMeasureItem, wmNCPaint, wmNCActivate:
 	default:
 		return 0, false
 	}
-	if !w.darkMenuBar() {
+	if !w.drawsMenuBar() {
 		return 0, false
 	}
 	switch m {
@@ -204,9 +254,17 @@ func (w *window) darkMenuMessage(m uint32, wp, lp uintptr) (uintptr, bool) {
 		w.drawMenuBar(lp)
 	case wmUAHDrawMenuItem:
 		w.drawMenuBarItem(lp)
+	case wmUAHMeasureItem:
+		r, _, _ := procDefWindowProcW.Call(w.hwnd, uintptr(m), wp, lp)
+		if fluentMenus() {
+			w.measureMenuBarItem(lp)
+		}
+		return r, true
 	default: // the frame, then the line over it
 		r, _, _ := procDefWindowProcW.Call(w.hwnd, uintptr(m), wp, lp)
-		w.coverMenuLine()
+		if w.b.isDark() {
+			w.coverMenuLine()
+		}
 		return r, true
 	}
 	return 0, true

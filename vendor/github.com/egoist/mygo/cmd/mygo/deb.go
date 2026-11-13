@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/md5"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"image/png"
@@ -20,22 +21,114 @@ import (
 
 // Linux configures Linux packaging.
 type Linux struct {
-	// Maintainer of the Debian package, "Name <email>" (default: the
-	// author in package.json, else the app's name).
+	// Maintainer of the Debian and RPM packages and of the PKGBUILD,
+	// "Name <email>" (default: the author in package.json, else the app's
+	// name).
 	Maintainer string `json:"maintainer"`
 	// Comment is a short description of the app, for its desktop entry and
-	// its package.
+	// its packages.
 	Comment string `json:"comment"`
 	// Categories of the desktop entry (default Utility).
 	Categories []string `json:"categories"`
-	// Depends lists Debian packages the app needs besides GTK and
-	// WebKitGTK.
-	Depends []string `json:"depends"`
-	// Command is the name of a command that runs the app: a link in
-	// /usr/bin from the Debian package, and in ~/.local/bin from
-	// install.sh. Empty means none, and the app opens from the applications
-	// menu.
-	Command string `json:"command"`
+	// Depends lists packages the app needs besides GTK and WebKitGTK, by
+	// package format or as a list of Debian packages mapped to Arch Linux
+	// and RPM where known.
+	Depends linuxDepends `json:"depends"`
+	// WebView false says that the app shows no web page, in a window or a
+	// ui.WebView, as an app of native UI: its packages depend on GTK
+	// alone, and install.sh does not ask for WebKitGTK, which the app then
+	// never loads (default true).
+	WebView *bool `json:"webview"`
+	// Command is the name of a command that runs the app, or a list of
+	// names, as ["my-app", "ma"], which adds a short one: a link in
+	// /usr/bin from the Debian and RPM packages and the PKGBUILD, and in
+	// ~/.local/bin from install.sh, for each, which says to run the app
+	// by the first it links. Empty means none, and the app opens from the
+	// applications menu.
+	Command commandNames `json:"command"`
+	// Formats lists the packages mygo build writes: "deb", "rpm" and
+	// "pkgbuild" (default all three). The archive with install.sh is
+	// always written, as install.sh updates the app from it and the
+	// PKGBUILD packages it; an empty list writes it alone.
+	Formats []string `json:"formats"`
+}
+
+// linuxFormats are the packages linux.formats chooses from.
+var linuxFormats = []string{"deb", "rpm", "pkgbuild"}
+
+// builds reports whether mygo build writes the package of format, which
+// linux.formats lists, or every one when it is left out.
+func (l *Linux) builds(format string) bool {
+	return l.Formats == nil || slices.Contains(l.Formats, format)
+}
+
+// commandNames are the names of linux.command, which takes one name, as
+// "my-app", or a list of them, as ["my-app", "ma"].
+type commandNames []string
+
+func (n *commandNames) UnmarshalJSON(b []byte) error {
+	var name string
+	if json.Unmarshal(b, &name) == nil {
+		*n = nil
+		if name != "" {
+			*n = commandNames{name}
+		}
+		return nil
+	}
+	var names []string
+	if json.Unmarshal(b, &names) != nil {
+		return fmt.Errorf("linux.command is a command name, or a list of them, not %s", b)
+	}
+	*n = names
+	return nil
+}
+
+// linuxDepends holds extra Linux package dependencies for each package format.
+// Unmarshaling a JSON string array populates Deb and sets legacy to true so
+// archDepends and rpmDepends map those Debian package names through
+// archPackages and rpmPackages.
+type linuxDepends struct {
+	Deb    []string `json:"deb"`
+	RPM    []string `json:"rpm"`
+	Arch   []string `json:"arch"`
+	legacy bool     // true when unmarshaled from a JSON string array
+}
+
+func (d *linuxDepends) UnmarshalJSON(b []byte) error {
+	if bytes.Equal(bytes.TrimSpace(b), []byte("null")) {
+		*d = linuxDepends{}
+		return nil
+	}
+	var list []string
+	if err := json.Unmarshal(b, &list); err == nil {
+		*d = linuxDepends{
+			Deb:    list,
+			legacy: len(list) > 0,
+		}
+		return nil
+	}
+	type raw linuxDepends
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	var r raw
+	if err := dec.Decode(&r); err != nil {
+		return fmt.Errorf("linux.depends is a list of packages, or an object with deb, rpm and arch lists, not %s", b)
+	}
+	*d = linuxDepends(r)
+	return nil
+}
+
+// webView reports whether the app may show web pages, which need
+// WebKitGTK.
+func (l *Linux) webView() bool { return l.WebView == nil || *l.WebView }
+
+// debDepends returns the Debian packages the app depends on.
+func (l *Linux) debDepends() []string {
+	depends := []string{"libgtk-3-0 | libgtk-3-0t64"}
+	if l.webView() {
+		depends = append(depends, "libwebkit2gtk-4.1-0")
+	}
+	return append(depends, l.Depends.Deb...)
 }
 
 // commandRe matches the names linux.command may take.
@@ -56,8 +149,8 @@ func debVersion(v string) string {
 
 // writeDeb packages the Linux app in stage, the executable name and the
 // files next to it, as a Debian package: the app in /opt/<name>, a link in
-// /usr/bin named linux.command when there is one, its desktop entry and
-// icons. It returns the package's path.
+// /usr/bin for each name of linux.command, its desktop entry and icons. It
+// returns the package's path.
 func writeDeb(c *Config, stage, name, goarch string, app []string) (string, error) {
 	arch, ok := debArch[goarch]
 	if !ok {
@@ -70,10 +163,7 @@ func writeDeb(c *Config, stage, name, goarch string, app []string) (string, erro
 	}
 	size := int64(0)
 	md5sums := &bytes.Buffer{}
-	for _, entry := range app {
-		if strings.HasSuffix(entry, ".desktop") || entry == name+".png" || entry == name+".xml" {
-			continue // installed where desktops look for them
-		}
+	for _, entry := range optEntries(app, name) {
 		err := filepath.WalkDir(filepath.Join(stage, entry), func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
@@ -112,8 +202,10 @@ func writeDeb(c *Config, stage, name, goarch string, app []string) (string, erro
 			return "", err
 		}
 	}
-	if command := c.Linux.Command; command != "" {
+	if len(c.Linux.Command) > 0 {
 		data.dir("usr/bin")
+	}
+	for _, command := range c.Linux.Command {
 		data.link("usr/bin/"+command, "../../"+opt+"/"+name)
 	}
 	if xml := mimePackage(c); xml != "" {
@@ -128,30 +220,20 @@ func writeDeb(c *Config, stage, name, goarch string, app []string) (string, erro
 	desktop := []byte(linuxDesktopEntry(c, "/"+opt+"/"+name, name))
 	data.file("usr/share/applications/"+name+".desktop", desktop, 0o644)
 	fmt.Fprintf(md5sums, "%x  usr/share/applications/%s.desktop\n", md5.Sum(desktop), name)
-	if c.Icon != "" {
-		src, err := os.ReadFile(c.path(c.Icon))
-		if err != nil {
-			return "", err
+	icons, err := linuxIcons(c)
+	if err != nil {
+		return "", err
+	}
+	for _, icon := range icons {
+		dir := icon.dir()
+		for _, d := range []string{"usr/share/icons", "usr/share/icons/hicolor", path.Dir(dir), dir} {
+			data.dir(d)
 		}
-		img, err := png.Decode(bytes.NewReader(src))
-		if err != nil {
-			return "", fmt.Errorf("icon %s: %w", c.Icon, err)
-		}
-		for _, px := range []int{256, 512} {
-			dir := fmt.Sprintf("usr/share/icons/hicolor/%dx%d/apps", px, px)
-			for _, d := range []string{"usr/share/icons", "usr/share/icons/hicolor", path.Dir(dir), dir} {
-				data.dir(d)
-			}
-			var b bytes.Buffer
-			if err := png.Encode(&b, resize(img, px)); err != nil {
-				return "", err
-			}
-			data.file(dir+"/"+name+".png", b.Bytes(), 0o644)
-			fmt.Fprintf(md5sums, "%x  %s/%s.png\n", md5.Sum(b.Bytes()), dir, name)
-		}
+		data.file(dir+"/"+name+".png", icon.png, 0o644)
+		fmt.Fprintf(md5sums, "%x  %s/%s.png\n", md5.Sum(icon.png), dir, name)
 	}
 
-	depends := append([]string{"libgtk-3-0 | libgtk-3-0t64", "libwebkit2gtk-4.1-0"}, c.Linux.Depends...)
+	depends := c.Linux.debDepends()
 	description := c.Linux.Comment
 	if description == "" {
 		description = c.Name
@@ -184,6 +266,57 @@ func writeDeb(c *Config, stage, name, goarch string, app []string) (string, erro
 	}
 	out := filepath.Join(stage, fmt.Sprintf("%s_%s_%s.deb", name, debVersion(c.Version), arch))
 	return out, os.WriteFile(out, deb.Bytes(), 0o644)
+}
+
+// optEntries returns the entries of app, the executable name and the files
+// next to it, that packages install in /opt/<name>: all but the desktop
+// entry, the icon and the MIME package, which they install where desktops
+// look for them.
+func optEntries(app []string, name string) []string {
+	var entries []string
+	for _, entry := range app {
+		if !strings.HasSuffix(entry, ".desktop") && entry != name+".png" && entry != name+".xml" {
+			entries = append(entries, entry)
+		}
+	}
+	return entries
+}
+
+// linuxIcon is the app's icon in one of the sizes packages install in the
+// hicolor theme.
+type linuxIcon struct {
+	size int
+	png  []byte
+}
+
+// dir is where the icon goes, relative to the root.
+func (i linuxIcon) dir() string {
+	return fmt.Sprintf("usr/share/icons/hicolor/%dx%d/apps", i.size, i.size)
+}
+
+// linuxIcons returns the icon of the app at 256 and 512 pixels, the sizes
+// of the hicolor theme packages install it in, or none without an icon.
+func linuxIcons(c *Config) ([]linuxIcon, error) {
+	if c.Icon == "" {
+		return nil, nil
+	}
+	src, err := os.ReadFile(c.path(c.Icon))
+	if err != nil {
+		return nil, err
+	}
+	img, err := png.Decode(bytes.NewReader(src))
+	if err != nil {
+		return nil, fmt.Errorf("icon %s: %w", c.Icon, err)
+	}
+	var icons []linuxIcon
+	for _, px := range []int{256, 512} {
+		var b bytes.Buffer
+		if err := png.Encode(&b, resize(img, px)); err != nil {
+			return nil, err
+		}
+		icons = append(icons, linuxIcon{px, b.Bytes()})
+	}
+	return icons, nil
 }
 
 // mimePackage returns the shared-mime-info package defining the MIME types

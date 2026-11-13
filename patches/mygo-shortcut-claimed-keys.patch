@@ -1,9 +1,8 @@
 diff --git a/vendor/github.com/egoist/mygo/ui/input.go b/vendor/github.com/egoist/mygo/ui/input.go
-index 29f7258..316b162 100644
 --- a/vendor/github.com/egoist/mygo/ui/input.go
 +++ b/vendor/github.com/egoist/mygo/ui/input.go
-@@ -594,8 +594,11 @@ func (rt *engine) keyDownPhysical(mods Modifiers, key, physical Key, repeat bool
- 		rt.blinkStart = time.Now()
+@@ -1110,8 +1110,11 @@
+ 		rt.blinkStart = rt.now()
  		return true
  	}
 +	// A chord claimed as a shortcut in the focus chain or by the window goes
@@ -14,8 +13,8 @@ index 29f7258..316b162 100644
 +		!typesText(k) && !rt.claimed(k) && s.editor.textKey(k) {
  		// OnTextKey took it as it came, as HandleInput does, but after the
  		// keys and text before it, which it reads.
- 		rt.blinkStart = time.Now()
-@@ -605,7 +608,8 @@ func (rt *engine) keyDownPhysical(mods Modifiers, key, physical Key, repeat bool
+ 		rt.blinkStart = rt.now()
+@@ -1121,7 +1124,8 @@
  	if (key == KeyContextMenu && mods == 0 || key == KeyF10 && mods == Shift) && !rt.claimed(k) && rt.menuKey() {
  		return false
  	}
@@ -27,7 +26,6 @@ index 29f7258..316b162 100644
  			return false
 diff --git a/vendor/github.com/egoist/mygo/ui/shortcut_claimed_test.go b/vendor/github.com/egoist/mygo/ui/shortcut_claimed_test.go
 new file mode 100644
-index 0000000..5763725
 --- /dev/null
 +++ b/vendor/github.com/egoist/mygo/ui/shortcut_claimed_test.go
 @@ -0,0 +1,46 @@

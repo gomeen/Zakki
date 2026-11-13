@@ -8,12 +8,17 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/egoist/mygo/internal/pacing"
 )
 
 // Frame statistics: with MYGO_FRAME_STATS set, the engine logs each frame
 // slower than a threshold, with how long each part took, which path drew
 // it, what the process allocated meanwhile and whether the garbage
-// collector ran. Unset, frames measure nothing.
+// collector ran. Unset, frames measure nothing. With MYGO_UNCAPPED set
+// too, frames wait for no refresh, so a frame's present is its own work,
+// and the engine logs once a second how many frames came: the rate a scene
+// draws at, which the display's no longer hides.
 
 // frameStatsThreshold is how long a frame takes before it is logged, from
 // MYGO_FRAME_STATS: 1 (or true, on) logs those over 8 ms, another number
@@ -69,7 +74,15 @@ type frameStats struct {
 	samples     [stats]metrics.Sample
 	before      [stats]float64
 	layouts     uint64 // the text system's, before the frame
+	// rateFrom is when the frames counted for the rate began (rate),
+	// rateFrames how many ended since, the last at rateLast.
+	rateFrom, rateLast time.Time
+	rateFrames         int
 }
+
+// rateGap is a pause between frames that starts the count of the frame
+// rate anew: the time a window idled tells nothing of how fast it draws.
+const rateGap = 250 * time.Millisecond
 
 func newFrameStats(threshold time.Duration) *frameStats {
 	f := &frameStats{threshold: threshold}
@@ -126,7 +139,11 @@ func (f *frameStats) end(rt *engine) {
 	if f == nil {
 		return
 	}
-	total := time.Since(f.start)
+	end := time.Now()
+	total := end.Sub(f.start)
+	if pacing.Uncapped {
+		f.rate(f.start, end)
+	}
 	if total < f.threshold {
 		return
 	}
@@ -146,6 +163,10 @@ func (f *frameStats) end(rt *engine) {
 			path = fp
 		}
 	}
+	if pacing.Uncapped {
+		// Its present waited for no refresh.
+		path += ", uncapped"
+	}
 	passes := ""
 	switch {
 	case f.passes == 0:
@@ -160,4 +181,28 @@ func (f *frameStats) end(rt *engine) {
 	frameLog(fmt.Sprintf("mygo: frame %d took %s ms: build %s%s, layout %s, paint %s, present %s (%s), other %s; meanwhile the process made about %.0f allocations, %.1f KB, %d text layouts; %s",
 		rt.frame, ms(total), ms(f.laps[phaseBuild]), passes, ms(f.laps[phaseLayout]), ms(f.laps[phasePaint]), ms(f.laps[phasePresent]), path, ms(other),
 		d[statObjects]+d[statTiny], d[statBytes]/1024, rt.text.LayoutsMade()-f.layouts, gc))
+}
+
+// rate counts a frame that ran from start to end while frames are uncapped
+// (MYGO_UNCAPPED), and once they followed each other for a second, logs how
+// many came a second and counts anew: the frame rate, which the display's
+// refreshes no longer cap, tells how much of a refresh a scene leaves. A
+// pause longer than rateGap starts the count anew, and so does a frame
+// that took longer, as one that waited on the system, which the frame's
+// own line tells: counted, it would have the second it ends in log a few
+// frames a second, as if the frames after it still came that slowly.
+func (f *frameStats) rate(start, end time.Time) {
+	if end.Sub(start) > rateGap {
+		f.rateFrom, f.rateFrames, f.rateLast = end, 0, end
+		return
+	}
+	if f.rateFrom.IsZero() || start.Sub(f.rateLast) > rateGap {
+		f.rateFrom, f.rateFrames = start, 0
+	}
+	f.rateFrames++
+	f.rateLast = end
+	if d := end.Sub(f.rateFrom); d >= time.Second {
+		frameLog(fmt.Sprintf("mygo: %.0f frames a second, uncapped: %.2f ms a frame", float64(f.rateFrames)/d.Seconds(), d.Seconds()*1000/float64(f.rateFrames)))
+		f.rateFrom, f.rateFrames = end, 0
+	}
 }

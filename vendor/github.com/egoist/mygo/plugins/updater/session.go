@@ -21,11 +21,17 @@ import (
 // creates.
 type session struct {
 	u *updater
+	// t are the texts of the window, in the language the app showed when
+	// the check began: a window keeps its language while it is open.
+	t *text
 	// ctx is canceled when the session ends, the user cancels or the
 	// window closes.
 	ctx       context.Context
 	cancel    context.CancelFunc
 	responses chan response
+	// rechecks asks the session to check again while it offers an
+	// update (offering).
+	rechecks chan struct{}
 
 	// showMu is held while the window is being created.
 	showMu sync.Mutex
@@ -40,13 +46,17 @@ type session struct {
 	changed chan struct{} // closed when the view changes
 	win     *mygo.Window
 	release bool // the window has the size of a release view
+	// offering is set while the window offers an update and waits for the
+	// user's answer.
+	offering bool
 }
 
-func newSession(u *updater, user bool) *session {
+func newSession(u *updater, t *text, user bool) *session {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &session{
-		u: u, user: user, ctx: ctx, cancel: cancel,
+		u: u, t: t, user: user, ctx: ctx, cancel: cancel,
 		responses: make(chan response, 1),
+		rechecks:  make(chan struct{}, 1),
 		changed:   make(chan struct{}),
 	}
 }
@@ -102,7 +112,7 @@ func (s *session) NewWindow(content mygo.Content) *mygo.Window {
 	width, height := frontend.Size(v.Release)
 	light, dark := frontend.Background()
 	win := mygo.NewWindow(mygo.WindowOptions{
-		Title:             s.u.text().Title,
+		Title:             s.t.Title,
 		Width:             width,
 		Height:            height,
 		UseContentSize:    true,
@@ -153,7 +163,7 @@ func (s *session) Fit(width, height int) {
 }
 
 // Texts returns the texts of the window around its views.
-func (s *session) Texts() frontend.Texts { return s.u.text().texts() }
+func (s *session) Texts() frontend.Texts { return s.t.texts() }
 
 // Icon returns the icon of the window, or nil.
 func (s *session) Icon() []byte { return s.u.icon() }
@@ -200,6 +210,40 @@ func (s *session) promote() {
 	s.user = true
 	s.mu.Unlock()
 	s.show()
+}
+
+// recheck asks the session to check again and then bring its window to
+// the front, when the window offers an update. It reports whether it does.
+func (s *session) recheck() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.offering {
+		return false
+	}
+	select {
+	case s.rechecks <- struct{}{}:
+	default: // already asked
+	}
+	return true
+}
+
+// setOffering sets whether the window offers an update. When the offer
+// ends with a re-check still asked for, the window comes to the front, as
+// the user asked, unless it closed.
+func (s *session) setOffering(on bool) {
+	s.mu.Lock()
+	s.offering = on
+	s.mu.Unlock()
+	if on {
+		return
+	}
+	select {
+	case <-s.rechecks:
+		if s.ctx.Err() == nil {
+			s.promote()
+		}
+	default:
+	}
 }
 
 // wait waits for the user to respond to the view, or the window to close.

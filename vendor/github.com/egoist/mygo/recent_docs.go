@@ -41,7 +41,7 @@ func loadRecentLocked() {
 	}
 	recentDocs.loaded = true
 	if f, err := recentFile(); err == nil {
-		if data, err := os.ReadFile(f); err == nil {
+		if data, err := readAppFile(f); err == nil {
 			_ = json.Unmarshal(data, &recentDocs.paths)
 		}
 	}

@@ -8,7 +8,8 @@ import (
 const (
 	// tooltipDelay is how long the pointer rests on an element before its
 	// tip shows, and tooltipWarm how soon after a tip goes another shows at
-	// once, as the pointer moves along a toolbar: Base UI's.
+	// once, as the pointer moves along a toolbar: Base UI's, which a
+	// theme's TooltipDelay changes.
 	tooltipDelay = 600 * time.Millisecond
 	tooltipWarm  = 400 * time.Millisecond
 )
@@ -37,10 +38,12 @@ type tooltips struct {
 // builds its content. It shows once the pointer has rested on anchor for
 // 0.6 seconds, at once as anchor gets the keyboard focus from the
 // keyboard, and at once too within 0.4 seconds of another tip going, as
-// the pointer moves along a toolbar. It goes as the pointer leaves anchor
-// or presses it, and with Escape, until the pointer comes back or the
-// focus does. Over elements inside one another, the innermost one's tip
-// shows; one shows at a time.
+// the pointer moves along a toolbar; the theme's TooltipDelay changes
+// both. It goes as the pointer leaves anchor
+// or presses it, as a menu or popover of anchor opens, and with Escape,
+// until the pointer comes back or the focus does; it does not show while
+// that menu or popover shows. Over elements inside one another, the
+// innermost one's tip shows; one shows at a time.
 //
 // The tip goes above anchor, centered, or below it where there is no room
 // above; fn may place it elsewhere with AttachTo, as after it:
@@ -65,6 +68,9 @@ func coreTooltipBase(c *context, anchor *node, fn func(tip *node)) *node {
 func tooltipBase(c *context, anchor *node, fn func(tip *node)) (*node, bool) {
 	anchor.flags |= flagHover
 	anchor.tip = true
+	// The theme the anchor builds with sets how long the pointer rests on
+	// it, which showTooltip reads from its state.
+	anchor.st.tipDelay, anchor.st.tipWarm = c.theme.tooltipDelay()
 	rt := c.rt
 	// A press or a click on the anchor, by the pointer, the keys or
 	// assistive technology, hides its tip, as Base UI's closeOnClick: a
@@ -77,7 +83,7 @@ func tooltipBase(c *context, anchor *node, fn func(tip *node)) (*node, bool) {
 	}
 	var tip *node
 	coreOverlay(c, func() {
-		tip = coreBox(c).Absolute().PassThrough().Role(RoleTooltip)
+		tip = coreBox(c).Absolute().IgnoreInput(true).Role(RoleTooltip)
 		fn(tip)
 		if tip.attach == 0 {
 			tip.AttachTo(anchor, AnchorTop, AnchorBottom)
@@ -87,6 +93,23 @@ func tooltipBase(c *context, anchor *node, fn func(tip *node)) (*node, bool) {
 		}
 	})
 	return tip, rt.tips.byFocus
+}
+
+// popupShows notes that a popup attached to e shows in the frame: its
+// menu, its popover or its options, while which its tip does not show.
+func (e *node) popupShows() {
+	if e.hasState() {
+		e.st.popped = e.c.rt.frame
+	}
+}
+
+// hideTip hides the tip of the element of s as its menu opens, by the
+// pointer, the keys or assistive technology, until neither the pointer
+// nor the focus is on it, as a press on it does.
+func (rt *engine) hideTip(s *state) {
+	if s.tip {
+		rt.tips.dismissed = s.id
+	}
 }
 
 // Tooltip shows s by the element when the pointer rests on it, or the
@@ -142,9 +165,19 @@ func (rt *engine) showTooltip(c *context) uint64 {
 	if hover != t.hover {
 		t.hover, t.hoverSince = hover, now
 	}
+	// The element with the keyboard focus, or the one it gives it to (as
+	// a menu's highlighted item, an ActiveDescendant), whose tip shows as a
+	// focused element's does.
 	var focus uint64
-	if rt.focusVisible && rt.windowFocus() && tipped(rt.focused) {
-		focus = rt.focused
+	if rt.focusVisible && rt.windowFocus() {
+		if f := rt.states[rt.focused]; f != nil {
+			switch {
+			case tipped(f.activeDescendant):
+				focus = f.activeDescendant
+			case tipped(rt.focused):
+				focus = rt.focused
+			}
+		}
 	}
 	if focus != t.focus {
 		t.focus, t.focusSince = focus, now
@@ -154,6 +187,15 @@ func (rt *engine) showTooltip(c *context) uint64 {
 	}
 	if rt.pressed != nil && hover != 0 {
 		t.dismissed = hover
+	}
+	// An element whose menu or popover shows, in this frame or the last
+	// one, shows no tip: the pointer coming back to a menu button while
+	// its menu shows, or the focus coming back to it as the menu closes,
+	// leaves it hidden until they leave it.
+	for _, id := range [2]uint64{hover, focus} {
+		if s := rt.states[id]; id != 0 && s != nil && s.popped != 0 && s.popped+1 >= rt.frame {
+			t.dismissed = id
+		}
 	}
 	if hover == t.dismissed {
 		hover = 0
@@ -166,8 +208,9 @@ func (rt *engine) showTooltip(c *context) uint64 {
 	case focus != 0 && (hover == 0 || !t.focusSince.Before(t.hoverSince)):
 		t.shown, t.byFocus = focus, true
 	case hover != 0:
-		warm := !t.lastShown.IsZero() && t.hoverSince.Sub(t.lastShown) <= tooltipWarm
-		if wait := tooltipDelay - now.Sub(t.hoverSince); wait > 0 && !warm {
+		s := rt.states[hover]
+		warm := !t.lastShown.IsZero() && t.hoverSince.Sub(t.lastShown) <= s.tipWarm
+		if wait := s.tipDelay - now.Sub(t.hoverSince); wait > 0 && !warm {
 			rt.scheduleAt(now.Add(wait))
 			break
 		}

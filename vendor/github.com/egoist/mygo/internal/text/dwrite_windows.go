@@ -5,6 +5,7 @@ package text
 import (
 	"errors"
 	"fmt"
+	"hash/maphash"
 	"log"
 	"math"
 	"reflect"
@@ -13,10 +14,12 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"unicode/utf16"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
 	"github.com/egoist/mygo/internal/scene"
+	"golang.org/x/text/width"
 )
 
 // DirectWrite lays out paragraphs with IDWriteTextLayout, which finds the
@@ -48,6 +51,8 @@ var (
 	procDWriteCreate    = dwriteDLL.NewProc("DWriteCreateFactory")
 	kernel32DLL         = syscall.NewLazyDLL(systemDir() + `\kernel32.dll`)
 	procUserLocaleName  = kernel32DLL.NewProc("GetUserDefaultLocaleName")
+	procPreferredLangs  = kernel32DLL.NewProc("GetUserPreferredUILanguages")
+	procRegGetValue     = syscall.NewLazyDLL(systemDir() + `\advapi32.dll`).NewProc("RegGetValueW")
 	procSystemDirectory = syscall.NewLazyDLL("kernel32.dll").NewProc("GetSystemDirectoryW")
 	procSystemParams    = syscall.NewLazyDLL(systemDir() + `\user32.dll`).NewProc("SystemParametersInfoW")
 )
@@ -129,7 +134,9 @@ const (
 	// IDWriteFont1
 	font1IsMonospacedFont = 17
 	// IDWriteFontFace
-	faceGetMetrics = 8
+	faceGetMetrics            = 8
+	faceGetDesignGlyphMetrics = 10
+	faceGetGlyphIndices       = 11
 	// IDWriteFontFace2
 	face2IsColorFont                 = 30
 	face2GetRecommendedRenderingMode = 34
@@ -143,14 +150,18 @@ const (
 	paramsGetRenderingMode              = 7
 	params1GetGrayscaleEnhancedContrast = 8
 	// IDWriteLocalizedStrings
-	stringsFindLocaleName  = 4
-	stringsGetStringLength = 7
-	stringsGetString       = 8
+	stringsGetCount            = 3
+	stringsFindLocaleName      = 4
+	stringsGetLocaleNameLength = 5
+	stringsGetLocaleName       = 6
+	stringsGetStringLength     = 7
+	stringsGetString           = 8
 
 	// IDWriteTextFormat, and IDWriteTextLayout which extends it
 	formatSetTextAlignment     = 3
 	formatSetWordWrapping      = 5
 	formatSetReadingDirection  = 6
+	formatSetIncrementalTab    = 8
 	layoutSetFontCollection    = 30
 	layoutSetFontFamilyName    = 31
 	layoutSetFontWeight        = 32
@@ -161,6 +172,7 @@ const (
 	layoutSetLocaleName        = 41
 	layoutDraw                 = 58
 	layoutGetLineMetrics       = 59
+	layoutGetClusterMetrics    = 62
 	layoutHitTestTextPosition  = 65
 	layout1SetCharacterSpacing = 69
 	typographyAddFontFeature   = 3
@@ -168,9 +180,14 @@ const (
 	glyphsCreateAlphaTexture   = 4
 	colorRunsMoveNext          = 3
 	colorRunsGetCurrentRun     = 4
-	// IDWriteFontSetBuilder1
-	builderCreateFontSet = 6
-	builderAddFontFile   = 7
+	// IDWriteFontSetBuilder, and IDWriteFontSetBuilder1
+	builderAddFontFaceReference = 3 // with properties
+	builderCreateFontSet        = 6
+	builderAddFontFile          = 7
+	// IDWriteFontSet
+	setGetFontCount         = 3
+	setGetFontFaceReference = 4
+	setGetPropertyValues    = 9 // of a font
 	// IDWriteInMemoryFontFileLoader
 	loaderCreateInMemoryFontFileReference = 4
 )
@@ -180,6 +197,12 @@ const (
 	fontStyleNormal   = 0
 	fontStyleItalic   = 2
 	fontStretchNormal = 5
+
+	// DWRITE_FONT_PROPERTY_ID: the family names, and the last property.
+	propertyWWSFamilyName         = 1
+	propertyTypographicFamilyName = 2
+	propertyWin32FamilyName       = 5
+	propertyTypographicFaceName   = 13
 
 	wordWrappingWrap      = 0
 	wordWrappingNoWrap    = 1
@@ -252,6 +275,13 @@ type (
 		height, baseline                                float32
 		isTrimmed                                       int32
 	}
+	// DWRITE_CLUSTER_METRICS, its flags canWrapLineAfter, isWhitespace,
+	// isNewline, isSoftHyphen and isRightToLeft from the lowest bit.
+	dwClusterMetrics struct {
+		width  float32
+		length uint16
+		flags  uint16
+	}
 	dwHitTestMetrics struct {
 		textPosition, length     uint32
 		left, top, width, height float32
@@ -267,7 +297,18 @@ type (
 		strikethroughPosition             int16
 		strikethroughThickness            uint16
 	}
-	dwRect struct{ left, top, right, bottom int32 }
+	dwGlyphMetrics struct {
+		leftSideBearing                    int32
+		advanceWidth                       uint32
+		rightSideBearing, topSideBearing   int32
+		advanceHeight                      uint32
+		bottomSideBearing, verticalOriginY int32
+	}
+	dwRect         struct{ left, top, right, bottom int32 }
+	dwFontProperty struct {
+		id            uint32
+		value, locale *uint16
+	}
 )
 
 // ptr converts an address from DirectWrite to a pointer.
@@ -344,12 +385,19 @@ var dwGeneric = map[string][]string{
 
 type dwrite struct {
 	shapeScratch
+	nativeFonts
 	factory  uintptr // IDWriteFactory
 	factory2 uintptr // IDWriteFactory2, from Windows 8.1
 	factory3 uintptr // IDWriteFactory3, from Windows 10
 	factory5 uintptr // IDWriteFactory5, from Windows 10 1703
 	system   uintptr // the system font collection
 	locale   []uint16
+	// han is the locale of Han characters in no language that writes
+	// them, which would otherwise take locale (userHanLanguage); nil when
+	// they keep it. It is read the first time a text has such characters
+	// (userHan), and hanRead says whether it was.
+	han     []uint16
+	hanRead bool
 
 	exists  map[string]bool // whether the system has a family
 	formats map[formatKey]uintptr
@@ -357,8 +405,18 @@ type dwrite struct {
 	// one family.
 	fallbacks map[string]uintptr
 	faces     map[faceKey]uintptr
-	fonts     map[fontKey]*Font
-	color     map[uintptr]bool // whether a font face has color glyphs
+	// fonts are the Fonts of faces at sizes, which hold a reference to
+	// their face until they are unreachable (nativeFonts).
+	fonts map[fontKey]*Font
+	// numbers holds what text formats shape numbers into (shapeNumber).
+	numbers map[formatKey]*numberFont
+	// wholes are the texts wrapping lately, shaped into one line, wrapFonts
+	// what wrapping them keeps for text formats (wrapWhole), textSeed seeds
+	// the hashes of their keys, and frame counts the frames.
+	wholes    map[wholeKey]*keptWhole
+	wrapFonts map[formatKey]*wrapFont
+	textSeed  maphash.Seed
+	frame     uint64
 	thin      map[uintptr]bool // whether a font face is too thin for antialiasing
 
 	// The system's settings for text (settings): its rendering parameters,
@@ -373,16 +431,41 @@ type dwrite struct {
 	clearLevel   float32
 	aliased      bool
 
-	// The fonts the app registers: their files, a collection of them,
-	// the family name of each name they are registered under, and the
-	// names they are listed under: the one the app gave, or their own.
+	// The fonts the app registers, a collection of them, the family name
+	// of each name they are registered under, and the names they are
+	// listed under: the one the app gave, or their own.
 	loader  uintptr
-	files   []uintptr
+	app     []appFont
 	custom  uintptr
 	aliases map[string]string
 	names   []string
 
 	scratch []byte
+	// firsts is room for the code unit starting the cluster of each glyph of
+	// a run (run).
+	firsts []uint32
+}
+
+// appFont is a font file the app registers: its own families, the
+// families the app gave it, its own when it gave none, and its faces under
+// the one it gave, when that is not its own.
+type appFont struct {
+	file  uintptr
+	names []string
+	gave  []string
+	given []givenFace
+}
+
+// givenFace is a face of the app's fonts under a family the app gave it,
+// which a font set holds apart from the face's own family (#1224).
+type givenFace struct {
+	ref   uintptr // IDWriteFontFaceReference
+	props []fontProperty
+}
+
+type fontProperty struct {
+	id            uint32
+	value, locale string
 }
 
 type formatKey struct {
@@ -405,6 +488,10 @@ type faceKey struct {
 type fontKey struct {
 	face uintptr
 	size float32
+	text bool // a color face drawing in monochrome (emojiCluster)
+	// cell marks a monochrome face drawing symbols in the wider cells of
+	// a color face's (textGlyph), whose Font's data is a cellShifts.
+	cell bool
 }
 
 func newDWrite() (*dwrite, error) {
@@ -417,7 +504,10 @@ func newDWrite() (*dwrite, error) {
 		fallbacks: map[string]uintptr{},
 		faces:     map[faceKey]uintptr{},
 		fonts:     map[fontKey]*Font{},
-		color:     map[uintptr]bool{},
+		numbers:   map[formatKey]*numberFont{},
+		wholes:    map[wholeKey]*keptWhole{},
+		wrapFonts: map[formatKey]*wrapFont{},
+		textSeed:  maphash.MakeSeed(),
 		thin:      map[uintptr]bool{},
 		aliases:   map[string]string{},
 	}
@@ -438,6 +528,68 @@ func newDWrite() (*dwrite, error) {
 		e.locale = utf16z("en-US")
 	}
 	return e, nil
+}
+
+// userHan returns the locale of Han characters in no language that writes
+// them (han), reading it the first time: unless the user's locale writes
+// them, the first language that does of the user's display languages, or
+// else of the languages of their profile (#1479).
+func (e *dwrite) userHan() []uint16 {
+	if !e.hanRead {
+		e.hanRead = true
+		if han := resolveUserHanLanguage(syscall.UTF16ToString(e.locale), preferredLanguages, userProfileLanguages); han != "" {
+			e.han = utf16z(han)
+		}
+	}
+	return e.han
+}
+
+// userProfileLanguages returns the languages of the user's profile, in
+// order: those of Settings > Time & language > Language & region, with or
+// without their language pack, as GlobalizationPreferences.Languages and
+// Get-WinUserLanguageList return them. Windows keeps them, from Windows 8,
+// in the value Languages of HKCU\Control Panel\International\User Profile,
+// which this reads: in microseconds, where the Windows Runtime's class
+// takes milliseconds the first time and a COM apartment on the thread,
+// and text is laid out on any. A Windows without the value has none.
+func userProfileLanguages() []string {
+	const (
+		hkeyCurrentUser = 0x80000001
+		rrfRtRegMultiSz = 0x00000020
+		errorMoreData   = 234
+	)
+	key := utf16z(`Control Panel\International\User Profile`)
+	name := utf16z("Languages")
+	size := uint32(256)
+	for range 3 {
+		buf := make([]uint16, (size+1)/2)
+		size = uint32(len(buf) * 2)
+		r, _, _ := procRegGetValue.Call(hkeyCurrentUser, uintptr(unsafe.Pointer(&key[0])), uintptr(unsafe.Pointer(&name[0])), rrfRtRegMultiSz, 0, uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&size)))
+		switch r {
+		case 0:
+			return splitMultiString(buf[:min(int(size/2), len(buf))])
+		case errorMoreData: // size is now the value's, which may grow again
+		default:
+			return nil
+		}
+	}
+	return nil
+}
+
+// preferredLanguages returns the user's display languages, in order
+// (GetUserPreferredUILanguages), as the backend reads them: those of the
+// user's languages whose language pack is installed.
+func preferredLanguages() []string {
+	const muiLanguageName = 0x8
+	var count, size uint32
+	if ok, _, _ := procPreferredLangs.Call(muiLanguageName, uintptr(unsafe.Pointer(&count)), 0, uintptr(unsafe.Pointer(&size))); ok == 0 || size == 0 {
+		return nil
+	}
+	buf := make([]uint16, size)
+	if ok, _, _ := procPreferredLangs.Call(muiLanguageName, uintptr(unsafe.Pointer(&count)), uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&size))); ok == 0 {
+		return nil
+	}
+	return splitMultiString(buf)
 }
 
 // has reports whether a collection has a family.
@@ -615,7 +767,7 @@ func (e *dwrite) font(style Style) *Font {
 	if face == 0 {
 		return nil
 	}
-	return e.fontOf(face, style.FontSize())
+	return e.fontOf(face, style.FontSize(), false, false)
 }
 
 // matchFace returns the face of a family that best matches a weight and
@@ -642,9 +794,11 @@ func (e *dwrite) matchFace(coll uintptr, family string, weight int, italic bool)
 	return face
 }
 
-// fontOf returns the Font of a face at a size.
-func (e *dwrite) fontOf(face uintptr, size float32) *Font {
-	key := fontKey{face, size}
+// fontOf returns the Font of a face at a size, for text a Font of a color
+// face that draws its glyphs' outlines in monochrome, for cell one that
+// draws its glyphs in the middle of a color face's cells (textGlyph).
+func (e *dwrite) fontOf(face uintptr, size float32, text, cell bool) *Font {
+	key := fontKey{face, size, text, cell}
 	if f, ok := e.fonts[key]; ok {
 		return f
 	}
@@ -652,12 +806,22 @@ func (e *dwrite) fontOf(face uintptr, size float32) *Font {
 	var m dwFontMetrics
 	call(face, faceGetMetrics, uintptr(unsafe.Pointer(&m)))
 	em := size / float32(max(m.designUnitsPerEm, 1))
-	f := &Font{Size: size, Ascent: float32(m.ascent) * em, Descent: float32(m.descent) * em, LineGap: float32(m.lineGap) * em, native: face, thin: e.isThin(face),
+	f := &Font{Size: size, Ascent: float32(m.ascent) * em, Descent: float32(m.descent) * em, LineGap: float32(m.lineGap) * em, native: face, thin: e.isThin(face), color: !text && isColor(face),
 		underlineTop: float32(m.underlinePosition) * em, underlineThick: float32(m.underlineThickness) * em,
 		strikeTop: float32(m.strikethroughPosition) * em, strikeThick: float32(m.strikethroughThickness) * em}
+	if cell {
+		f.data = cellShifts{}
+	}
+	e.own(f)
 	e.fonts[key] = f
 	return f
 }
+
+// cellShifts are how far right, in DIPs, the glyphs of a cell Font draw
+// from their origin (fontOf), by glyph: the middle of the cell, wider than
+// the glyph, a color face laid them out in. The layout keeps the origin
+// and the cell's advance, which carets and hit testing go by.
+type cellShifts map[uint32]float32
 
 // The renderer IDWriteTextLayout.Draw hands its glyph runs to, which
 // collects them in drawing: a static COM object whose methods are created
@@ -763,14 +927,34 @@ func collect(run *dwGlyphRun, desc *dwGlyphRunDescription) {
 }
 
 func (e *dwrite) shape(text []rune, style Style, spans []Span, width float32, rtl, wholeWords bool) []shapedLine {
+	if lines := e.shapeNumber(text, style, spans, width, rtl); lines != nil {
+		return lines
+	}
+	if wrapsFromWhole(text, style, spans, width, rtl, wholeWords) {
+		if lines := e.wrapWhole(text, style, width); lines != nil {
+			return lines
+		}
+	}
+	return e.shapeText(text, style, spans, width, rtl, wholeWords)
+}
+
+// shapeText has DirectWrite shape text.
+func (e *dwrite) shapeText(text []rune, style Style, spans []Span, width float32, rtl, wholeWords bool) []shapedLine {
 	format := e.format(style)
 	if format == 0 || len(text) == 0 {
 		return nil
 	}
 	u16, index := utf16Text(text)
+	// A line as wide as the width fits it: the layout that gave the width
+	// summed the same advances, and may come out a rounding under them, which
+	// would wrap the line's last cluster (as canvas_js.go allows too).
+	wrapAt := width
+	if width > 0 {
+		wrapAt = width + 1e-3
+	}
 	var layout uintptr
 	hr := method[func(this uintptr, text *uint16, n uint32, format uintptr, width, height float32, out *uintptr) uintptr](e.factory, factoryCreateTextLayout)(
-		e.factory, &u16[0], uint32(len(u16)), format, width, maxLayoutHeight, &layout)
+		e.factory, &u16[0], uint32(len(u16)), format, wrapAt, maxLayoutHeight, &layout)
 	if failed(hr) {
 		return nil
 	}
@@ -783,6 +967,10 @@ func (e *dwrite) shape(text []rune, style Style, spans []Span, width float32, rt
 		wrapping = wordWrappingWholeWord
 	}
 	call(layout, formatSetWordWrapping, wrapping)
+	if style.tabStop > 0 {
+		// Every stop at multiples of it, from the start of each line.
+		method[func(this uintptr, stop float32) uintptr](layout, formatSetIncrementalTab)(layout, style.tabStop)
+	}
 	e.typeset(layout, style, spans, text)
 	if rtl {
 		// Trailing alignment keeps the lines at the left, as left-to-right
@@ -799,12 +987,18 @@ func (e *dwrite) shape(text []rune, style Style, spans []Span, width float32, rt
 	if failed(call(layout, layoutGetLineMetrics, uintptr(unsafe.Pointer(&metrics[0])), uintptr(count), uintptr(unsafe.Pointer(&count)))) {
 		return nil
 	}
+	if count > 1 && keepsAnyWords(style.Lang, spans) {
+		if lines := e.keepWords(layout, text, style, spans, wrapAt, rtl, wholeWords, metrics, index); lines != nil {
+			return lines
+		}
+	}
 
 	drawMu.Lock()
 	drawing = drawing[:0]
 	method[func(this, context, renderer uintptr, x, y float32) uintptr](layout, layoutDraw)(layout, 0, textRenderer(), 0, 0)
 	runs := slices.Clone(drawing)
 	drawMu.Unlock()
+	runs = tabRuns(layout, u16, runs)
 
 	lines := make([]shapedLine, len(metrics))
 	ends := make([]uint32, len(metrics)) // the code unit ending each line
@@ -815,15 +1009,32 @@ func (e *dwrite) shape(text []rune, style Style, spans []Span, width float32, rt
 		ends[i] = pos
 		lines[i].end = index[min(int(pos), len(u16))]
 	}
+	lefts := make([][]float32, len(lines)) // the left of each run of a line
 	for _, r := range runs {
 		li, _ := slices.BinarySearch(ends, r.pos+1)
 		if li >= len(lines) || int(r.pos+r.n) > len(u16) {
 			continue
 		}
+		// A left-to-right run starts where its first glyph's code unit
+		// does: code units before it, as a tab, have no glyph in it.
+		at := r.pos
+		if !r.rtl {
+			at += r.firstGlyphUnit()
+		}
 		var x, y float32
 		var hit dwHitTestMetrics
-		call(layout, layoutHitTestTextPosition, uintptr(r.pos), 0, uintptr(unsafe.Pointer(&x)), uintptr(unsafe.Pointer(&y)), uintptr(unsafe.Pointer(&hit)))
-		lines[li].runs = append(lines[li].runs, e.run(r, x, index))
+		call(layout, layoutHitTestTextPosition, uintptr(at), 0, uintptr(unsafe.Pointer(&x)), uintptr(unsafe.Pointer(&y)), uintptr(unsafe.Pointer(&hit)))
+		run, left := e.run(layout, u16, r, x, index)
+		// The runs of a line go from left to right, whatever order
+		// DirectWrite draws them in: a line is few runs, nearly in order,
+		// insertion sorted.
+		ls := append(lefts[li], left)
+		rs := append(lines[li].runs, run)
+		for k := len(ls) - 1; k > 0 && ls[k-1] > ls[k]; k-- {
+			ls[k-1], ls[k] = ls[k], ls[k-1]
+			rs[k-1], rs[k] = rs[k], rs[k-1]
+		}
+		lefts[li], lines[li].runs = ls, rs
 	}
 	if len(layoutObjects.objects) > 0 {
 		units := make([]uint32, len(text)+1)
@@ -836,6 +1047,177 @@ func (e *dwrite) shape(text []rune, style Style, spans []Span, width float32, rt
 		objectRuns(layout, lines, ends, spans, units, index)
 	}
 	return lines
+}
+
+// Cluster metrics' flags.
+const (
+	clusterCanWrapLineAfter = 1 << iota
+	clusterIsWhitespace
+	clusterIsNewline
+)
+
+// keepWords breaks text, which layout laid out in lines of metrics, at
+// most wrapAt DIPs wide, into lines between words, where it is in a
+// language that keeps them whole (keepWordsWhole) and DirectWrite broke a
+// line within a word: as DirectWrite breaks lines, at the breaks it finds
+// but those, a word too long for a line within it unless wholeWords. It
+// shapes each line apart. It returns nil when every line of the layout
+// ends where the language lets it.
+func (e *dwrite) keepWords(layout uintptr, text []rune, style Style, spans []Span, wrapAt float32, rtl, wholeWords bool, metrics []dwLineMetrics, index []int) []shapedLine {
+	var count uint32
+	if hr := call(layout, layoutGetClusterMetrics, 0, 0, uintptr(unsafe.Pointer(&count))); failed(hr) && uint32(hr) != errNotSufficientBuffer || count == 0 {
+		return nil
+	}
+	clusters := make([]dwClusterMetrics, count)
+	if failed(call(layout, layoutGetClusterMetrics, uintptr(unsafe.Pointer(&clusters[0])), uintptr(count), uintptr(unsafe.Pointer(&count)))) {
+		return nil
+	}
+	clusters = clusters[:count]
+	n := len(index) - 1
+	// The code unit each cluster starts at, and where DirectWrite may
+	// break lines, by rune, but those the language takes out.
+	starts := make([]int, len(clusters)+1)
+	breaks := make([]bool, len(text)+1)
+	for k, c := range clusters {
+		u := min(starts[k]+int(c.length), n)
+		starts[k+1] = u
+		breaks[index[u]] = c.flags&(clusterCanWrapLineAfter|clusterIsNewline) != 0
+	}
+	if !keepWordsWhole(breaks, text, style.Lang, spans) {
+		return nil
+	}
+	within := false
+	u := 0
+	for _, m := range metrics[:len(metrics)-1] {
+		u += int(m.length)
+		if u <= 0 || u >= n || !breakAt(breaks, index, u) {
+			within = true
+			break
+		}
+	}
+	if !within {
+		return nil
+	}
+	// after reports whether a line may break after cluster k.
+	after := func(k int) bool {
+		u := starts[k+1]
+		return u >= n || clusters[k].flags&clusterIsNewline != 0 || breakAt(breaks, index, u)
+	}
+	var lines []shapedLine
+	for k0 := 0; k0 < len(clusters); {
+		end := len(clusters) // the cluster after the line
+		last := -1           // the cluster after the last break in the line
+		w := float32(0)
+		for k := k0; k < len(clusters); k++ {
+			c := clusters[k]
+			// Whitespace ending a line hangs past it.
+			if k > k0 && c.flags&clusterIsWhitespace == 0 && w+c.width > wrapAt {
+				switch {
+				case last > k0:
+					end = last
+				case !wholeWords:
+					end = k
+				default:
+					// A word kept whole overflows the line.
+					end = k
+					for end < len(clusters) && !after(end-1) {
+						end++
+					}
+				}
+				break
+			}
+			w += c.width
+			if c.flags&clusterIsNewline != 0 {
+				end = k + 1
+				break
+			}
+			if after(k) {
+				last = k + 1
+			}
+		}
+		start, stop := index[starts[k0]], index[starts[end]]
+		if stop <= start {
+			break
+		}
+		line := e.shape(text[start:stop], style, spansIn(spans, start, stop), 0, rtl, false)
+		offsetLines(line, start)
+		lines = append(lines, line...)
+		k0 = end
+	}
+	return lines
+}
+
+// tabRuns adds to the runs DirectWrite drew of a layout of text a run for
+// each tab it drew no glyph of: a run may cover a tab whose cluster has no
+// glyph, its advance only showing in where the run's glyphs start, so a
+// line starting with tabs would lose them and tabs would add nothing to a
+// line's width. The run is the space glyph of the nearest drawn run's
+// font, as wide as hit testing finds the tab.
+func tabRuns(layout uintptr, u16 []uint16, runs []dwRun) []dwRun {
+	if len(runs) == 0 || !slices.Contains(u16, '\t') {
+		return runs
+	}
+	// The code units starting a cluster with a glyph: a run may cover a
+	// tab whose cluster has none.
+	drawn := make([]bool, len(u16))
+	for _, r := range runs {
+		if r.clusters == nil {
+			for u := r.pos; u < r.pos+r.n && int(u) < len(drawn); u++ {
+				drawn[u] = true
+			}
+		}
+		for k, g := range r.clusters {
+			if u := int(r.pos) + k; int(g) < len(r.glyphs) && (k == 0 || r.clusters[k-1] != g) && u < len(drawn) {
+				drawn[u] = true
+			}
+		}
+	}
+	n := len(runs)
+	for i, c := range u16 {
+		if c != '\t' || drawn[i] {
+			continue
+		}
+		near := &runs[0]
+		for k := range runs[:n] {
+			if d, best := distance(runs[k], uint32(i)), distance(*near, uint32(i)); d < best {
+				near = &runs[k]
+			}
+		}
+		space := uint32(' ')
+		var id uint16
+		call(near.face, faceGetGlyphIndices, uintptr(unsafe.Pointer(&space)), 1, uintptr(unsafe.Pointer(&id)))
+		if id == 0 {
+			continue
+		}
+		var x, y float32
+		var hit dwHitTestMetrics
+		call(layout, layoutHitTestTextPosition, uintptr(i), 0, uintptr(unsafe.Pointer(&x)), uintptr(unsafe.Pointer(&y)), uintptr(unsafe.Pointer(&hit)))
+		runs = append(runs, dwRun{face: near.face, size: near.size, rtl: hit.bidiLevel&1 != 0, pos: uint32(i), n: 1,
+			glyphs: []uint16{id}, advances: []float32{hit.width}, clusters: []uint16{0}})
+	}
+	return runs
+}
+
+// firstGlyphUnit returns the code unit of the run, from its start, whose
+// cluster holds its first glyph.
+func (r *dwRun) firstGlyphUnit() uint32 {
+	for k, g := range r.clusters {
+		if g == 0 {
+			return uint32(k)
+		}
+	}
+	return 0
+}
+
+// distance returns how many code units lie between a run and code unit i.
+func distance(r dwRun, i uint32) uint32 {
+	switch {
+	case i < r.pos:
+		return r.pos - i
+	case i >= r.pos+r.n:
+		return i - (r.pos + r.n) + 1
+	}
+	return 0
 }
 
 // typeset applies a style's letter spacing and OpenType features to a text
@@ -854,7 +1236,7 @@ func (e *dwrite) typeset(layout uintptr, style Style, spans []Span, text []rune)
 		return uintptr(units[from]) | uintptr(units[to]-units[from])<<32
 	}
 	all := textRange(0, len(text))
-	e.spacing(layout, style.LetterSpacing, all)
+	e.spacing(layout, style.LetterSpacing, false, all)
 	e.typography(layout, style.Features, all)
 	from := 0
 	for _, sp := range spans {
@@ -880,7 +1262,7 @@ func (e *dwrite) typeset(layout uintptr, style Style, spans []Span, text []rune)
 		if sp.Size > 0 {
 			method[func(this uintptr, size float32, r uintptr) uintptr](layout, layoutSetFontSize)(layout, sp.Size, r)
 		}
-		e.spacing(layout, sp.LetterSpacing, r)
+		e.spacing(layout, sp.LetterSpacing, sp.SpacingSet, r)
 		e.typography(layout, sp.Features, r)
 	}
 	// The runes in other languages than the format's: those of spans, and
@@ -891,12 +1273,25 @@ func (e *dwrite) typeset(layout uintptr, style Style, spans []Span, text []rune)
 		call(layout, layoutSetLocaleName, uintptr(unsafe.Pointer(&name[0])), textRange(run.start, run.end))
 		runtime.KeepAlive(name)
 	}
+	// Han characters left in the user's locale take the first of the
+	// user's languages that writes them, when the locale does not (#1454),
+	// read the first time a text has some (#1479).
+	if !e.hanRead || e.han != nil {
+		if runs := userHanRuns(text, style.Lang, spans); len(runs) > 0 {
+			if han := e.userHan(); han != nil {
+				for _, run := range runs {
+					call(layout, layoutSetLocaleName, uintptr(unsafe.Pointer(&han[0])), textRange(run.start, run.end))
+				}
+			}
+		}
+	}
 	setObjects(layout, spans, units)
 }
 
-// spacing adds letter spacing to a range of a text layout.
-func (e *dwrite) spacing(layout uintptr, spacing float32, r uintptr) {
-	if spacing == 0 {
+// spacing adds letter spacing to a range of a text layout, or, set, makes
+// it that of the range, zero included.
+func (e *dwrite) spacing(layout uintptr, spacing float32, set bool, r uintptr) {
+	if spacing == 0 && !set {
 		return
 	}
 	// IDWriteTextLayout1 came with Windows 8.
@@ -926,13 +1321,21 @@ func (e *dwrite) typography(layout uintptr, list string, r uintptr) {
 	call(layout, layoutSetTypography, typography, r)
 }
 
-// run positions the glyphs of a run whose origin, on the right for a
-// right-to-left run, is at x.
-func (e *dwrite) run(r dwRun, x float32, index []int) shapedRun {
-	f := e.fontOf(r.face, r.size)
-	out := shapedRun{font: f, start: index[r.pos], end: index[r.pos+r.n], glyphs: make([]Glyph, len(r.glyphs))}
+// run positions the glyphs of a run of a layout of u16 whose origin, on
+// the right for a right-to-left run, is at x, in visual order, and returns
+// them with the left of the run's advances. DirectWrite gives the glyphs of
+// a run in logical order, those of a right-to-left run from the right. A
+// tab's glyph has no advance of its own, its stop moving the origin of
+// what follows, which a run's pen cannot see: its place and width are
+// those hit testing finds.
+func (e *dwrite) run(layout uintptr, u16 []uint16, r dwRun, x float32, index []int) (shapedRun, float32) {
+	f := e.fontOf(r.face, r.size, false, false)
+	// The glyphs last until the next layout, which takes them into its lines.
+	out := shapedRun{font: f, start: index[r.pos], end: index[r.pos+r.n], glyphs: e.glyphRoom(len(r.glyphs))}
 	// The code unit starting the cluster of each glyph.
-	first := make([]uint32, len(r.glyphs))
+	e.firsts = slices.Grow(e.firsts[:0], len(r.glyphs))[:len(r.glyphs)]
+	first := e.firsts
+	clear(first)
 	for k := 0; k < len(r.clusters); {
 		g0 := int(r.clusters[k])
 		k1 := k + 1
@@ -954,7 +1357,25 @@ func (e *dwrite) run(r dwRun, x float32, index []int) shapedRun {
 		if r.offsets != nil {
 			off = r.offsets[i]
 		}
-		g := Glyph{Font: f, ID: uint32(id), Advance: r.advances[i], Y: -off.ascenderOffset, Cluster: index[r.pos+first[i]], RTL: r.rtl}
+		gf, gid := f, uint32(id)
+		if f.color && len(r.clusters) > 0 {
+			k := first[i]
+			end := k + 1
+			for int(end) < len(r.clusters) && r.clusters[end] == r.clusters[k] {
+				end++
+			}
+			if c := u16[r.pos+k : r.pos+end]; !emojiCluster(c) {
+				alone := (i == 0 || first[i-1] != k) && (i+1 == len(first) || first[i+1] != k)
+				gf, gid = e.textGlyph(r, c, gid, r.advances[i], alone)
+			}
+		}
+		g := Glyph{Font: gf, ID: gid, Advance: r.advances[i], Y: -off.ascenderOffset, Cluster: index[r.pos+first[i]], RTL: r.rtl}
+		if u := r.pos + first[i]; !r.rtl && int(u) < len(u16) && u16[u] == '\t' && (i == 0 || first[i-1] != first[i]) {
+			var tx, ty float32
+			var hit dwHitTestMetrics
+			call(layout, layoutHitTestTextPosition, uintptr(u), 0, uintptr(unsafe.Pointer(&tx)), uintptr(unsafe.Pointer(&ty)), uintptr(unsafe.Pointer(&hit)))
+			pen, g.Advance = hit.left, hit.width
+		}
 		if r.rtl {
 			pen -= g.Advance
 			g.X = pen - off.advanceOffset
@@ -964,7 +1385,15 @@ func (e *dwrite) run(r dwRun, x float32, index []int) shapedRun {
 		}
 		out.glyphs[i] = g
 	}
-	return out
+	if r.rtl {
+		// From the left, as Pango and Core Text give them: the pen
+		// stopped at the run's left.
+		for i, j := 0, len(out.glyphs)-1; i < j; i, j = i+1, j-1 {
+			out.glyphs[i], out.glyphs[j] = out.glyphs[j], out.glyphs[i]
+		}
+		return out, pen
+	}
+	return out, x
 }
 
 // settings reads the system's settings for text once: the rendering
@@ -1097,7 +1526,10 @@ func (e *dwrite) glyph(f *Font, id uint32, scale, dx float32, _ Shade, subpixel 
 	index := uint16(id)
 	var advance float32
 	run := dwGlyphRun{fontFace: f.native, fontEmSize: f.Size * scale, glyphCount: 1, glyphIndices: &index, glyphAdvances: &advance}
-	if e.isColor(f.native) {
+	if shifts, ok := f.data.(cellShifts); ok {
+		dx += shifts[id] * scale
+	}
+	if f.color {
 		if b, ok := e.colorGlyph(&run, dx); ok {
 			return b
 		}
@@ -1183,16 +1615,75 @@ func (e *dwrite) isThin(face uintptr) bool {
 	return t
 }
 
-func (e *dwrite) isColor(face uintptr) bool {
-	c, ok := e.color[face]
-	if !ok {
-		if f2 := queryInterface(face, &iidIDWriteFontFace2); f2 != 0 {
-			c = call(f2, face2IsColorFont) != 0
-			release(f2)
+// emojiCluster reports whether a cluster of code units drawn with a color
+// font is an emoji, drawn in color, or text, drawn in the text's color, as
+// UTS #51 presents it and Core Text and Ghostty draw it: a variation
+// selector says which, else the default presentation of its first
+// character. Characters with emoji presentation are the regional
+// indicators, flags in pairs, and some East Asian Wide ones: UAX #11 gives
+// them all W, and a symbol presented as text, such as ⏺, is narrow.
+// DirectWrite's fallback picks Segoe UI Emoji for either.
+func emojiCluster(u16 []uint16) bool {
+	for _, c := range u16 {
+		switch c {
+		case 0xFE0E:
+			return false
+		case 0xFE0F:
+			return true
 		}
-		e.color[face] = c
 	}
-	return c
+	r := rune(u16[0])
+	if utf16.IsSurrogate(r) && len(u16) > 1 {
+		r = utf16.DecodeRune(r, rune(u16[1]))
+	}
+	return r >= 0x1F1E6 && r <= 0x1F1FF || width.LookupRune(r).Kind() == width.EastAsianWide
+}
+
+// textGlyph returns the font and glyph that draw glyph id of a run of a
+// color font, of a cluster c presented as text (emojiCluster), alone when
+// it is the cluster's only glyph: Segoe UI Symbol's glyph of the cluster's
+// character, as Windows has that monochrome font for most symbols Segoe UI
+// Emoji draws in color, else id's outline in monochrome. The glyph keeps
+// the advance the run laid it out with, cell, and Segoe UI Symbol's,
+// narrower, draws in the middle of it (cellShifts).
+func (e *dwrite) textGlyph(r dwRun, c []uint16, id uint32, cell float32, alone bool) (*Font, uint32) {
+	if alone && e.hasSystem("Segoe UI Symbol") {
+		ch := uint32(c[0])
+		if utf16.IsSurrogate(rune(ch)) && len(c) > 1 {
+			ch = uint32(utf16.DecodeRune(rune(ch), rune(c[1])))
+		}
+		var sid uint16
+		if sf := e.font(Style{Family: "Segoe UI Symbol", Size: r.size}); sf != nil {
+			call(sf.native, faceGetGlyphIndices, uintptr(unsafe.Pointer(&ch)), 1, uintptr(unsafe.Pointer(&sid)))
+			if sid != 0 {
+				f := e.fontOf(sf.native, r.size, false, true)
+				shifts := f.data.(cellShifts)
+				if _, ok := shifts[uint32(sid)]; !ok {
+					var gm dwGlyphMetrics
+					var fm dwFontMetrics
+					call(f.native, faceGetMetrics, uintptr(unsafe.Pointer(&fm)))
+					shift := float32(0)
+					if !failed(call(f.native, faceGetDesignGlyphMetrics, uintptr(unsafe.Pointer(&sid)), 1, uintptr(unsafe.Pointer(&gm)), 0)) {
+						w := float32(gm.advanceWidth) * r.size / float32(max(fm.designUnitsPerEm, 1))
+						shift = max(cell-w, 0) / 2
+					}
+					shifts[uint32(sid)] = shift
+				}
+				return f, uint32(sid)
+			}
+		}
+	}
+	return e.fontOf(r.face, r.size, true, false), id
+}
+
+// isColor reports whether a font face has color glyphs.
+func isColor(face uintptr) bool {
+	f2 := queryInterface(face, &iidIDWriteFontFace2)
+	if f2 == 0 {
+		return false
+	}
+	defer release(f2)
+	return call(f2, face2IsColorFont) != 0
 }
 
 // analyze returns the grayscale glyph run analysis of a run drawn at
@@ -1370,30 +1861,57 @@ func (e *dwrite) register(data []byte, family string) error {
 	if hr := call(e.loader, loaderCreateInMemoryFontFileReference, e.factory, uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)), 0, uintptr(unsafe.Pointer(&file))); failed(hr) {
 		return fmt.Errorf("mygo: cannot add font (HRESULT %#08x)", uint32(hr))
 	}
-	one, err := e.newCollection([]uintptr{file})
+	set, err := e.fileSet(file)
 	if err != nil {
 		release(file)
 		return err
 	}
-	names := familyNames(one)
-	release(one)
+	var names []string
+	if one, err := e.collectionOf(set); err == nil {
+		names = familyNames(one)
+		release(one)
+	}
 	if len(names) == 0 {
+		release(set)
 		release(file)
 		return errors.New("mygo: cannot add font: not a font DirectWrite reads")
 	}
-	coll, err := e.newCollection(append(e.files, file))
+	// A family the app gives holds only the files registered under it, as
+	// on macOS: their faces again, under it rather than their own family,
+	// unless it is their own (#1224).
+	font := appFont{file: file, names: names, gave: names}
+	alias := names[0]
+	if family != "" {
+		font.gave = []string{family}
+	}
+	if family != "" && !strings.EqualFold(family, names[0]) {
+		alias = family
+		if a, ok := e.aliases[strings.ToLower(family)]; ok {
+			alias = a
+		}
+		if font.given = givenFaces(set, alias); len(font.given) == 0 {
+			release(set)
+			release(file)
+			return errors.New("mygo: cannot add font under another family name")
+		}
+	}
+	release(set)
+	coll, err := e.newCollection(append(e.app, font))
 	if err != nil {
+		for _, f := range font.given {
+			release(f.ref)
+		}
 		release(file)
 		return err
 	}
-	e.files = append(e.files, file)
+	e.app = append(e.app, font)
 	release(e.custom)
 	e.custom = coll
 	for _, name := range names {
 		e.aliases[strings.ToLower(name)] = name
 	}
 	if family != "" {
-		e.aliases[strings.ToLower(family)] = names[0]
+		e.aliases[strings.ToLower(family)] = alias
 		// Listed under the name the app gave it, which is the one it uses.
 		e.names = append(e.names, family)
 	} else {
@@ -1413,26 +1931,145 @@ func (e *dwrite) register(data []byte, family string) error {
 	return nil
 }
 
-// newCollection returns a font collection of font files.
-func (e *dwrite) newCollection(files []uintptr) (uintptr, error) {
-	var builder, set, coll uintptr
+// newCollection returns a font collection of the app's fonts.
+func (e *dwrite) newCollection(fonts []appFont) (uintptr, error) {
+	set, err := e.newFontSet(fonts)
+	if err != nil {
+		return 0, err
+	}
+	defer release(set)
+	return e.collectionOf(set)
+}
+
+// fileSet returns a font set of the faces of a font file.
+func (e *dwrite) fileSet(file uintptr) (uintptr, error) {
+	var builder, set uintptr
 	if hr := call(e.factory5, factory5CreateFontSetBuilder, uintptr(unsafe.Pointer(&builder))); failed(hr) {
 		return 0, fmt.Errorf("mygo: cannot add font (HRESULT %#08x)", uint32(hr))
 	}
 	defer release(builder)
-	for _, f := range files {
-		if hr := call(builder, builderAddFontFile, f); failed(hr) {
-			return 0, fmt.Errorf("mygo: cannot add font (HRESULT %#08x)", uint32(hr))
+	if hr := call(builder, builderAddFontFile, file); failed(hr) {
+		return 0, fmt.Errorf("mygo: cannot add font (HRESULT %#08x)", uint32(hr))
+	}
+	if hr := call(builder, builderCreateFontSet, uintptr(unsafe.Pointer(&set))); failed(hr) {
+		return 0, fmt.Errorf("mygo: cannot add font (HRESULT %#08x)", uint32(hr))
+	}
+	return set, nil
+}
+
+// newFontSet returns a font set of the app's fonts: each under its own
+// families, but for those the app gives other fonts, and again under the
+// family the app gave it. So a family the app gives holds only the files
+// it gave it, and the faces of a family that declare the same weight, as
+// Selawik's Light and Semilight, are told apart whichever the app
+// registers first (#1224).
+func (e *dwrite) newFontSet(fonts []appFont) (uintptr, error) {
+	taken := map[string]bool{}
+	for _, f := range fonts {
+		for _, name := range f.gave {
+			taken[strings.ToLower(name)] = true
+		}
+	}
+	var builder, set uintptr
+	if hr := call(e.factory5, factory5CreateFontSetBuilder, uintptr(unsafe.Pointer(&builder))); failed(hr) {
+		return 0, fmt.Errorf("mygo: cannot add font (HRESULT %#08x)", uint32(hr))
+	}
+	defer release(builder)
+	var own []givenFace // faces under the own families a font keeps
+	defer func() {
+		for _, f := range own {
+			release(f.ref)
+		}
+	}()
+	add := func(given []givenFace) error {
+		for _, f := range given {
+			props := make([]dwFontProperty, len(f.props))
+			for i, p := range f.props {
+				props[i] = dwFontProperty{p.id, &utf16z(p.value)[0], &utf16z(p.locale)[0]}
+			}
+			hr := call(builder, builderAddFontFaceReference, f.ref, uintptr(unsafe.Pointer(&props[0])), uintptr(len(props)))
+			runtime.KeepAlive(props)
+			if failed(hr) {
+				return fmt.Errorf("mygo: cannot add font under another family name (HRESULT %#08x)", uint32(hr))
+			}
+		}
+		return nil
+	}
+	for _, f := range fonts {
+		gave := func(name string) bool {
+			return slices.ContainsFunc(f.gave, func(g string) bool { return strings.EqualFold(g, name) })
+		}
+		keep := slices.DeleteFunc(slices.Clone(f.names), func(name string) bool { return taken[strings.ToLower(name)] && !gave(name) })
+		if len(keep) == len(f.names) {
+			if hr := call(builder, builderAddFontFile, f.file); failed(hr) {
+				return 0, fmt.Errorf("mygo: cannot add font (HRESULT %#08x)", uint32(hr))
+			}
+		} else if len(keep) > 0 {
+			one, err := e.fileSet(f.file)
+			if err != nil {
+				return 0, err
+			}
+			for _, name := range keep {
+				faces := givenFaces(one, name)
+				own = append(own, faces...)
+				if err := add(faces); err != nil {
+					release(one)
+					return 0, err
+				}
+			}
+			release(one)
+		}
+		if err := add(f.given); err != nil {
+			return 0, err
 		}
 	}
 	if hr := call(builder, builderCreateFontSet, uintptr(unsafe.Pointer(&set))); failed(hr) {
 		return 0, fmt.Errorf("mygo: cannot add font (HRESULT %#08x)", uint32(hr))
 	}
-	defer release(set)
+	return set, nil
+}
+
+// collectionOf returns the font collection of a font set.
+func (e *dwrite) collectionOf(set uintptr) (uintptr, error) {
+	var coll uintptr
 	if hr := call(e.factory5, factory3CreateFontCollectionFromFontSet, set, uintptr(unsafe.Pointer(&coll))); failed(hr) {
 		return 0, fmt.Errorf("mygo: cannot add font (HRESULT %#08x)", uint32(hr))
 	}
 	return coll, nil
+}
+
+// givenFaces returns the faces of a font set under a family the app gives
+// them: each with its own properties, its weight, stretch and style among
+// them, but for its family names, which are family.
+func givenFaces(set uintptr, family string) []givenFace {
+	var out []givenFace
+	for i := range uint32(call(set, setGetFontCount)) {
+		var ref uintptr
+		if failed(call(set, setGetFontFaceReference, uintptr(i), uintptr(unsafe.Pointer(&ref)))) {
+			continue
+		}
+		f := givenFace{ref: ref}
+		for id := uint32(propertyWWSFamilyName); id <= propertyTypographicFaceName; id++ {
+			switch id {
+			case propertyWWSFamilyName, propertyTypographicFamilyName, propertyWin32FamilyName:
+				f.props = append(f.props, fontProperty{id, family, "en-us"})
+				continue
+			}
+			var exists int32
+			var strs uintptr
+			if failed(call(set, setGetPropertyValues, uintptr(i), uintptr(id), uintptr(unsafe.Pointer(&exists)), uintptr(unsafe.Pointer(&strs)))) || strs == 0 {
+				continue // as the typographic face name before Windows 10 1709
+			}
+			for j := range uint32(call(strs, stringsGetCount)) {
+				f.props = append(f.props, fontProperty{id,
+					localizedString(strs, j, stringsGetStringLength, stringsGetString),
+					localizedString(strs, j, stringsGetLocaleNameLength, stringsGetLocaleName)})
+			}
+			release(strs)
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 // appFamilies lists the families of the app's fonts, monospaced when
@@ -1531,12 +2168,18 @@ func englishName(strs uintptr) string {
 	if exists == 0 {
 		index = 0
 	}
-	var length uint32
-	if failed(call(strs, stringsGetStringLength, uintptr(index), uintptr(unsafe.Pointer(&length)))) {
+	return localizedString(strs, index, stringsGetStringLength, stringsGetString)
+}
+
+// localizedString returns a string of localized strings, or its locale
+// name, by the methods of its length and of it.
+func localizedString(strs uintptr, index uint32, length, get int) string {
+	var n uint32
+	if failed(call(strs, length, uintptr(index), uintptr(unsafe.Pointer(&n)))) {
 		return ""
 	}
-	buf := make([]uint16, length+1)
-	if failed(call(strs, stringsGetString, uintptr(index), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))) {
+	buf := make([]uint16, n+1)
+	if failed(call(strs, get, uintptr(index), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))) {
 		return ""
 	}
 	return syscall.UTF16ToString(buf)
@@ -1544,11 +2187,16 @@ func englishName(strs uintptr) string {
 
 func (e *dwrite) fontCount() int { return len(e.fonts) }
 
-// forgetFonts lets go of the faces of the Fonts made so far; the faces of
-// the families stay.
+// forgetFonts lets go of the Fonts made so far; the faces of the families
+// stay. The Fonts' references to their faces go with them, once nothing
+// refers to them (releaseFonts).
 func (e *dwrite) forgetFonts() {
-	for _, f := range e.fonts {
-		release(f.native)
-	}
 	clear(e.fonts)
+	clear(e.numbers)
+	clear(e.wholes)
+	clear(e.wrapFonts)
+	e.dropScratch()
 }
+
+// releaseFonts releases the faces of the Fonts nothing refers to.
+func (e *dwrite) releaseFonts() { e.releaseDead(release) }

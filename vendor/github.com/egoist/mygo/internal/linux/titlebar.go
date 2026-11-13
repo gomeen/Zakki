@@ -142,6 +142,10 @@ func (w *window) measureControls() {
 			room.Height = max(room.Height, int(height))
 		}
 	}
+	// The bars, which hold the buttons, take the title bar's height.
+	if room.Left > 0 || room.Right > 0 {
+		room.Bottom = room.Height
+	}
 	if room != c.room {
 		c.room = room
 		w.h.TitleBarChanged()
@@ -177,6 +181,22 @@ func buttonLayout() (start, end string) {
 	gObjectGetPtr(gtkSettingsGetDefault(), cs("gtk-decoration-layout"), unsafe.Pointer(&p), 0)
 	before, after, _ := strings.Cut(takeStr(p), ":")
 	return windowButtons(before), windowButtons(after)
+}
+
+// WindowButtons returns the buttons of the desktop's layout, none where the
+// compositor decorates windows itself (platform.WindowButtonsBackend).
+func (b *Backend) WindowButtons() (start, end []string) {
+	if b.compositorDecorates {
+		return nil, nil
+	}
+	s, e := buttonLayout()
+	split := func(side string) []string {
+		if side == "" {
+			return nil
+		}
+		return strings.Split(side, ",")
+	}
+	return split(s), split(e)
 }
 
 func windowButtons(side string) string {

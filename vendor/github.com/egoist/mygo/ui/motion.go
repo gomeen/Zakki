@@ -4,6 +4,8 @@ import (
 	"math"
 	"slices"
 	"time"
+
+	"github.com/egoist/mygo/internal/scene"
 )
 
 // Animation says how a value goes to a new target: along an easing curve
@@ -24,6 +26,21 @@ type Animation struct {
 	// changes, before it heads for the new one, as a list's rows do one
 	// after another with Delay: time.Duration(i) * 30 * time.Millisecond.
 	Delay time.Duration
+	// Oklab mixes the colors it moves (AnimateColor, and a Transition's
+	// colors, those of an element of its Match and a ContentTransition's
+	// text morphing) in the Oklab color space, as a gradient's Oklab
+	// does, instead of in sRGB: between two saturated colors, the way
+	// keeps their lightness and saturation rather than going through a
+	// dull, darker middle.
+	Oklab bool
+	// NonMotion says that the value AnimateTo animates moves nothing on
+	// screen, as an opacity, a blur or a crossfade: it still animates
+	// while the desktop asks for less motion (Preferences.ReduceMotion),
+	// as colors and a Transition's fades do, where other values go to
+	// their targets at once. Leave it off for a position, a size, a
+	// scale or a scroll. What MyGo moves itself (ScrollTo, a pose, a
+	// Transition) knows what moves, and does not read it.
+	NonMotion bool
 }
 
 // Springs that settle without bouncing, with a little bounce, and with a
@@ -298,7 +315,9 @@ func (e *node) channel(key any, value float64) (*channel, bool) {
 // on the way, or a new kind of Animation, takes over from where the value
 // is: a spring keeps its velocity, even that of a curve. When the desktop
 // asks for less motion (Preferences.ReduceMotion), the value goes to its
-// target at once.
+// target at once, unless a's NonMotion says it moves nothing, as a fade:
+//
+//	op := e.AnimateTo("fade", target, ui.Animation{Duration: 200 * time.Millisecond, NonMotion: true})
 func (e *node) AnimateTo(key any, target float32, a Animation) float32 {
 	finiteMotion("animation", float64(target))
 	if a.Duration < 0 || a.Delay < 0 {
@@ -319,7 +338,7 @@ func (e *node) AnimateTo(key any, target float32, a Animation) float32 {
 	now := e.c.now
 	moving := ch.moving || ch.pending
 	ch.advance(now)
-	if rt.preferences().ReduceMotion || rt.instant() {
+	if rt.preferences().ReduceMotion && !a.NonMotion || rt.instant() {
 		if ch.moving || ch.pending || ch.value != to {
 			ch.rested = rt.frame
 		}
@@ -439,15 +458,152 @@ func (e *node) Arrived(key any) bool {
 	return false
 }
 
+// viewInputs is what InView, InViewMargin and InViewAmount answer from:
+// the element's box as its transforms place it, what of it the clips
+// around it show, and whether it shows at all.
+type viewInputs struct {
+	world          scene.Affine
+	x, y, w, h     float32
+	vx, vy, vw, vh float32
+	invisible      bool
+}
+
+// viewWatch is what an element that reads whether it is in view keeps:
+// the frame it last read in, and the inputs of that answer as of the last
+// commit. It is allocated once, by the first read.
+type viewWatch struct {
+	read   uint64
+	inputs viewInputs
+}
+
+func (s *state) viewInputs() viewInputs {
+	return viewInputs{s.world, s.x, s.y, s.w, s.h, s.vx, s.vy, s.vw, s.vh, s.invisible}
+}
+
+// watchView notes that the build reads whether the element is in view,
+// which comes from the last commit: commitElement asks for another frame
+// when its inputs changed since, as scrolling does, so that what the view
+// shows follows at once, not at the next input.
+func (e *node) watchView() {
+	s := e.st
+	if s.view == nil {
+		s.view = &viewWatch{inputs: s.viewInputs()}
+	}
+	s.view.read = e.c.rt.frame
+}
+
 // InView reports whether some of the element showed in the window in the
 // frame before, within the scroll containers and clips around it: to
-// animate it in as it scrolls into view, as Motion's whileInView.
+// animate it in as it scrolls into view, as Motion's whileInView. When
+// what it answers from changes, as a scroll brings the element in, MyGo
+// builds another frame, so that the view reads the new answer.
 func (e *node) InView() bool {
 	if !e.hasState() {
 		return false
 	}
 	s := e.st
+	e.watchView()
 	return s.seen+1 >= e.c.rt.frame && s.vw > 0 && s.vh > 0
+}
+
+// InViewMargin reports whether some of the element showed in the frame
+// before, as InView does, with the window and the scroll containers
+// around it grown by margin, in DIPs, CSS style as Padding: all sides,
+// vertical and horizontal, or top, right, bottom and left. As
+// IntersectionObserver's rootMargin and scrollMargin, a margin of 200
+// has the element in view once it is within 200 DIPs of showing, to load
+// what it shows before it scrolls in, and a negative one only once it is
+// that far inside; other clips around it clip it as they do. As InView
+// does, it has MyGo build another frame when what it answers from changes.
+func (e *node) InViewMargin(margin ...float32) bool {
+	m := edges(margin)
+	in := e.InView()
+	if m == [4]float32{} || in && m[0] >= 0 && m[1] >= 0 && m[2] >= 0 && m[3] >= 0 {
+		return in // grown, what showed shows still
+	}
+	if !e.hasState() {
+		return false
+	}
+	s, rt := e.st, e.c.rt
+	e.watchView()
+	if s.seen+1 < rt.frame || s.invisible {
+		return false
+	}
+	v := rt.visibleWithin(s, m)
+	return v.W > 0 && v.H > 0
+}
+
+// InViewAmount reports whether at least amount of the element's area,
+// from 0 to 1, showed in the frame before, within the window and the
+// scroll containers and clips around it, grown by margin as InViewMargin
+// grows them: as IntersectionObserver's threshold, and Motion's amount
+// for whileInView and useInView, and builds another frame when what it
+// answers from changes, as InView does. An impression counts once half of a
+// card shows with 0.5, an animation starts at a fifth of it with 0.2,
+// and 1 waits for all of it; 0 is InViewMargin. Its area is that of its
+// box as transforms move it, the box holding them as InView's clips do.
+//
+//	card := ui.Column(c).Key(ad.ID)
+//	if card.InViewAmount(0.5) {
+//		app.counted(ad.ID)
+//	}
+func (e *node) InViewAmount(amount float32, margin ...float32) bool {
+	if !(amount > 0) {
+		return e.InViewMargin(margin...)
+	}
+	if !e.hasState() {
+		return false
+	}
+	s, rt := e.st, e.c.rt
+	e.watchView()
+	if s.seen+1 < rt.frame || s.invisible {
+		return false
+	}
+	whole := transformRect(s.world, Rect{s.x, s.y, s.w, s.h})
+	if !(whole.W > 0 && whole.H > 0) {
+		return false
+	}
+	v := Rect{s.vx, s.vy, s.vw, s.vh}
+	if m := edges(margin); m != [4]float32{} {
+		v = rt.visibleWithin(s, m)
+	}
+	if !(v.W > 0 && v.H > 0) {
+		return false
+	}
+	// A shade under the area, which the clips and transforms round.
+	return v.W*v.H >= min(amount, 1)*whole.W*whole.H*(1-1e-5)
+}
+
+// visibleWithin returns the part of the element that showed in the last
+// frame with the window and the scroll containers around it grown by m,
+// top, right, bottom and left, as commitElement clips it otherwise.
+func (rt *engine) visibleWithin(s *state, m [4]float32) Rect {
+	w, h, _ := rt.size()
+	v := intersect(transformRect(s.world, Rect{s.x, s.y, s.w, s.h}), outset(Rect{0, 0, w, h}, m))
+	// The clips around an element flying stop at it, as it paints out of
+	// them (contains).
+	for p := rt.states[s.parent]; p != nil && !s.lifted && v.W > 0 && v.H > 0; p = rt.states[p.parent] {
+		if p.clips {
+			r := transformRect(p.world, p.clipRect)
+			if p.flags&(flagScrollX|flagScrollY) != 0 {
+				r = outset(r, m)
+			}
+			v = intersect(v, r)
+		}
+		if p.selfClips {
+			v = intersect(v, transformRect(p.world, p.selfClip))
+		}
+		if p.lifted || p.parent == 0 {
+			break
+		}
+	}
+	return v
+}
+
+// outset returns r grown by m, top, right, bottom and left: shrunk where
+// m is negative.
+func outset(r Rect, m [4]float32) Rect {
+	return Rect{r.X - m[3], r.Y - m[0], r.W + m[1] + m[3], r.H + m[0] + m[2]}
 }
 
 // colorMotion is a color that AnimateColor moves from from to to, k of
@@ -459,8 +615,8 @@ type colorMotion struct {
 
 // AnimateColor returns a color that goes to target as a says, mixed with
 // premultiplied alpha as transitions mix colors, so that a color fading
-// from transparent keeps its hue; key tells apart the element's animated
-// colors. It starts at the first target. As changing colors moves
+// from transparent keeps its hue, in sRGB or, with a's Oklab, in Oklab;
+// key tells apart the element's animated colors. It starts at the first target. As changing colors moves
 // nothing, colors still change smoothly while the desktop asks for less
 // motion; DisableAnimations shows them at once.
 func (e *node) AnimateColor(key any, target Color, a Animation) Color {
@@ -495,7 +651,7 @@ func (e *node) AnimateColor(key any, target Color, a Animation) Color {
 	}
 	m.to = target
 	if m.k.moving || m.k.pending {
-		m.shown = mixPremultiplied(m.from, target, max(0, min(float32(m.k.value), 1)))
+		m.shown = mixPremultiplied(m.from, target, max(0, min(float32(m.k.value), 1)), a.Oklab)
 		e.c.AnimationFrame()
 	} else {
 		m.shown = target
@@ -565,13 +721,18 @@ type KeyframeOptions struct {
 	// plays, and RepeatDelay how long it holds where it got to before it
 	// plays again.
 	Delay, RepeatDelay time.Duration
+	// NonMotion says that the sequence moves nothing on screen, as a
+	// pulsing opacity or a blur that settles: it still plays while the
+	// desktop asks for less motion, as Animation's NonMotion does.
+	NonMotion bool
 }
 
 // Keyframes plays a sequence, holding its last value when done. It starts
 // on the first call, with the first frame's value. Keep the element and
 // key stable, and change Run when changing the sequence. Only active
 // playback asks for animation frames. Reduced motion completes playback at
-// its final value, including when the preference changes mid-sequence.
+// its final value, including when the preference changes mid-sequence,
+// unless the options' NonMotion says the sequence moves nothing.
 func (e *node) Keyframes(key any, frames []Keyframe, options ...KeyframeOptions) float32 {
 	if len(frames) < 2 || frames[0].At != 0 {
 		panic("ui: Keyframes needs at least two frames starting at zero")
@@ -612,7 +773,7 @@ func (e *node) Keyframes(key any, frames []Keyframe, options ...KeyframeOptions)
 	rt := e.c.rt
 	switch {
 	case s.done:
-	case rt.preferences().ReduceMotion:
+	case rt.preferences().ReduceMotion && !o.NonMotion:
 		s.value, s.done, s.rested = s.final(), true, rt.frame
 	default:
 		s.value, s.done = s.sample(now)

@@ -26,6 +26,7 @@ import (
 
 // FSEventStreamCreateFlags.
 const (
+	fseNoDefer    = 0x00000002 // kFSEventStreamCreateFlagNoDefer
 	fseWatchRoot  = 0x00000004 // kFSEventStreamCreateFlagWatchRoot
 	fseFileEvents = 0x00000010 // kFSEventStreamCreateFlagFileEvents
 )
@@ -57,6 +58,9 @@ const (
 	// fseLatency is how long FSEvents may coalesce events: 10 ms, well
 	// under the core's 50 ms Debounce, so the core's trailing debounce
 	// does the coalescing an app sees and the stream only batches bursts.
+	// With fseNoDefer the first event after a quiet period is delivered
+	// at once rather than after the latency, and the events that follow
+	// it within the latency are batched.
 	fseLatency = 0.01
 	// fseQueueSize is how many notices a watch holds before it asks the
 	// core to look at everything again.
@@ -343,10 +347,10 @@ func (d *fseWatch) covered(path string) bool {
 
 func (d *fseWatch) Add(t platform.FileWatchTarget) error {
 	if !t.Directory {
-		// A file target is covered by the stream of the directory that
-		// holds it, which the core enrolls for a file watch (watchParent),
-		// and FSEvents watches trees, not single files.
-		return nil
+		// A file is covered by the stream of the directory that holds it,
+		// which the core enrolls for a file watch (watchParent), and
+		// FSEvents watches trees, not single files.
+		return platform.ErrUnsupported
 	}
 	// FSEvents reports paths as they are on disk, which a path given on a
 	// case-insensitive volume may not be.
@@ -382,7 +386,7 @@ func (d *fseWatch) Add(t platform.FileWatchTarget) error {
 	s := &fseStream{id: t.ID, path: streamPath, subtree: t.Subtree, driver: d}
 	s.context.info = uintptr(unsafe.Pointer(s))
 	// kFSEventStreamEventIdSinceNow: the core's snapshot is taken already.
-	stream := fseStreamCreate(0, fseCallback, &s.context, cfPaths, ^uint64(0), fseLatency, fseFileEvents|fseWatchRoot)
+	stream := fseStreamCreate(0, fseCallback, &s.context, cfPaths, ^uint64(0), fseLatency, fseNoDefer|fseFileEvents|fseWatchRoot)
 	cfRelease(cfPaths)
 	cfRelease(cfPath)
 	if stream == 0 {

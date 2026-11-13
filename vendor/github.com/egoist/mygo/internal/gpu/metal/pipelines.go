@@ -15,15 +15,18 @@ import (
 // waits for one: pipeFor returns the general pipeline, which draws the same
 // pixels, until a worker goroutine has made the specialized one, and a cache
 // shared by every renderer of a device keeps them, so that a second window
-// finds them made.
+// finds them made. GPUs older than Metal's Mac2 family (canSpecialize) have
+// none: every batch draws with the general pipeline, and nothing compiles
+// behind the frames.
 
-// pipeKey names a pipeline: the pixel format of the target, the class and
+// pipeKey names a pipeline: the pixel format of the target, the classes of
+// its batches (gpu.Batch.Classes: one, or those of joined batches) and
 // whether its instances have continuous corners, and how it blends.
 type pipeKey struct {
-	format uint
-	class  gpu.Class
-	cont   bool
-	mode   blendMode
+	format  uint
+	classes uint32
+	cont    bool
+	mode    blendMode
 }
 
 // deviceKey is a pipeline of a device in the cache of all renderers.
@@ -67,14 +70,18 @@ type pipeState struct {
 // warmSet returns the pipelines that frames most likely draw with in a target of
 // format: every class with and without continuous corners drawn over what is
 // there, and the plain and other fills drawn as opaque cores (which float16
-// targets do not use, and which shadows do not need).
-func warmSet(format uint) (keys []pipeKey) {
-	for _, cl := range []gpu.Class{gpu.ClassPlain, gpu.ClassGlyph, gpu.ClassImage, gpu.ClassFill, gpu.ClassShadow, gpu.ClassSubpixel} {
+// targets do not use, and which shadows do not need), and the classes that
+// small batches join most (gpu.Batch.Joined): shadows with the fills casting
+// them, and fills with their labels. A device that does not specialize warms
+// none.
+func (r *Renderer) warmSet(format uint) (keys []pipeKey) {
+	for _, cl := range []uint32{1 << gpu.ClassPlain, 1 << gpu.ClassGlyph, 1 << gpu.ClassImage, 1 << gpu.ClassFill, 1 << gpu.ClassShadow, 1 << gpu.ClassSubpixel,
+		1<<gpu.ClassShadow | 1<<gpu.ClassPlain, 1<<gpu.ClassPlain | 1<<gpu.ClassGlyph} {
 		for _, cont := range []bool{false, true} {
-			if specializable(format, cl, blendOver) {
+			if r.specializable(format, cl, blendOver) {
 				keys = append(keys, pipeKey{format, cl, cont, blendOver})
 			}
-			if (cl == gpu.ClassPlain || cl == gpu.ClassFill) && specializable(format, cl, blendNone) {
+			if (cl == 1<<gpu.ClassPlain || cl == 1<<gpu.ClassFill) && r.specializable(format, cl, blendNone) {
 				keys = append(keys, pipeKey{format, cl, cont, blendNone})
 			}
 		}
@@ -82,10 +89,10 @@ func warmSet(format uint) (keys []pipeKey) {
 	return keys
 }
 
-// specializable reports whether batches of class cl blended as mode draw with a
-// specialized pipeline in targets of format.
-func specializable(format uint, cl gpu.Class, mode blendMode) bool {
-	if cl == gpu.ClassGeneral || cl >= gpu.NumClasses {
+// specializable reports whether batches of the classes cl (gpu.Batch.Classes)
+// blended as mode draw with a specialized pipeline in targets of format.
+func (r *Renderer) specializable(format uint, cl uint32, mode blendMode) bool {
+	if !r.canSpecialize || cl&(1<<gpu.ClassGeneral) != 0 || cl >= 1<<gpu.NumClasses {
 		return false
 	}
 	if format == pixelFormatRGBA16Float {
@@ -93,7 +100,7 @@ func specializable(format uint, cl gpu.Class, mode blendMode) bool {
 		// place of a half apart in float16 targets, at a pixel in a scene, so
 		// shadows keep the general function there; opaque cores are blended
 		// there (see makePipelines).
-		return cl != gpu.ClassShadow && mode != blendNone
+		return cl&(1<<gpu.ClassShadow) == 0 && mode != blendNone
 	}
 	return true
 }
@@ -122,7 +129,7 @@ func (r *Renderer) startPipelines(f *formatState) {
 		return
 	}
 	p.warmed[i] = true
-	for _, k := range warmSet(f.format) {
+	for _, k := range r.warmSet(f.format) {
 		r.enqueueLocked(k)
 	}
 }
@@ -173,7 +180,7 @@ func (r *Renderer) buildPipeline(k pipeKey) {
 	}
 	var err error
 	if pipe == 0 {
-		pipe, err = r.newClassPipeline(r.lib, "ps", k.format, k.mode, k.class, k.cont)
+		pipe, err = r.newClassPipeline(r.lib, "ps", k.format, k.mode, k.classes, k.cont)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%v: drawing with the general shader\n", err)
 		} else if cacheable {
@@ -204,12 +211,12 @@ func (r *Renderer) buildPipeline(k pipeKey) {
 	p.ready[k] = pipe
 }
 
-// pipeFor returns the pipeline of f that draws batches of class cl blended as
-// mode says. It never waits for a compile: until the specialized pipeline is
+// pipeFor returns the pipeline of f that draws batches of the classes cl
+// (gpu.Batch.Classes) blended as mode says. It never waits for a compile: until the specialized pipeline is
 // made, by the worker or by another renderer of the device, it is the general one,
 // which draws the same pixels.
-func (r *Renderer) pipeFor(f *formatState, cl gpu.Class, continuous bool, mode blendMode) id {
-	if mode == blendNone && f.format == pixelFormatRGBA16Float {
+func (r *Renderer) pipeFor(f *formatState, cl uint32, continuous bool, mode blendMode) id {
+	if mode == blendNone && r.coresBlend(f.format) {
 		mode = blendOver // see makePipelines
 	}
 	general := f.pipeline
@@ -219,7 +226,7 @@ func (r *Renderer) pipeFor(f *formatState, cl gpu.Class, continuous bool, mode b
 	case blendNone:
 		general = f.opaquePipe
 	}
-	if !specializable(f.format, cl, mode) {
+	if !r.specializable(f.format, cl, mode) {
 		return general
 	}
 	k := pipeKey{f.format, cl, continuous, mode}

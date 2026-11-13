@@ -53,7 +53,7 @@ func (e *node) inputParams(width float32) text.Params {
 	ed := e.st.editor
 	p.Text = ed.displayText()
 	if !ed.password {
-		p.Spans, _ = ed.rangeSpans(0, ed.buf.n)
+		p.Spans = ed.rangeKey(0, ed.buf.n)
 	}
 	p.KeepSpaces = true
 	p.MaxLines = 0
@@ -114,9 +114,10 @@ func (e *node) layoutInput(cw, ch float32) {
 	}
 	// Text narrower than the box goes where TextAlign puts it: Start is
 	// the right of an input laid out right to left, whatever its text, as
-	// that of Text.
+	// that of Text. Its last column stays for the caret, as where the text
+	// scrolls: a caret on the box's right edge would be clipped away.
 	rtl := e.rtl()
-	if room := cw - l.Width; room > 0 {
+	if room := cw - l.Width - 1; room > 0 {
 		switch align := e.resolvedText().align; {
 		case align == Center:
 			ed.originX += room / 2
@@ -154,7 +155,7 @@ func (e *node) placeholderParams(width float32) text.Params {
 func (e *node) paintInput(p *Painter) {
 	ed := e.st.editor
 	l := ed.layout
-	t := e.c.theme
+	t := p.Theme()
 	if l == nil && ed.area == nil {
 		return
 	}
@@ -167,8 +168,12 @@ func (e *node) paintInput(p *Painter) {
 	ts := e.resolvedText()
 	if ed.buf.n == 0 && ed.compose == "" && ed.placeholder != "" {
 		pl := textSystem().Layout(e.placeholderParams(box.W))
+		color := t.TextMuted
+		if ed.placeholderColorSet {
+			color = ed.placeholderColor
+		}
 		// The placeholder aligns itself in the content box, as its layout has the box's width.
-		p.textLayout(pl, e.x+e.contentX(), oy, t.TextMuted, ts, nil)
+		p.textLayout(pl, e.x+e.contentX(), oy, color, ts, nil)
 	}
 	if ed.area != nil {
 		ed.area.paint(e, p, e.x+ed.originX, e.y+ed.originY)
@@ -199,13 +204,14 @@ func (e *node) paintInput(p *Painter) {
 	}
 	if focused && !ed.readOnly {
 		rt := e.c.rt
-		phase := time.Since(rt.blinkStart)
+		phase := e.c.now.Sub(rt.blinkStart)
 		const blink = 530 * time.Millisecond
-		if (phase/blink)%2 == 0 {
+		if (phase/blink)%2 == 0 && ed.caretWidth > 0 {
 			x, y, h := l.CaretAt(text.CaretPosition{Index: ed.displayIndex(ed.caret) + ed.composeCaret, Affinity: ed.caretAffinity})
-			p.add(scene.Op{Kind: scene.OpFill, Rect: p.snap(Rect{ox + x, oy + y, 0, h}), Color: t.Accent.scene(), Wide: p.wide(t.Accent, Color{}, Color{}), Opacity: p.opacity})
+			caret := ts.caretColor(t)
+			p.add(scene.Op{Kind: scene.OpFill, Rect: p.snap(Rect{ox + x, oy + y, 0, h}), Color: caret.scene(), Wide: p.wide(caret, Color{}, Color{}), Opacity: p.opacity})
 			op := &p.s.Ops[len(p.s.Ops)-1]
-			op.Rect.W = max(round(p.scale), 1)
+			op.Rect.W = max(round(ed.caretWidth*p.scale), 1)
 		}
 		if phase < 30*time.Second {
 			e.c.After(blink - phase%blink)
@@ -218,6 +224,19 @@ func (e *node) paintInput(p *Painter) {
 // rangeSpans 返回 [start, end) rune 相对 start 的布局 key 与绘制属性。
 // 输入法组合文本保持无样式，其后的区间移动到组合文本之后。
 func (ed *editor) rangeSpans(start, end int) (string, *spanPaint) {
+	return ed.spansOf(ed.inReach(start), start, end)
+}
+
+// rangeKey returns the spans of the weights of the TextRanges in runes
+// start up to end, as rangeSpans does, without how to paint them: a
+// layout needs no more, and a text without weights costs nothing.
+func (ed *editor) rangeKey(start, end int) string {
+	key, _ := ed.styleRanges(ed.inReach(start), start, end, false)
+	return key
+}
+
+// inReach returns the ranges from the first that can reach rune start.
+func (ed *editor) inReach(start int) []TextRange {
 	if !ed.apart {
 		ed.sortRanges()
 	}
@@ -228,14 +247,31 @@ func (ed *editor) rangeSpans(start, end int) (string, *spanPaint) {
 	if first > 0 && ed.ranges[first-1].End > start {
 		first--
 	}
-	return ed.spansOf(ed.ranges[first:], start, end)
+	return ed.ranges[first:]
 }
 
 // spansOf is rangeSpans of ranges, sorted and apart: those from the first
 // starting at end or later are out of reach.
 func (ed *editor) spansOf(ranges []TextRange, start, end int) (string, *spanPaint) {
-	if len(ranges) == 0 {
-		return "", nil
+	return ed.styleRanges(ranges, start, end, true)
+}
+
+// styleRanges is spansOf, building how to paint the ranges only if paint
+// is set. Without it, it builds nothing unless a range sets a weight.
+func (ed *editor) styleRanges(ranges []TextRange, start, end int, paint bool) (string, *spanPaint) {
+	reach := len(ranges)
+	if !paint {
+		shaped := false
+		for i, r := range ranges {
+			if r.Start >= end {
+				reach = i
+				break
+			}
+			shaped = shaped || (r.Font != "" || r.Italic || r.Weight > 0 || r.ObjectWidth > 0 || r.ObjectHeight > 0) && max(r.Start, start) < min(r.End, end)
+		}
+		if !shaped {
+			return "", nil
+		}
 	}
 	caret, n := -1, 0
 	if ed.compose != "" && start <= ed.caret && ed.caret <= end {
@@ -249,23 +285,35 @@ func (ed *editor) spansOf(ranges []TextRange, start, end int) (string, *spanPain
 		}
 		return i - start
 	}
+	// Each range adds a run, a gap before it, and one more where the caret
+	// splits it. To paint, the editor's buffers, which the painter holds
+	// only while it paints the text.
 	var styles []text.Span
 	var spans []Span
-	shaped, painted := false, false
+	if paint {
+		styles, spans = ed.paintStyles[:0], ed.paintSpans[:0]
+	} else {
+		styles = make([]text.Span, 0, 2*reach+1)
+	}
 	at := 0
 	add := func(from, to int, r TextRange) {
 		if from > at {
 			styles = append(styles, text.Span{End: from})
-			spans = append(spans, Span{})
+			if paint {
+				spans = append(spans, Span{})
+			}
 		}
 		span := Span{Font: r.Font, Italic: r.Italic, Color: r.Color, Background: r.Background, Weight: r.Weight,
 			Underline: r.Underline, WavyUnderline: r.WavyUnderline, DecorationColor: r.DecorationColor,
 			ObjectWidth: r.ObjectWidth, ObjectHeight: r.ObjectHeight}
 		styles = append(styles, spanStyle(span, to))
-		spans = append(spans, span)
+		if paint {
+			spans = append(spans, span)
+		}
 		at = to
 	}
-	for _, r := range ranges {
+	shaped, painted := false, false
+	for _, r := range ranges[:reach] {
 		if r.Start >= end {
 			break
 		}
@@ -303,8 +351,12 @@ func (ed *editor) spansOf(ranges []TextRange, start, end int) (string, *spanPain
 		key = text.EncodeSpans(layout)
 	}
 	var sp *spanPaint
-	if painted {
-		sp = &spanPaint{spans: spans, styles: styles}
+	if paint {
+		ed.paintStyles, ed.paintSpans = styles, spans
+		if painted {
+			ed.painted = spanPaint{spans: spans, styles: styles}
+			sp = &ed.painted
+		}
 	}
 	return key, sp
 }

@@ -97,7 +97,7 @@ func loadCatalogs(c *Config) (*i18ngen.Catalog, i18ngen.Diagnostics, error) {
 // next to the client, named after the catalogs' directory, as
 // src/locales.ts, or "" for an app without a frontend.
 func i18nModule(c *Config) string {
-	if c.I18n == nil || !c.frontend {
+	if c.I18n == nil || c.Bindings == "" {
 		return ""
 	}
 	return filepath.Join(filepath.Dir(c.path(c.Bindings)), filepath.Base(c.path(c.I18n.Dir))+".ts")

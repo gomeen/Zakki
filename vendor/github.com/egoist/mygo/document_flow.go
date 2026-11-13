@@ -286,7 +286,7 @@ func (b *docBase) windowClosed() {
 	if keep {
 		// Closed without asking (Window.Destroy, a parent closing, a quit
 		// keeping documents): the changes stay in the recovery copy.
-		docWork.Go(b.backup)
+		docWork.Go(func() { b.backup() })
 	} else {
 		docWork.Go(func() { k.recovery.remove(b) })
 	}
@@ -562,7 +562,7 @@ func (b *docBase) relocate(target string) error {
 }
 
 func copyFile(from, to string) error {
-	src, err := os.Open(from)
+	src, err := openShared(from)
 	if err != nil {
 		return err
 	}
@@ -617,10 +617,10 @@ func documentsBeforeQuit(e *QuitEvent) {
 		docQuit.resolved = false
 		return
 	}
-	if e.DefaultPrevented() {
+	if e.DefaultPrevented() && !e.SessionEnding {
 		return
 	}
-	if docQuit.running {
+	if docQuit.running && !e.SessionEnding {
 		e.PreventDefault()
 		return
 	}
@@ -631,6 +631,22 @@ func documentsBeforeQuit(e *QuitEvent) {
 		}
 	}
 	if len(edited) == 0 {
+		return
+	}
+	if e.SessionEnding {
+		// The OS ends the session: no question, and nothing to wait for.
+		// Each document is saved in place or kept, right away.
+		for _, b := range edited {
+			b.mu.Lock()
+			autosaves, path := b.autosavesLocked(), b.path
+			b.mu.Unlock()
+			if autosaves {
+				if _, err := b.write(path, writeAutosave); err == nil {
+					continue
+				}
+			}
+			b.backup()
+		}
 		return
 	}
 	e.PreventDefault()

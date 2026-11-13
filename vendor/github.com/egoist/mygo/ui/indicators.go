@@ -44,14 +44,23 @@ func coreSpinner(c *context) *node {
 // worse: the theme's Warning color from Warning, its Danger color from
 // Critical. A Critical below Warning makes low values the bad ones, as a
 // battery's. Their zero value shows the theme's Success color throughout.
+//
+// NormalColor, WarningColor and CriticalColor fill the bar in colors of
+// the app's own, as a storage bar in a neutral gray until it is almost
+// full, in place of the theme's Success, Warning and Danger: those left
+// zero (Transparent) keep the theme's. Levels without Warning or Critical
+// fill it in NormalColor throughout.
 type MeterLevels struct {
 	Warning, Critical float64
+
+	NormalColor, WarningColor, CriticalColor Color
 }
 
 // Meter creates a bar showing value between lo and hi, as AppKit's level
 // indicator and the web's meter: the theme's Success color, or Warning and
-// Danger from the levels given, nil for none. Assistive technology sees a
-// level indicator of that value; name it with Label.
+// Danger from the levels given, nil for none, or the levels' own colors.
+// Background colors its track. Assistive technology sees a level
+// indicator of that value; name it with Label.
 //
 //	ui.Meter(c, app.disk.Used, 0, app.disk.Size, &ui.MeterLevels{Warning: 0.8 * size, Critical: 0.95 * size}).Label("Disk")
 func coreMeter(c *context, value, lo, hi float64, levels *MeterLevels) *node {
@@ -61,13 +70,17 @@ func coreMeter(c *context, value, lo, hi float64, levels *MeterLevels) *node {
 	e.widget = "Meter"
 	e.hasRange, e.accRange = true, [3]float64{lo, hi, value}
 	color := t.Success
-	if l := levels; l != nil && l.Warning != l.Critical {
+	if l := levels; l != nil {
+		if l.NormalColor != Transparent {
+			color = l.NormalColor
+		}
 		low := l.Critical < l.Warning
 		switch {
+		case l.Warning == l.Critical:
 		case !low && value >= l.Critical, low && value <= l.Critical:
-			color = t.Danger
+			color = orColor(l.CriticalColor, t.Danger)
 		case !low && value >= l.Warning, low && value <= l.Warning:
-			color = t.Warning
+			color = orColor(l.WarningColor, t.Warning)
 		}
 	}
 	frac := fraction(value, lo, hi)
@@ -81,6 +94,14 @@ func coreMeter(c *context, value, lo, hi float64, levels *MeterLevels) *node {
 		p.Fill(Rect{x, r.Y, r.W * frac, r.H}, color, rad)
 	})
 	return e
+}
+
+// orColor returns c, or else when c is zero.
+func orColor(c, or Color) Color {
+	if c == Transparent {
+		return or
+	}
+	return c
 }
 
 // Rating creates a row of max stars, as AppKit's rating level indicator,
@@ -132,7 +153,7 @@ func coreRating(c *context, value *int, max int) *node {
 					} else {
 						set(i + 1)
 					}
-					e.Focus()
+					e.focus(false)
 				}
 			})
 			if star.Hovered() {
@@ -162,7 +183,7 @@ func coreRating(c *context, value *int, max int) *node {
 		// Around the stars, which a row stretched leaves at its start.
 		if first, last := e.first, e.last; e.FocusVisible() && first != nil {
 			stars := union(Rect{first.x, first.y, first.w, first.h}, Rect{last.x, last.y, last.w, last.h})
-			p.FocusRing(stars, [4]float32{t.Radius, t.Radius, t.Radius, t.Radius})
+			p.focusRingOf(e, stars, [4]float32{t.Radius, t.Radius, t.Radius, t.Radius})
 		}
 	})
 	e.flags |= flagOwnRing
@@ -251,7 +272,7 @@ func coreStepper(c *context, value *float64, lo, hi, step float64) *node {
 							set(*value - step)
 						}
 					}
-					e.Focus()
+					e.focus(false)
 					c.After(80 * time.Millisecond)
 				} else {
 					arrow.st.holding = false
@@ -283,7 +304,7 @@ func coreStepper(c *context, value *float64, lo, hi, step float64) *node {
 	})
 	e.DrawOver(func(p *Painter, r Rect) {
 		if e.FocusVisible() {
-			p.FocusRing(r, e.radius)
+			p.focusRingOf(e, r, e.radius)
 		}
 	})
 	return e
@@ -325,15 +346,16 @@ func coreRangeSlider(c *context, low, high *float64, lo, hi, step float64) *node
 	st := e.st
 	// Right to left, lo is at the right, as a Slider's.
 	rtl := e.rtl()
-	at := func() float64 {
-		x, _ := st.local(c.rt.pointerX, c.rt.pointerY)
+	// at is the value under the pointer pressing p: the slider or a knob.
+	at := func(p *state) float64 {
+		x, _ := st.local(p.pointer(c.rt))
 		f := (x + st.x - st.cx) / max(st.cw, 1)
 		if rtl {
 			f = 1 - f
 		}
 		return lo + float64(max(0, min(1, f)))*(hi-lo)
 	}
-	if !st.pressed {
+	if !st.pressedPrimary() {
 		*dragging = -1
 	}
 	var knobs [2]*node
@@ -364,15 +386,21 @@ func coreRangeSlider(c *context, low, high *float64, lo, hi, step float64) *node
 				}
 
 			})
-			if knob.st.pressed {
+			if knob.st.pressedPrimary() {
 				*dragging = k
 			}
 			knobs[k] = knob
 		}
 	})
 	e.afterInput(func() {
-		if (st.pressed || knobs[0].st.pressed || knobs[1].st.pressed) && !e.disabled() {
-			x := at()
+		p := st
+		for _, knob := range knobs {
+			if knob.st.pressedPrimary() {
+				p = knob.st
+			}
+		}
+		if p.pressedPrimary() && !e.disabled() {
+			x := at(p)
 			if *dragging < 0 {
 				// The nearest knob, the high one when they meet past it.
 				*dragging = 0
@@ -385,7 +413,7 @@ func coreRangeSlider(c *context, low, high *float64, lo, hi, step float64) *node
 			} else {
 				set(high, x, *low, hi)
 			}
-			knobs[*dragging].Focus()
+			knobs[*dragging].focus(false)
 		}
 
 	})

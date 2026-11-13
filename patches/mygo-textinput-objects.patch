@@ -1,10 +1,12 @@
 diff --git a/vendor/github.com/egoist/mygo/ui/api_gen.go b/vendor/github.com/egoist/mygo/ui/api_gen.go
 --- a/vendor/github.com/egoist/mygo/ui/api_gen.go
 +++ b/vendor/github.com/egoist/mygo/ui/api_gen.go
-@@ -3499,6 +3499,27 @@
+@@ -4955,8 +4955,29 @@
+ 	_ctx := _node.c
+ 	_ = _ctx
  	return wrapElement(_node.DrawOver(fn))
- }
- 
++}
++
 +// DrawTextObjects 在真实文字绘制时绘制占位符，沿用文字裁剪、变换与透明度。
 +// 回调矩形为 Painter 坐标，Index 为已提交文字的 rune 偏移；回调只绘制。
 +func (_handle Element) DrawTextObjects(fn func(p *Painter, object TextObject)) Element {
@@ -13,8 +15,8 @@ diff --git a/vendor/github.com/egoist/mygo/ui/api_gen.go b/vendor/github.com/ego
 +		return Element{}
 +	}
 +	return wrapElement(_node.DrawTextObjects(fn))
-+}
-+
+ }
+ 
 +// TextObjects 返回最近实际布局中的对象，Rect 为元素局部坐标，Index 为 rune 偏移。
 +// 构建期可能尚无布局；在 Draw 或输入回调中查询，不触发布局。
 +// TextArea 仅返回可见段落，完整矩形未裁切。
@@ -32,7 +34,7 @@ diff --git a/vendor/github.com/egoist/mygo/ui/api_gen.go b/vendor/github.com/ego
 diff --git a/vendor/github.com/egoist/mygo/ui/editor_layout.go b/vendor/github.com/egoist/mygo/ui/editor_layout.go
 --- a/vendor/github.com/egoist/mygo/ui/editor_layout.go
 +++ b/vendor/github.com/egoist/mygo/ui/editor_layout.go
-@@ -181,6 +181,7 @@
+@@ -186,6 +186,7 @@
  		_, sp = ed.rangeSpans(0, ed.buf.n)
  	}
  	p.textBackgrounds(l, ox, oy, ts, sp)
@@ -40,17 +42,26 @@ diff --git a/vendor/github.com/egoist/mygo/ui/editor_layout.go b/vendor/github.c
  	if focused {
  		for _, selected := range ed.selectedRanges() {
  			for _, r := range l.SelectionVisual(ed.displayIndex(selected.Start), ed.displayIndex(selected.End), false) {
-@@ -258,7 +259,8 @@
- 			spans = append(spans, Span{})
+@@ -266,7 +267,7 @@
+ 				reach = i
+ 				break
+ 			}
+-			shaped = shaped || (r.Font != "" || r.Italic || r.Weight > 0) && max(r.Start, start) < min(r.End, end)
++			shaped = shaped || (r.Font != "" || r.Italic || r.Weight > 0 || r.ObjectWidth > 0 || r.ObjectHeight > 0) && max(r.Start, start) < min(r.End, end)
+ 		}
+ 		if !shaped {
+ 			return "", nil
+@@ -303,7 +304,8 @@
+ 			}
  		}
  		span := Span{Font: r.Font, Italic: r.Italic, Color: r.Color, Background: r.Background, Weight: r.Weight,
 -			Underline: r.Underline, WavyUnderline: r.WavyUnderline, DecorationColor: r.DecorationColor}
 +			Underline: r.Underline, WavyUnderline: r.WavyUnderline, DecorationColor: r.DecorationColor,
 +			ObjectWidth: r.ObjectWidth, ObjectHeight: r.ObjectHeight}
  		styles = append(styles, spanStyle(span, to))
- 		spans = append(spans, span)
- 		at = to
-@@ -277,7 +279,7 @@
+ 		if paint {
+ 			spans = append(spans, span)
+@@ -325,7 +327,7 @@
  		} else {
  			add(local(from, true), local(to, false), r)
  		}
@@ -62,19 +73,20 @@ diff --git a/vendor/github.com/egoist/mygo/ui/editor_layout.go b/vendor/github.c
 diff --git a/vendor/github.com/egoist/mygo/ui/element.go b/vendor/github.com/egoist/mygo/ui/element.go
 --- a/vendor/github.com/egoist/mygo/ui/element.go
 +++ b/vendor/github.com/egoist/mygo/ui/element.go
-@@ -287,6 +287,8 @@
- 	paintFn      func(p *Painter, r Rect)
+@@ -460,6 +460,9 @@
+ 	// can skip it.
  	styleFn      func(e *node)
  	paintAfterFn func(p *Painter, r Rect)
 +
 +	textObjectsFn func(p *Painter, object TextObject)
- 
- 	// Input the element takes itself (HandleInput), and where the caret of
- 	// the text it takes is (TextCaret).
++
+ 	// faces are the backgrounds a button's styleFn (styleButtonFace)
+ 	// picks from as it paints: as built, hovered and pressed. They are
+ 	// the element's, not captured by a closure, so that building a button
 diff --git a/vendor/github.com/egoist/mygo/ui/paint.go b/vendor/github.com/egoist/mygo/ui/paint.go
 --- a/vendor/github.com/egoist/mygo/ui/paint.go
 +++ b/vendor/github.com/egoist/mygo/ui/paint.go
-@@ -532,6 +532,9 @@
+@@ -882,6 +882,9 @@
  // and lines of the spans of sp, if any.
  func (p *Painter) textLayout(l *text.Layout, x, y float32, color Color, ts textStyle, sp *spanPaint) {
  	p.textBackgrounds(l, x, y, ts, sp)
@@ -87,17 +99,19 @@ diff --git a/vendor/github.com/egoist/mygo/ui/paint.go b/vendor/github.com/egois
 diff --git a/vendor/github.com/egoist/mygo/ui/text_layout.go b/vendor/github.com/egoist/mygo/ui/text_layout.go
 --- a/vendor/github.com/egoist/mygo/ui/text_layout.go
 +++ b/vendor/github.com/egoist/mygo/ui/text_layout.go
-@@ -147,9 +147,10 @@
+@@ -176,10 +176,11 @@
  	return t
  }
  
 -// TextObject is an inline object of a TextLayout (Span.ObjectWidth): the
 -// UTF-16 offset of its object replacement character, and its box,
--// standing on its line's baseline.
+-// standing on its line's baseline, ObjectDescent of it below, or as far
+-// off it as its span's BaselineShift.
 +// TextObject 描述内联对象及其基线对齐矩形。TextLayout.Objects 的 Index 是 UTF-16
 +// 偏移，Rect 是布局局部坐标；Element.TextObjects 的 Index 是已提交文字的 rune
 +// 偏移，Rect 是元素局部坐标；DrawTextObjects 的 Rect 是 Painter 绘制坐标。
-+// 两个 Element API 的 Index 均不包含输入法组合文本。
++// 两个 Element API 的 Index 均不包含输入法组合文本。Rect 站在所在行的基线上，
++// 其下为 ObjectDescent，或随 span 的 BaselineShift 偏移。
  type TextObject struct {
  	Index int
  	Rect  Rect
@@ -131,7 +145,7 @@ diff --git a/vendor/github.com/egoist/mygo/ui/textarea.go b/vendor/github.com/eg
  		}
  		return a.wrapped
  	}
-@@ -396,6 +398,7 @@
+@@ -402,6 +404,7 @@
  		start, end := b.start(i), b.end(i)
  		_, sp := ed.rangeSpans(start, end)
  		p.textBackgrounds(l, ox, y, ts, sp)
@@ -142,7 +156,7 @@ diff --git a/vendor/github.com/egoist/mygo/ui/textarea.go b/vendor/github.com/eg
 diff --git a/vendor/github.com/egoist/mygo/ui/textinput.go b/vendor/github.com/egoist/mygo/ui/textinput.go
 --- a/vendor/github.com/egoist/mygo/ui/textinput.go
 +++ b/vendor/github.com/egoist/mygo/ui/textinput.go
-@@ -321,6 +321,9 @@
+@@ -491,6 +491,9 @@
  	Underline       bool
  	WavyUnderline   bool
  	DecorationColor Color
@@ -152,7 +166,7 @@ diff --git a/vendor/github.com/egoist/mygo/ui/textinput.go b/vendor/github.com/e
  }
  
  // TextRanges 设置当前帧的文字区间。重叠时，各属性独立取最后一次设置的非零值。
-@@ -332,6 +335,17 @@
+@@ -502,6 +505,17 @@
  	}
  	for _, r := range ranges {
  		if r.End > r.Start {
@@ -170,7 +184,7 @@ diff --git a/vendor/github.com/egoist/mygo/ui/textinput.go b/vendor/github.com/e
  			ed.ranges = append(ed.ranges, r)
  			ed.apart = false
  		}
-@@ -345,6 +359,7 @@
+@@ -515,6 +529,7 @@
  	points, starts                               []int
  	all, colors                                  rangeHeap
  	backgrounds                                  rangeHeap
@@ -178,7 +192,7 @@ diff --git a/vendor/github.com/egoist/mygo/ui/textinput.go b/vendor/github.com/e
  	weights                                      rangeHeap
  	fonts, italics                               rangeHeap
  	underlines, wavyUnderlines, decorationColors rangeHeap
-@@ -364,6 +379,7 @@
+@@ -534,6 +549,7 @@
  	slices.SortFunc(starts, func(a, b int) int { return given[a].Start - given[b].Start })
  	m.all, m.colors, m.backgrounds, m.weights = m.all[:0], m.colors[:0], m.backgrounds[:0], m.weights[:0]
  	m.fonts, m.italics = m.fonts[:0], m.italics[:0]
@@ -186,7 +200,7 @@ diff --git a/vendor/github.com/egoist/mygo/ui/textinput.go b/vendor/github.com/e
  	m.underlines, m.wavyUnderlines, m.decorationColors = m.underlines[:0], m.wavyUnderlines[:0], m.decorationColors[:0]
  	out, next := ed.ranges[:0], 0
  	for k := 0; k+1 < len(points); k++ {
-@@ -374,6 +390,12 @@
+@@ -544,6 +560,12 @@
  			if given[i].Color.A > 0 {
  				m.colors.push(i)
  			}
@@ -199,7 +213,7 @@ diff --git a/vendor/github.com/egoist/mygo/ui/textinput.go b/vendor/github.com/e
  			if given[i].Background.A > 0 {
  				m.backgrounds.push(i)
  			}
-@@ -400,6 +422,12 @@
+@@ -570,6 +592,12 @@
  			continue // between ranges
  		}
  		r := TextRange{Start: from, End: to}
@@ -318,7 +332,7 @@ new file mode 100644
 +func closeObject(a, b float32) bool { return math.Abs(float64(a-b)) < 0.1 }
 +
 +func TestTextInputObjectDimensionsMergeAndIME(t *testing.T) {
-+	ed := newEditor()
++	ed := newPatchEditor()
 +	ed.setText("a\uFFFCb")
 +	e := &node{st: &state{editor: ed}, flags: flagEditable}
 +	e.TextRanges(TextRange{Start: 0, End: 99, ObjectWidth: 41, ObjectHeight: 20},
@@ -519,7 +533,7 @@ new file mode 100644
 +}
 +
 +func TestTextObjectAtomicEditing(t *testing.T) {
-+	ed := newEditor()
++	ed := newPatchEditor()
 +	ed.setText("a\uFFFCb")
 +	ed.move(2, false)
 +	ed.insert("x")

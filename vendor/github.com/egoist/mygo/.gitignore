@@ -8,3 +8,8 @@ examples/*/build/
 packages/cli/npm/*/bin/
 .DS_Store
 mygo.ts
+benchmarks/*/target/
+
+# What Zig 0.16 fetches into the packages of native libraries.
+zig-pkg/
+.zig-cache/

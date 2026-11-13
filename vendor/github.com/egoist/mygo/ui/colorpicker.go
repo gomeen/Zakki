@@ -124,8 +124,8 @@ func coreColorPicker(c *context, color *Color) *node {
 		sq.flags |= flagDraggable | flagHover | flagOwnRing
 		sq.Cursor(CursorCrosshair)
 		sq.afterInput(func() {
-			if s := sq.st; s.pressed && s.w > 0 && s.h > 0 {
-				px, py := s.local(c.rt.pointerX, c.rt.pointerY)
+			if s := sq.st; s.pressedPrimary() && s.w > 0 && s.h > 0 {
+				px, py := s.local(s.pointer(c.rt))
 				set(hsva{x.h, float64(px / s.w), 1 - float64(py/s.h), x.a})
 			}
 			switch {
@@ -156,7 +156,7 @@ func coreColorPicker(c *context, color *Color) *node {
 			p.Stroke(Rect{cx - d/2, cy - d/2, d, d}, RGB(255, 255, 255), d/2, 2)
 			p.Stroke(Rect{cx - d/2 - 1, cy - d/2 - 1, d + 2, d + 2}, RGBA(0, 0, 0, 0.3), d/2+1, 1)
 			if sq.FocusVisible() {
-				p.FocusRing(r, [4]float32{t.Radius, t.Radius, t.Radius, t.Radius})
+				p.focusRingOf(sq, r, [4]float32{t.Radius, t.Radius, t.Radius, t.Radius})
 			}
 		})
 		// The hue, and the opacity.
@@ -232,7 +232,7 @@ func channelSlider(c *context, v *float64, max float64, name string, track func(
 	kw := t.Space(3)
 	s := sliderBase(c, v, 0, max, 0).Height(t.Space(4)).PaddingX(kw / 2).FocusRing(false).Label(name)
 	frac := fraction(*v, 0, max)
-	held := s.Animate("held", b2f(s.st.pressed), 150*time.Millisecond)
+	held := s.Animate("held", b2f(s.st.pressedPrimary()), 150*time.Millisecond)
 	s.Draw(func(p *Painter, r Rect) {
 		bar := Rect{r.X, r.Y + t.Space(0.5), r.W, r.H - t.Space(1)}
 		p.Clip(bar, bar.H/2, func() { track(p, bar) })
@@ -243,7 +243,7 @@ func channelSlider(c *context, v *float64, max float64, name string, track func(
 		p.Shadow(k, k.W/2, 0, 1, 3, 0, RGBA(0, 0, 0, 0.3))
 		p.Fill(k, RGB(255, 255, 255), k.W/2)
 		if s.FocusVisible() {
-			p.FocusRing(k, [4]float32{k.W / 2, k.W / 2, k.W / 2, k.W / 2})
+			p.focusRingOf(s, k, [4]float32{k.W / 2, k.W / 2, k.W / 2, k.W / 2})
 		}
 	})
 	return s

@@ -46,6 +46,7 @@ func (e *node) DragDataFrom(data func() transfer.Data, options ...transfer.DragO
 // from the returned Data. Empty Formats accepts nothing.
 func coreDropData(e *node, options transfer.DropOptions) (transfer.Drop, bool) {
 	e.st.dataTarget = &options
+	e.c.rt.noteTarget()
 	if d := e.st.dataDropped; d != nil {
 		e.c.rt.consumed = true
 		return *d, true
@@ -58,6 +59,7 @@ func coreDropData(e *node, options transfer.DropOptions) (transfer.Drop, bool) {
 // Hover never invokes a data provider.
 func coreDataDragOver(e *node, options transfer.DropOptions) (transfer.Offer, bool) {
 	e.st.dataTarget = &options
+	e.c.rt.noteTarget()
 	rt := e.c.rt
 	if rt.dataOver == e.id && rt.incoming != nil {
 		offer := rt.incoming.Offer
@@ -146,15 +148,24 @@ func (rt *engine) dataDrop(x, y float32, d *platform.DataDragEvent) bool {
 	return true
 }
 
+// noteTarget notes that the pass made an element a native drop target.
+func (rt *engine) noteTarget() {
+	rt.targetsBuilt.frame, rt.targetsBuilt.pass = rt.frame, rt.pass
+}
+
 func (rt *engine) syncDropFormats() {
 	formats := append(rt.dropScratch[:0], transfer.FileList, transfer.URIList, platform.DragSessionFormat)
-	for _, s := range rt.states {
-		if s.dataTarget == nil || s.flags&flagDisabled != 0 || s.seen != rt.frame || s.pass != rt.pass {
-			continue
-		}
-		for _, f := range s.dataTarget.Formats {
-			if !slices.Contains(formats, f) {
-				formats = append(formats, f)
+	// Only a pass that made an element a native drop target (noteTarget)
+	// has formats to add; its states are those it built.
+	if t := rt.targetsBuilt; t.frame == rt.frame && t.pass == rt.pass {
+		for _, s := range rt.built {
+			if s.dataTarget == nil || s.flags&flagDisabled != 0 || s.seen != rt.frame || s.pass != rt.pass {
+				continue
+			}
+			for _, f := range s.dataTarget.Formats {
+				if !slices.Contains(formats, f) {
+					formats = append(formats, f)
+				}
 			}
 		}
 	}
@@ -169,10 +180,11 @@ func (rt *engine) syncDropFormats() {
 }
 
 // dataPreview snapshots the last scene, resampling the source's visible
-// bounds to DIPs. No GPU readback or native API is needed.
+// bounds to the window's DIPs. No GPU readback or native API is needed.
 func (rt *engine) dataPreview(s *state) (image.Image, image.Point) {
-	_, _, scale := rt.host.size()
-	w, h := min(int(s.vw), 512), min(int(s.vh), 512)
+	_, _, scale := rt.size()
+	z := rt.zoomFactor()
+	w, h := min(int(s.vw*z), 512), min(int(s.vh*z), 512)
 	if w <= 0 || h <= 0 {
 		return nil, image.Point{}
 	}
@@ -182,7 +194,7 @@ func (rt *engine) dataPreview(s *state) (image.Image, image.Point) {
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			px, py := int((s.vx+float32(x))*scale), int((s.vy+float32(y))*scale)
+			px, py := int((s.vx+float32(x)/z)*scale), int((s.vy+float32(y)/z)*scale)
 			if px < 0 || py < 0 || px >= m.W || py >= m.H {
 				continue
 			}
@@ -191,5 +203,5 @@ func (rt *engine) dataPreview(s *state) (image.Image, image.Point) {
 		}
 	}
 	x, y := s.world.Point(s.x+s.pressX, s.y+s.pressY)
-	return img, image.Pt(min(max(int(x-s.vx), 0), w-1), min(max(int(y-s.vy), 0), h-1))
+	return img, image.Pt(min(max(int((x-s.vx)*z), 0), w-1), min(max(int((y-s.vy)*z), 0), h-1))
 }

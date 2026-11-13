@@ -3,6 +3,7 @@
 package mygo
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"log"
@@ -18,6 +19,7 @@ import (
 	"sync"
 
 	"github.com/egoist/mygo/internal/platform"
+	"github.com/egoist/mygo/internal/schemehost"
 )
 
 // ProtocolModule registers custom URL schemes served by Go.
@@ -43,7 +45,8 @@ var reservedSchemes = map[string]bool{
 // Pages served this way are loaded like regular web pages: they can use
 // fetch, ES modules and relative URLs. Schemes must be registered before
 // the windows that use them are created. Handlers run on their own
-// goroutines and responses are streamed to the page.
+// goroutines and responses are streamed to the page. CallerPage and
+// CallerWindow of the request's Context tell which page asks.
 //
 // The mygo scheme serves the app's frontend (see SetFrontend) unless it is
 // handled here.
@@ -145,7 +148,9 @@ func serveScheme(win *Window, h http.Handler, req *platform.SchemeRequest) {
 	if body == nil {
 		body = http.NoBody
 	}
-	r, err := http.NewRequestWithContext(req.Context, req.Method, req.URL, body)
+	// Handlers tell the page asking with CallerPage(r.Context()).
+	ctx := context.WithValue(context.WithValue(req.Context, callerKey{}, win.top()), pageKey{}, win.pg)
+	r, err := http.NewRequestWithContext(ctx, req.Method, req.URL, body)
 	if err != nil {
 		rw.WriteHeader(http.StatusBadRequest)
 		return
@@ -194,27 +199,21 @@ func allowCORS(win *Window, header http.Header, r *http.Request) (preflight bool
 }
 
 // schemeHosts is set where the webview serves custom schemes at
-// http://<scheme>.localhost (WebView2). Elsewhere, such an origin is a
-// server on the loopback interface, not the app's.
+// http://[<host>.]<scheme>.localhost (WebView2). Elsewhere, such an origin
+// is a server on the loopback interface, not the app's.
 var schemeHosts = runtime.GOOS == "windows"
 
 // appOrigin maps the origin WebView2 gives pages of a custom scheme,
-// http://<scheme>.localhost, back to <scheme>://localhost, as the rest of
-// MyGo names it.
+// http://<scheme>.localhost or http://<host>.<scheme>.localhost, back to
+// <scheme>://localhost or <scheme>://<host>, as the rest of MyGo names it.
 func appOrigin(origin string) string {
 	if !schemeHosts {
 		return origin
 	}
-	u, err := url.Parse(origin)
-	if err != nil || u.Scheme != "http" || u.Port() != "" {
-		return origin
-	}
-	scheme, ok := strings.CutSuffix(strings.ToLower(u.Hostname()), ".localhost")
-	if !ok || !(scheme == frontendScheme || Protocol.IsHandled(scheme)) {
-		return origin
-	}
-	return scheme + "://localhost"
+	return schemehost.AppOrigin(origin, isAppScheme)
 }
+
+func isAppScheme(scheme string) bool { return scheme == frontendScheme || Protocol.IsHandled(scheme) }
 
 // schemeWriter is the http.ResponseWriter for custom scheme requests. Body
 // bytes are buffered and handed to the main thread in chunks, or written
@@ -339,7 +338,9 @@ func (w *schemeWriter) finish() {
 
 // FileServer serves files from fsys and falls back to index.html for
 // unknown paths without an extension, so client side routers work. Files
-// are served with their content type and support range requests.
+// are served with their content type and support range requests. Pages
+// cannot play audio and video from a custom scheme on Linux: serve them
+// over loopback HTTP, with net/http and this handler (docs/frontend.md).
 func FileServer(fsys fs.FS) http.Handler {
 	files := http.FileServerFS(fsys)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

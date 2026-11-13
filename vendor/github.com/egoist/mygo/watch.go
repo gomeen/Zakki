@@ -19,15 +19,21 @@ const (
 	// FileCreate is a file or directory that appeared.
 	FileCreate FileOp = "create"
 	// FileWrite is a file whose content may have changed: its size or
-	// modification time changed, or the system said it was written.
-	// Changes of permissions and other metadata are not reported, nor
-	// are directories written, whose changes are their entries'.
+	// modification time changed, the system said it was written, or
+	// another file replaced it at its path, as atomic saves do. Changes
+	// of permissions and other metadata are not reported, nor are
+	// directories written, whose changes are their entries'.
 	FileWrite FileOp = "write"
 	// FileRemove is a file or directory that went away.
 	FileRemove FileOp = "remove"
 	// FileRename is a file or directory that moved within the watched
 	// directory.
 	FileRename FileOp = "rename"
+	// FileHint says only that something in or under the directory at
+	// Path changed: which file, and how, is unknown. A watch with
+	// FileWatchOptions.HintsOnly reports nothing else, but a FileRemove
+	// of "." when its directory goes away.
+	FileHint FileOp = "hint"
 )
 
 // FileEvent is a change in a watched file or directory. A watch compares
@@ -70,7 +76,24 @@ type FileWatchOptions struct {
 	// snapshot of before it stops with ErrWatchLimit: 65536 on macOS,
 	// where a watch covers a whole tree with one stream, and 8192
 	// elsewhere, where a backend may take a handle per entry, when zero.
+	// With HintsOnly it counts the directories the watch enrolls.
 	MaxEntries int
+	// HintsOnly makes the watch cheap and coarse: it keeps no snapshot of
+	// the tree and stats no file, so it reports only FileHint events that
+	// name a directory in or under which the system said something
+	// changed, never which file, how, or that it was renamed. After the
+	// system lost changes it hints "." (look at everything). It suits a
+	// dev reloader, which rebuilds whatever changed; never use it where
+	// what changed matters, such as following a document's file.
+	//
+	// It still doesn't follow symlinks and doesn't leave the directory.
+	// Ignore is asked only about directories: what is in one it ignores
+	// is not watched or hinted, but a change to a file it would ignore
+	// still hints at that file's directory. On macOS and Windows a
+	// recursive watch enrolls only its directory, which the system
+	// watches as a tree; on Linux it enrolls every directory, without
+	// stat'ing what is in them.
+	HintsOnly bool
 }
 
 // ErrWatchLimit is what a watch stops with when its directory has more
@@ -82,8 +105,10 @@ var ErrWatchLimit = errors.New("mygo: file watch entry limit exceeded")
 type FileWatcher struct {
 	mu sync.Mutex
 	// batch is the changes waiting for Next, nil when none do: the watch
-	// doesn't look again until Next takes them, which taken tells.
+	// doesn't look again until Next takes them, which taken tells. gone
+	// is what a watched file that the batch removes was.
 	batch   []FileEvent
+	gone    fileWatchGone
 	waiters []chan fileResult
 	stopped bool
 	err     error
@@ -92,17 +117,32 @@ type FileWatcher struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	// native is the backend's watch, which only the goroutine of the
-	// watch uses; what it reports goes through raw, and overflow says raw
-	// was full.
+	// watch uses; what it reports goes through raw. What comes while raw
+	// is full, as during a burst while the watch looks, waits in spill
+	// (spilled tells), up to MaxEntries notices; past that, overflow says
+	// some were dropped.
 	native   platform.FileWatch
 	raw      chan platform.FileWatchNotice
+	spillMu  sync.Mutex
+	spill    []platform.FileWatchNotice
+	spilled  chan struct{}
 	overflow chan struct{}
 	root     string
 	opts     FileWatchOptions
 }
 type fileResult struct {
 	events []FileEvent
+	gone   fileWatchGone
 	err    error
+}
+
+// fileWatchGone is the identity of a watched file that went away, as the
+// watch last saw it, so that a document finds the file again where
+// another app renamed it (findRenamed): a look at the file after the
+// batch came may be too late, once it moved.
+type fileWatchGone struct {
+	id fileWatchID
+	ok bool
 }
 
 var fileWatches = struct {
@@ -159,7 +199,7 @@ func WatchFiles(ctx context.Context, path string, opts FileWatchOptions) (*FileW
 		return nil, err
 	}
 	life, cancel := context.WithCancel(ctx)
-	w := &FileWatcher{ctx: life, cancel: cancel, root: root, opts: opts, taken: make(chan struct{}, 1), done: make(chan struct{}), raw: make(chan platform.FileWatchNotice, 4096), overflow: make(chan struct{}, 1)}
+	w := &FileWatcher{ctx: life, cancel: cancel, root: root, opts: opts, taken: make(chan struct{}, 1), done: make(chan struct{}), raw: make(chan platform.FileWatchNotice, 4096), spilled: make(chan struct{}, 1), overflow: make(chan struct{}, 1)}
 	fileWatches.Lock()
 	if fileWatches.stopped {
 		fileWatches.Unlock()
@@ -184,7 +224,9 @@ func WatchFiles(ctx context.Context, path string, opts FileWatchOptions) (*FileW
 }
 
 // notice is what the backend reports to, on its goroutine. When raw is
-// full the watch looks at everything again instead.
+// full the notice is spilled, and when the spill is full too the watch
+// looks at everything again instead, as after any overflow: either way no
+// change goes unseen.
 func (w *FileWatcher) notice(n platform.FileWatchNotice) {
 	select {
 	case <-w.ctx.Done():
@@ -201,12 +243,32 @@ func (w *FileWatcher) notice(n platform.FileWatchNotice) {
 	}
 	select {
 	case w.raw <- n:
+		return
 	default:
-		select {
-		case w.overflow <- struct{}{}:
-		default:
-		}
 	}
+	w.spillMu.Lock()
+	signal := w.spilled
+	if len(w.spill) < w.opts.MaxEntries {
+		w.spill = append(w.spill, n)
+	} else {
+		// More than a look at everything would cost to follow.
+		w.spill = nil
+		signal = w.overflow
+	}
+	w.spillMu.Unlock()
+	select {
+	case signal <- struct{}{}:
+	default:
+	}
+}
+
+// unspill takes the notices spilled.
+func (w *FileWatcher) unspill() []platform.FileWatchNotice {
+	w.spillMu.Lock()
+	defer w.spillMu.Unlock()
+	spill := w.spill
+	w.spill = nil
+	return spill
 }
 
 // Root returns the path the watch watches, absolute and with its symlinks
@@ -227,16 +289,22 @@ func (w *FileWatcher) Next(ctx context.Context) ([]FileEvent, error) {
 	if ctx == nil {
 		return nil, errors.New("mygo: nil wait context")
 	}
+	r := w.next(ctx)
+	return r.events, r.err
+}
+
+// next is Next, with what a watched file that the batch removes was.
+func (w *FileWatcher) next(ctx context.Context) fileResult {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return fileResult{err: err}
 	}
 	w.mu.Lock()
 	if w.batch != nil {
-		batch := w.batch
-		w.batch = nil
+		r := fileResult{events: w.batch, gone: w.gone}
+		w.batch, w.gone = nil, fileWatchGone{}
 		w.mu.Unlock()
 		w.take()
-		return batch, nil
+		return r
 	}
 	if w.stopped {
 		err := w.err
@@ -244,7 +312,7 @@ func (w *FileWatcher) Next(ctx context.Context) ([]FileEvent, error) {
 			err = io.EOF
 		}
 		w.mu.Unlock()
-		return nil, err
+		return fileResult{err: err}
 	}
 	waiter := make(chan fileResult, 1)
 	w.waiters = append(w.waiters, waiter)
@@ -265,8 +333,7 @@ func (w *FileWatcher) Next(ctx context.Context) ([]FileEvent, error) {
 		}
 	})
 	defer stop()
-	r := await(waiter)
-	return r.events, r.err
+	return await(waiter)
 }
 
 // take tells the goroutine of the watch that a batch was taken.
@@ -319,7 +386,7 @@ func (w *FileWatcher) stop(err error, discard bool) {
 }
 
 // emit hands events to a waiting Next, or keeps them for the next one.
-func (w *FileWatcher) emit(events []FileEvent) {
+func (w *FileWatcher) emit(events []FileEvent, gone fileWatchGone) {
 	if len(events) == 0 {
 		return
 	}
@@ -330,13 +397,16 @@ func (w *FileWatcher) emit(events []FileEvent) {
 	}
 	if len(w.waiters) == 0 {
 		w.batch = append(w.batch, events...)
+		if gone.ok {
+			w.gone = gone
+		}
 		w.mu.Unlock()
 		return
 	}
 	waiter := w.waiters[0]
 	w.waiters = w.waiters[1:]
 	w.mu.Unlock()
-	deliver(waiter, fileResult{events: events})
+	deliver(waiter, fileResult{events: events, gone: gone})
 }
 
 // waiting reports whether a batch waits for Next.
@@ -368,7 +438,10 @@ func stopFileWatches() {
 func (w *FileWatcher) run(ready chan error) {
 	var terminal error
 	discard := true
-	scan := newFileWatchScan(w)
+	var scan fileWatchLooker = newFileWatchScan(w)
+	if w.opts.HintsOnly {
+		scan = newFileWatchHints(w)
+	}
 	defer func() {
 		w.stop(terminal, discard)
 		scan.close()
@@ -384,7 +457,7 @@ func (w *FileWatcher) run(ready chan error) {
 		deliver(ready, err)
 		return
 	}
-	w.emit(events)
+	w.emit(events, fileWatchGone{})
 	deliver(ready, nil)
 	var timer *time.Timer
 	var timerC <-chan time.Time
@@ -413,7 +486,7 @@ func (w *FileWatcher) run(ready chan error) {
 		due = false
 		events, err := scan.update()
 		if err == nil {
-			w.emit(events)
+			w.emit(events, scan.removedFile())
 			return true
 		}
 		if w.ctx.Err() != nil {
@@ -421,7 +494,7 @@ func (w *FileWatcher) run(ready chan error) {
 		}
 		if scan.gone() {
 			// The directory went away: say so, then end as closed.
-			w.emit(scan.goneEvents())
+			w.emit(scan.goneEvents(), fileWatchGone{})
 			discard = false
 			return false
 		}
@@ -433,8 +506,18 @@ func (w *FileWatcher) run(ready chan error) {
 		case <-w.ctx.Done():
 			return
 		case <-w.overflow:
-			scan.all = true
+			scan.lookAll()
 			schedule()
+		case <-w.spilled:
+			for _, n := range w.unspill() {
+				if err := scan.mark(n); err != nil {
+					terminal = err
+					return
+				}
+			}
+			if scan.pending() {
+				schedule()
+			}
 		case n := <-w.raw:
 			if err := scan.mark(n); err != nil {
 				terminal = err

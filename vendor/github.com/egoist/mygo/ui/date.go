@@ -50,7 +50,7 @@ func coreDateInput(c *context, date *time.Time) *node {
 	// whose panel is as wide as the field at least.
 	corePopoverBase(c, b, open, func(panel *node) {
 		stylePanel(c, panel)
-		calendarGrid(c, date, cursor, false, choose).AutoFocus()
+		calendarGrid(c, calendarBox(c), date, cursor, false, choose).AutoFocus()
 	})
 	return b
 }
@@ -62,16 +62,71 @@ func coreDateInput(c *context, date *time.Time) *node {
 // months, and Home and End go to the first and the last day of the month.
 // Changed reports a new date, which keeps the time of day and location of
 // *date. Assistive technology reads the day chosen as the arrows move.
+// Browse makes the keys and the buttons move without choosing.
 func coreCalendar(c *context, date *time.Time) *node {
-	var g *node
-	g = calendarGrid(c, date, date, true, func(d time.Time) {
+	g := calendarBox(c)
+	g.widget = "Calendar"
+	// Input reaches the calendar as its constructor returns, before this
+	// build's Browse: it follows the build before, which the user saw.
+	set := coreLocal(g, calendarKey{}, func() calendarSettings { return calendarSettings{} })
+	set.shown, set.now = set.now, false
+	// The cursor follows the date the app sets.
+	if !set.shown || !sameDay(set.date, *date) {
+		set.cursor = *date
+	}
+	set.date = *date
+	cursor := date
+	if set.shown {
+		cursor = &set.cursor
+	}
+	calendarGrid(c, g, date, cursor, !set.shown, func(d time.Time) {
 		if setDay(date, d) {
 			g.st.markChanged()
 			c.rt.consumed = true
 		}
 	})
-	g.widget = "Calendar"
 	return g
+}
+
+type calendarKey struct{}
+
+// calendarSettings are a Calendar's: whether it browses, in this build
+// and in the one before, its cursor while it does, and the date the
+// cursor followed last.
+type calendarSettings struct {
+	now, shown   bool
+	cursor, date time.Time
+}
+
+// Browse lets the user move about a Calendar without choosing a day: its
+// buttons and Page Up and Page Down only show other months, and the
+// arrows, Home and End only move among the days, until a click, Enter or
+// Space chooses one, as in a date input's calendar. Changed then reports
+// only a day chosen, as a calendar in a popover that closes when the
+// user picks a day needs. The calendar goes back to *date as the app
+// sets another.
+func (e *node) Browse() *node {
+	if e.widget == "Calendar" {
+		coreLocal(e, calendarKey{}, func() calendarSettings { return calendarSettings{} }).now = true
+	}
+	return e
+}
+
+// monthChevron draws the arrow of a calendar's button to the month before,
+// back, or after, mirrored right to left: drawn, it sits in the middle of
+// the button, where the text's ‹ and › sat low.
+func monthChevron(c *context, back bool) {
+	t := c.theme
+	e := coreBox(c).Size(t.Space(1.5), t.Space(2.5)).Shrink(0)
+	tip, ends := float32(0.15), float32(0.85) // ‹
+	if back == e.rtl() {
+		tip, ends = ends, tip // ›
+	}
+	e.Draw(func(p *Painter, r Rect) {
+		var path Path
+		path.MoveTo(r.X+r.W*ends, r.Y+r.H*0.1).LineTo(r.X+r.W*tip, r.Y+r.H*0.5).LineTo(r.X+r.W*ends, r.Y+r.H*0.9)
+		p.StrokePath(&path, 1.5, t.Text)
+	})
 }
 
 // setDay sets the day of *date to d's, keeping its time of day and its
@@ -94,10 +149,18 @@ func sameDay(a, b time.Time) bool {
 	return ay == by && am == bm && ad == bd
 }
 
-// calendarGrid creates the month around *cursor, the day the keys move,
-// with *date chosen; choose chooses a day, as a click and Enter do, and
-// every move does with moveChooses.
-func calendarGrid(c *context, date, cursor *time.Time, moveChooses bool, choose func(time.Time)) *node {
+// calendarBox creates the element of a month's grid, which calendarGrid
+// fills.
+func calendarBox(c *context) *node {
+	grid := coreColumn(c).Gap(c.theme.Space(1)).Focusable().Shrink(0).Role(RoleTable)
+	grid.flags |= flagOwnRing
+	return grid
+}
+
+// calendarGrid fills grid, from calendarBox, with the month around
+// *cursor, the day the keys move, with *date chosen; choose chooses a
+// day, as a click and Enter do, and every move does with moveChooses.
+func calendarGrid(c *context, grid *node, date, cursor *time.Time, moveChooses bool, choose func(time.Time)) *node {
 	t := c.theme
 	region, locale := c.formats()
 	cur := *cursor
@@ -105,8 +168,7 @@ func calendarGrid(c *context, date, cursor *time.Time, moveChooses bool, choose 
 	title := c.formatted(fmtKey{locale, fmtMonthYear, int64(month.Year())*12 + int64(month.Month())}, func() string {
 		return i18n.FormatDate(locale, month, i18n.DateOptions{Skeleton: "yMMMM"})
 	})
-	grid := coreColumn(c).Gap(t.Space(1)).Focusable().Shrink(0).Role(RoleTable).Label(title)
-	grid.flags |= flagOwnRing
+	grid.Label(title)
 	move := func(d time.Time) {
 		// Choosing it moves the cursor where it is the date chosen.
 		if moveChooses {
@@ -115,6 +177,13 @@ func calendarGrid(c *context, date, cursor *time.Time, moveChooses bool, choose 
 			*cursor = d
 		}
 		c.rt.consumed = true
+	}
+	moveMonth := func(delta int) {
+		// AddDate normalizes February 31 into March. Keep the cursor in
+		// the requested month, on its last day when it has fewer days.
+		last := time.Date(cur.Year(), cur.Month()+time.Month(delta)+1, 0, 0, 0, 0, 0, time.UTC)
+		move(time.Date(last.Year(), last.Month(), min(cur.Day(), last.Day()),
+			cur.Hour(), cur.Minute(), cur.Second(), cur.Nanosecond(), cur.Location()))
 	}
 	grid.afterInput(func() {
 		// The days of a week go from the right right to left.
@@ -129,9 +198,9 @@ func calendarGrid(c *context, date, cursor *time.Time, moveChooses bool, choose 
 		case grid.Shortcut(0, KeyDown):
 			move(cur.AddDate(0, 0, 7))
 		case grid.Shortcut(0, KeyPageUp):
-			move(cur.AddDate(0, -1, 0))
+			moveMonth(-1)
 		case grid.Shortcut(0, KeyPageDown):
-			move(cur.AddDate(0, 1, 0))
+			moveMonth(1)
 		case grid.Shortcut(0, KeyHome):
 			move(time.Date(cur.Year(), cur.Month(), 1, 0, 0, 0, 0, cur.Location()))
 		case grid.Shortcut(0, KeyEnd):
@@ -142,19 +211,21 @@ func calendarGrid(c *context, date, cursor *time.Time, moveChooses bool, choose 
 	})
 	grid.Children(func() {
 		coreRow(c).AlignItems(Center).Gap(t.Space(1)).Children(func() {
-			prev := coreButton(c, "‹").Padding(t.Space(0.5), t.Space(2.5)).Label(c.texts().PreviousMonth())
+			prev := coreButton(c, "").Padding(t.Space(1), t.Space(2.5)).Label(c.texts().PreviousMonth())
+			prev.Children(func() { monthChevron(c, true) })
 			prev.flags |= flagClickable
 			prev.afterInput(func() {
 				if prev.Clicked() {
-					move(cur.AddDate(0, -1, 0))
+					moveMonth(-1)
 				}
 			})
 			coreText(c, title).Bold().Grow(1).TextAlign(Center)
-			next := coreButton(c, "›").Padding(t.Space(0.5), t.Space(2.5)).Label(c.texts().NextMonth())
+			next := coreButton(c, "").Padding(t.Space(1), t.Space(2.5)).Label(c.texts().NextMonth())
+			next.Children(func() { monthChevron(c, false) })
 			next.flags |= flagClickable
 			next.afterInput(func() {
 				if next.Clicked() {
-					move(cur.AddDate(0, 1, 0))
+					moveMonth(1)
 				}
 			})
 		})
@@ -193,7 +264,7 @@ func calendarGrid(c *context, date, cursor *time.Time, moveChooses bool, choose 
 					}
 					switch {
 					case chosen:
-						cell.Background(t.Accent)
+						cell.Background(c.accent(t))
 						fg = t.AccentText
 					case atCursor:
 						cell.Background(t.SurfaceHover)
@@ -220,7 +291,7 @@ func calendarGrid(c *context, date, cursor *time.Time, moveChooses bool, choose 
 	})
 	grid.DrawOver(func(p *Painter, r Rect) {
 		if grid.FocusVisible() {
-			p.FocusRing(r, [4]float32{t.Radius, t.Radius, t.Radius, t.Radius})
+			p.focusRingOf(grid, r, [4]float32{t.Radius, t.Radius, t.Radius, t.Radius})
 		}
 	})
 	return grid

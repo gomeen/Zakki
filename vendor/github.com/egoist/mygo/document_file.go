@@ -2,6 +2,7 @@ package mygo
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -15,11 +16,20 @@ import (
 type fileStamp struct {
 	ModTime int64 `json:"modTime"` // Unix nanoseconds
 	Size    int64 `json:"size"`
+	// file is the file's identity, by which a document finds the file
+	// where another app renamed it (findRenamed). It says nothing of the
+	// content, so same ignores it, and recovery doesn't keep it.
+	file fileWatchGone
 }
 
 func stampOf(info os.FileInfo) fileStamp {
-	return fileStamp{ModTime: info.ModTime().UnixNano(), Size: info.Size()}
+	id, ok := fileWatchIdentity(StatIdentity(info))
+	id.typ = info.Mode().Type()
+	return fileStamp{ModTime: info.ModTime().UnixNano(), Size: info.Size(), file: fileWatchGone{id, ok}}
 }
+
+// same reports whether s and t stamp the same content.
+func (s fileStamp) same(t fileStamp) bool { return s.ModTime == t.ModTime && s.Size == t.Size }
 
 // statStamp returns the stamp of the file at path; ok is false when it
 // doesn't exist.
@@ -63,7 +73,7 @@ func (b *docBase) write(target string, op writeOp) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		if exists && (now != known || deleted) {
+		if exists && (!now.same(known) || deleted) {
 			b.mu.Lock()
 			was := b.conflict
 			b.conflict, b.deleted = true, false
@@ -79,7 +89,7 @@ func (b *docBase) write(target string, op writeOp) (bool, error) {
 		return false, err
 	}
 	b.mu.Lock()
-	b.ops.markSaved(snap)
+	settle := b.ops.markSaved(snap)
 	b.savedAt = snap.at
 	b.stamp = stamp
 	b.conflict, b.deleted = false, false
@@ -95,6 +105,11 @@ func (b *docBase) write(target string, op writeOp) (bool, error) {
 	b.scheduleLocked()
 	drop := !b.edited && b.backedUp != 0
 	b.mu.Unlock()
+	// Equal is the app's and may read the document, so it runs with the
+	// lock down — the same rule ImageCache.ask follows (0487c37b).
+	if settle != nil && settle() {
+		drop = true
+	}
 	if drop {
 		b.kind.recovery.remove(b)
 	}
@@ -164,10 +179,18 @@ func writeFileSafely(path string, write func(io.Writer) error) (fileStamp, error
 	if cerr := tmp.Close(); err == nil {
 		err = cerr
 	}
-	if err == nil {
+	replacing := err == nil
+	if replacing {
 		err = backend().ReplaceFile(path, name)
 	}
 	if err != nil {
+		if _, serr := os.Lstat(path); replacing && exists && errors.Is(serr, fs.ErrNotExist) {
+			// The system removed the file and could not put the new one in
+			// its place (ReplaceFileW's ERROR_UNABLE_TO_MOVE_REPLACEMENT):
+			// the sibling is the only copy left, so it stays. One that
+			// could not be written holds no contents to keep.
+			return fileStamp{}, fmt.Errorf("%w; the new contents are in %s", err, name)
+		}
 		os.Remove(name)
 		return fileStamp{}, err
 	}

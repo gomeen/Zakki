@@ -236,6 +236,7 @@ func versionInfo(c *Config, langs []windowsLanguage) []byte {
 	for _, l := range langs {
 		var table []verNode
 		for _, s := range [][2]string{
+			{"CompanyName", c.publisher()},
 			{"FileDescription", l.name},
 			{"FileVersion", c.Version},
 			{"InternalName", exe},

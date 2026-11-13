@@ -32,3 +32,10 @@ func fileWatchInaccessible(err error) bool {
 	const errorSharingViolation, errorLockViolation = syscall.Errno(32), syscall.Errno(33)
 	return errors.Is(err, fs.ErrPermission) || errors.Is(err, errorSharingViolation) || errors.Is(err, errorLockViolation)
 }
+
+// fileWatchEntryInfo returns what entry is, read from a directory opened in
+// root, by its name in root. What reading a directory says of an entry
+// lacks its identity, which os.SameFile would load by its path.
+func fileWatchEntryInfo(root *os.Root, entry fs.DirEntry) (os.FileInfo, error) {
+	return root.Lstat(entry.Name())
+}

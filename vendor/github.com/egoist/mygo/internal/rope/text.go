@@ -109,14 +109,17 @@ func (t Text) Chunks(a, b int, fn func(s string) bool) { Chunks(t.n, a, b, fn) }
 // Replace returns the text with bytes a to b replaced by s.
 func (t Text) Replace(a, b int, s string) Text { return Text{ReplaceBytes(t.n, a, b, s)} }
 
+const batchBytes = 64 << 10
+
 // EachLine calls fn with lines from to to, exclusive, and the byte each
 // starts at, reading them a batch at a time rather than finding each in
-// the tree, until fn returns false.
+// the tree, until fn returns false. Batches of long lines are short, so
+// that fn stopping early leaves little copied for nothing.
 func (t Text) EachLine(from, to int, fn func(i, start int, s string) bool) {
 	to = min(to, t.LineCount())
 	for i := max(0, from); i < to; {
-		end := min(i+256, to)
 		a := t.LineStart(i)
+		end := min(i+256, to, max(i+1, t.LineOf(a+batchBytes)))
 		text := t.Slice(a, t.LineEnd(end-1))
 		for i < end {
 			n := strings.IndexByte(text, '\n')
@@ -144,6 +147,9 @@ func (t Text) EachLineBack(from, to int, fn func(i, start int, s string) bool) {
 	to = max(0, to)
 	for i := from; i >= to; {
 		first := max(i-255, to)
+		if b := t.LineEnd(i) - batchBytes; b > 0 {
+			first = max(first, min(i, t.LineOf(b)+1))
+		}
 		a := t.LineStart(first)
 		text := t.Slice(a, t.LineEnd(i))
 		// Where the batch's lines start, to go back through them.

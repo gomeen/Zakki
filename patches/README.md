@@ -1,8 +1,12 @@
 # MyGo 依赖补丁
 
-本仓库保留 `go.mod` 锁定的 MyGo v0.5.1，并通过 Go 标准 `vendor/` 机制携带最小补丁。
+本仓库保留 `go.mod` 锁定的 MyGo v0.9.0，并通过 Go 标准 `vendor/` 机制携带最小补丁。
 `vendor/` 包含构建所需依赖及其许可证；普通 `go test`、`go build` 和 `go tool mygo` 自动使用它。
 不要用 `-mod=mod` 绕过补丁。
+
+MyGo v0.9 的 `cmd/mygo` 新增了 Linux 打包能力（RPM、OpenPGP 签名、压缩），
+`go mod vendor` 会把工具依赖一并复制进来，因此 `vendor/` 体积以这些包为主；
+它们只服务 `go tool mygo build`，不参与应用二进制。
 
 ## 输入区间样式
 
@@ -27,7 +31,8 @@ IME 组合文本保持无区间样式，原区间在其两侧拆分／移动，�
 
 ## 日期与时间面板
 
-`mygo-calendar-spacing.patch` 调整原生日期面板的列宽和行间距，给中文星期和日期格留出稳定的横向与纵向留白。
+`mygo-calendar-spacing.patch` 调整原生日期面板的列宽和行间距，给中文星期和日期格留出稳定的横向与纵向留白：
+`ui/date.go` 的 `calendarBox`（列间距与表头列宽）与 `calendarGrid`（日期格宽度）对着 v0.9 的拆分重写。
 
 应用层的时间弹层使用 `internal/app/live_timepopover.go`，保留原生 DateInput/TimeInput，并在应用层增加点击时刻浮出的小时／分钟滚轮面板。
 
@@ -59,6 +64,8 @@ make check
 不要单独执行 `go mod vendor` 后提交，否则会丢失补丁。升级 MyGo 后，先检查上游是否已支持
 对应原生区间属性；若接口和行为等价，移除补丁并保留回归测试，再评估是否仍需提交 `vendor/`。
 区间样式补丁修改 `ui/textinput.go`、`ui/editor_layout.go` 及同步后的 `ui/api_gen.go` 文档，
-另附上述两个底层测试文件。行内对象补丁还涉及 `ui/textarea.go` 的布局缓存、
+另附上述两个底层测试文件；v0.9 把区间到样式的换算拆成 `rangeKey`/`spansOf`/`styleRanges`，
+补丁按新结构重放，布局快速路径同样按字体、斜体与对象尺寸判断是否需要 shaping key。
+行内对象补丁还涉及 `ui/textarea.go` 的布局缓存、
 `ui/element.go` 与 `ui/paint.go` 的绘制回调、`ui/text_layout.go` 的索引说明，
 以及新增的 `ui/textobjects.go` 与 `ui/textobjects_test.go`；不批量改第三方格式。

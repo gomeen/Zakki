@@ -1,20 +1,10 @@
---- a/vendor/github.com/egoist/mygo/ui/textinput.go
-+++ b/vendor/github.com/egoist/mygo/ui/textinput.go
-@@ -309,22 +309,22 @@
- 	return e
+diff --git a/vendor/github.com/egoist/mygo/ui/api_gen.go b/vendor/github.com/egoist/mygo/ui/api_gen.go
+--- a/vendor/github.com/egoist/mygo/ui/api_gen.go
++++ b/vendor/github.com/egoist/mygo/ui/api_gen.go
+@@ -8151,13 +8151,8 @@
+ 	return wrapElement(_node.TextColor(c))
  }
  
--// TextRange styles runes Start up to End of a text input's text: their
--// color, when its alpha is not zero, and their weight, when Weight is set,
--// as a message field shows the mentions in what is typed.
-+// TextRange 设置输入文本 [Start, End) rune 的局部样式；零值不覆盖已有属性。
-+// Italic、Underline 与 WavyUnderline 只能开启，与 RichText 的 Span 语义一致。
- type TextRange struct {
--	Start, End int
--	Color      Color
--	Weight     int
--}
--
 -// TextRanges styles runs of a text input's text, in the frames that call
 -// it. Ranges may overlap and nest, as the attributes of an attributed
 -// string do: where they do, each of Color and Weight is that of the last
@@ -22,124 +12,15 @@
 -// text as it is: an app that finds them in the text finds them again as it
 -// changes. A password shows none; an input method's composition shows
 -// unstyled between them.
-+	Start, End      int
-+	Color           Color
-+	Background      Color
-+	Weight          int
-+	Font            string
-+	Italic          bool
-+	Underline       bool
-+	WavyUnderline   bool
-+	DecorationColor Color
-+}
-+
 +// TextRanges 设置当前帧的文字区间。重叠时，各属性独立取最后一次设置的非零值。
 +// 布尔属性只能开启；区间跟随当前文本重新计算，密码与输入法组合文本保持无样式。
- func (e *node) TextRanges(ranges ...TextRange) *node {
- 	ed := e.st.editor
- 	if ed == nil || e.flags&flagEditable == 0 {
-@@ -341,18 +341,16 @@
- 
- // rangeMerge is what sortRanges reuses from frame to frame.
- type rangeMerge struct {
--	given          []TextRange
--	points, starts []int
--	all, colors    rangeHeap
--	weights        rangeHeap
--}
--
--// sortRanges splits the ranges into runs apart, sorted by start, where
--// each of Color and Weight is that of the last range given setting it, as
--// TextRanges says, once the frame has given them all: a frame calling
--// TextRanges for each range merges them once. It takes O(n log n) for n
--// ranges: a sweep over their ends, with the ranges covering it on heaps
--// by the order they were given in.
-+	given                                        []TextRange
-+	points, starts                               []int
-+	all, colors                                  rangeHeap
-+	backgrounds                                  rangeHeap
-+	weights                                      rangeHeap
-+	fonts, italics                               rangeHeap
-+	underlines, wavyUnderlines, decorationColors rangeHeap
-+}
-+
-+// sortRanges 用端点扫描与属性堆生成有序、不相交的区间；各属性独立覆盖，复杂度 O(n log n)。
- func (ed *editor) sortRanges() {
- 	m := &ed.merge
- 	given := append(m.given[:0], ed.ranges...)
-@@ -364,7 +362,9 @@
- 	slices.Sort(points)
- 	points = slices.Compact(points)
- 	slices.SortFunc(starts, func(a, b int) int { return given[a].Start - given[b].Start })
--	m.all, m.colors, m.weights = m.all[:0], m.colors[:0], m.weights[:0]
-+	m.all, m.colors, m.backgrounds, m.weights = m.all[:0], m.colors[:0], m.backgrounds[:0], m.weights[:0]
-+	m.fonts, m.italics = m.fonts[:0], m.italics[:0]
-+	m.underlines, m.wavyUnderlines, m.decorationColors = m.underlines[:0], m.wavyUnderlines[:0], m.decorationColors[:0]
- 	out, next := ed.ranges[:0], 0
- 	for k := 0; k+1 < len(points); k++ {
- 		from, to := points[k], points[k+1]
-@@ -374,8 +374,26 @@
- 			if given[i].Color.A > 0 {
- 				m.colors.push(i)
- 			}
-+			if given[i].Background.A > 0 {
-+				m.backgrounds.push(i)
-+			}
- 			if given[i].Weight != 0 {
- 				m.weights.push(i)
-+			}
-+			if given[i].Font != "" {
-+				m.fonts.push(i)
-+			}
-+			if given[i].Italic {
-+				m.italics.push(i)
-+			}
-+			if given[i].Underline {
-+				m.underlines.push(i)
-+			}
-+			if given[i].WavyUnderline {
-+				m.wavyUnderlines.push(i)
-+			}
-+			if given[i].DecorationColor.A > 0 {
-+				m.decorationColors.push(i)
- 			}
- 		}
- 		if _, ok := m.all.top(given, from); !ok {
-@@ -385,12 +403,28 @@
- 		if i, ok := m.colors.top(given, from); ok {
- 			r.Color = given[i].Color
- 		}
-+		if i, ok := m.backgrounds.top(given, from); ok {
-+			r.Background = given[i].Background
-+		}
- 		if i, ok := m.weights.top(given, from); ok {
- 			r.Weight = given[i].Weight
- 		}
--		if n := len(out); n > 0 && out[n-1].End == from && out[n-1].Color == r.Color && out[n-1].Weight == r.Weight {
--			out[n-1].End = to // a run as one, as an attributed string's
--			continue
-+		if i, ok := m.fonts.top(given, from); ok {
-+			r.Font = given[i].Font
-+		}
-+		_, r.Italic = m.italics.top(given, from)
-+		_, r.Underline = m.underlines.top(given, from)
-+		_, r.WavyUnderline = m.wavyUnderlines.top(given, from)
-+		if i, ok := m.decorationColors.top(given, from); ok {
-+			r.DecorationColor = given[i].DecorationColor
-+		}
-+		if n := len(out); n > 0 && out[n-1].End == from {
-+			previous := out[n-1]
-+			previous.Start, previous.End = from, to
-+			if previous == r {
-+				out[n-1].End = to
-+				continue
-+			}
- 		}
- 		out = append(out, r)
- 	}
+ func (_handle Element) TextRanges(ranges ...TextRange) Element {
+ 	_node := _handle.node()
+ 	if _node == nil {
+diff --git a/vendor/github.com/egoist/mygo/ui/editor_layout.go b/vendor/github.com/egoist/mygo/ui/editor_layout.go
 --- a/vendor/github.com/egoist/mygo/ui/editor_layout.go
 +++ b/vendor/github.com/egoist/mygo/ui/editor_layout.go
-@@ -214,11 +214,8 @@
+@@ -220,12 +220,8 @@
  	p.clip = saved
  }
  
@@ -147,34 +28,52 @@
 -// from start: the spans of their weights for the layout ("" when none
 -// sets one), and how to paint their colors (nil when none sets one). An
 -// input method's composition at the caret, between start and end, sits
--// unstyled between the runs, and those after it move past it.
+-// unstyled between the runs, and those after it move past it. What it
+-// returns to paint is the editor's, good until the next call.
 +// rangeSpans 返回 [start, end) rune 相对 start 的布局 key 与绘制属性。
 +// 输入法组合文本保持无样式，其后的区间移动到组合文本之后。
  func (ed *editor) rangeSpans(start, end int) (string, *spanPaint) {
- 	if !ed.apart {
- 		ed.sortRanges()
-@@ -253,15 +250,17 @@
+ 	return ed.spansOf(ed.inReach(start), start, end)
+ }
+@@ -264,15 +260,15 @@
+ func (ed *editor) styleRanges(ranges []TextRange, start, end int, paint bool) (string, *spanPaint) {
+ 	reach := len(ranges)
+ 	if !paint {
+-		weighted := false
++		shaped := false
+ 		for i, r := range ranges {
+ 			if r.Start >= end {
+ 				reach = i
+ 				break
+ 			}
+-			weighted = weighted || r.Weight > 0 && max(r.Start, start) < min(r.End, end)
++			shaped = shaped || (r.Font != "" || r.Italic || r.Weight > 0) && max(r.Start, start) < min(r.End, end)
+ 		}
+-		if !weighted {
++		if !shaped {
+ 			return "", nil
+ 		}
  	}
- 	var styles []text.Span
- 	var spans []Span
--	weighted, colored := false, false
-+	shaped, painted := false, false
- 	at := 0
- 	add := func(from, to int, r TextRange) {
- 		if from > at {
- 			styles = append(styles, text.Span{End: from})
- 			spans = append(spans, Span{})
+@@ -306,13 +302,15 @@
+ 				spans = append(spans, Span{})
+ 			}
  		}
 -		styles = append(styles, text.Span{End: to, Weight: r.Weight})
--		spans = append(spans, Span{Color: r.Color, Weight: r.Weight})
 +		span := Span{Font: r.Font, Italic: r.Italic, Color: r.Color, Background: r.Background, Weight: r.Weight,
 +			Underline: r.Underline, WavyUnderline: r.WavyUnderline, DecorationColor: r.DecorationColor}
 +		styles = append(styles, spanStyle(span, to))
-+		spans = append(spans, span)
+ 		if paint {
+-			spans = append(spans, Span{Color: r.Color, Weight: r.Weight})
++			spans = append(spans, span)
+ 		}
  		at = to
  	}
- 	for _, r := range ranges {
-@@ -278,15 +277,31 @@
+-	weighted, colored := false, false
++	shaped, painted := false, false
+ 	for _, r := range ranges[:reach] {
+ 		if r.Start >= end {
+ 			break
+@@ -327,17 +325,33 @@
  		} else {
  			add(local(from, true), local(to, false), r)
  		}
@@ -206,15 +105,38 @@
 +		key = text.EncodeSpans(layout)
  	}
  	var sp *spanPaint
--	if colored {
-+	if painted {
- 		sp = &spanPaint{spans: spans, styles: styles}
- 	}
- 	return key, sp
---- a/vendor/github.com/egoist/mygo/ui/api_gen.go
-+++ b/vendor/github.com/egoist/mygo/ui/api_gen.go
-@@ -5322,13 +5322,8 @@
- 	return wrapElement(_node.TextColor(c))
+ 	if paint {
+ 		ed.paintStyles, ed.paintSpans = styles, spans
+-		if colored {
++		if painted {
+ 			ed.painted = spanPaint{spans: spans, styles: styles}
+ 			sp = &ed.painted
+ 		}
+diff --git a/vendor/github.com/egoist/mygo/ui/textinput.go b/vendor/github.com/egoist/mygo/ui/textinput.go
+--- a/vendor/github.com/egoist/mygo/ui/textinput.go
++++ b/vendor/github.com/egoist/mygo/ui/textinput.go
+@@ -479,22 +479,22 @@
+ 	return e
+ }
+ 
+-// TextRange styles runes Start up to End of a text input's text: their
+-// color, when its alpha is not zero, and their weight, when Weight is set,
+-// as a message field shows the mentions in what is typed.
++// TextRange 设置输入文本 [Start, End) rune 的局部样式；零值不覆盖已有属性。
++// Italic、Underline 与 WavyUnderline 只能开启，与 RichText 的 Span 语义一致。
+ type TextRange struct {
+-	Start, End int
+-	Color      Color
+-	Weight     int
++	Start, End      int
++	Color           Color
++	Background      Color
++	Weight          int
++	Font            string
++	Italic          bool
++	Underline       bool
++	WavyUnderline   bool
++	DecorationColor Color
  }
  
 -// TextRanges styles runs of a text input's text, in the frames that call
@@ -226,9 +148,110 @@
 -// unstyled between them.
 +// TextRanges 设置当前帧的文字区间。重叠时，各属性独立取最后一次设置的非零值。
 +// 布尔属性只能开启；区间跟随当前文本重新计算，密码与输入法组合文本保持无样式。
- func (_handle Element) TextRanges(ranges ...TextRange) Element {
- 	_node := _handle.node()
- 	if _node == nil {
+ func (e *node) TextRanges(ranges ...TextRange) *node {
+ 	ed := e.st.editor
+ 	if ed == nil || e.flags&flagEditable == 0 {
+@@ -511,18 +511,16 @@
+ 
+ // rangeMerge is what sortRanges reuses from frame to frame.
+ type rangeMerge struct {
+-	given          []TextRange
+-	points, starts []int
+-	all, colors    rangeHeap
+-	weights        rangeHeap
++	given                                        []TextRange
++	points, starts                               []int
++	all, colors                                  rangeHeap
++	backgrounds                                  rangeHeap
++	weights                                      rangeHeap
++	fonts, italics                               rangeHeap
++	underlines, wavyUnderlines, decorationColors rangeHeap
+ }
+ 
+-// sortRanges splits the ranges into runs apart, sorted by start, where
+-// each of Color and Weight is that of the last range given setting it, as
+-// TextRanges says, once the frame has given them all: a frame calling
+-// TextRanges for each range merges them once. It takes O(n log n) for n
+-// ranges: a sweep over their ends, with the ranges covering it on heaps
+-// by the order they were given in.
++// sortRanges 用端点扫描与属性堆生成有序、不相交的区间；各属性独立覆盖，复杂度 O(n log n)。
+ func (ed *editor) sortRanges() {
+ 	m := &ed.merge
+ 	given := append(m.given[:0], ed.ranges...)
+@@ -534,7 +532,9 @@
+ 	slices.Sort(points)
+ 	points = slices.Compact(points)
+ 	slices.SortFunc(starts, func(a, b int) int { return given[a].Start - given[b].Start })
+-	m.all, m.colors, m.weights = m.all[:0], m.colors[:0], m.weights[:0]
++	m.all, m.colors, m.backgrounds, m.weights = m.all[:0], m.colors[:0], m.backgrounds[:0], m.weights[:0]
++	m.fonts, m.italics = m.fonts[:0], m.italics[:0]
++	m.underlines, m.wavyUnderlines, m.decorationColors = m.underlines[:0], m.wavyUnderlines[:0], m.decorationColors[:0]
+ 	out, next := ed.ranges[:0], 0
+ 	for k := 0; k+1 < len(points); k++ {
+ 		from, to := points[k], points[k+1]
+@@ -544,9 +544,27 @@
+ 			if given[i].Color.A > 0 {
+ 				m.colors.push(i)
+ 			}
++			if given[i].Background.A > 0 {
++				m.backgrounds.push(i)
++			}
+ 			if given[i].Weight != 0 {
+ 				m.weights.push(i)
+ 			}
++			if given[i].Font != "" {
++				m.fonts.push(i)
++			}
++			if given[i].Italic {
++				m.italics.push(i)
++			}
++			if given[i].Underline {
++				m.underlines.push(i)
++			}
++			if given[i].WavyUnderline {
++				m.wavyUnderlines.push(i)
++			}
++			if given[i].DecorationColor.A > 0 {
++				m.decorationColors.push(i)
++			}
+ 		}
+ 		if _, ok := m.all.top(given, from); !ok {
+ 			continue // between ranges
+@@ -555,13 +573,29 @@
+ 		if i, ok := m.colors.top(given, from); ok {
+ 			r.Color = given[i].Color
+ 		}
++		if i, ok := m.backgrounds.top(given, from); ok {
++			r.Background = given[i].Background
++		}
+ 		if i, ok := m.weights.top(given, from); ok {
+ 			r.Weight = given[i].Weight
+ 		}
+-		if n := len(out); n > 0 && out[n-1].End == from && out[n-1].Color == r.Color && out[n-1].Weight == r.Weight {
+-			out[n-1].End = to // a run as one, as an attributed string's
+-			continue
++		if i, ok := m.fonts.top(given, from); ok {
++			r.Font = given[i].Font
+ 		}
++		_, r.Italic = m.italics.top(given, from)
++		_, r.Underline = m.underlines.top(given, from)
++		_, r.WavyUnderline = m.wavyUnderlines.top(given, from)
++		if i, ok := m.decorationColors.top(given, from); ok {
++			r.DecorationColor = given[i].DecorationColor
++		}
++		if n := len(out); n > 0 && out[n-1].End == from {
++			previous := out[n-1]
++			previous.Start, previous.End = from, to
++			if previous == r {
++				out[n-1].End = to
++				continue
++			}
++		}
+ 		out = append(out, r)
+ 	}
+ 	m.given, m.points, m.starts = given[:0], points[:0], starts[:0]
+diff --git a/vendor/github.com/egoist/mygo/ui/textinput_background_test.go b/vendor/github.com/egoist/mygo/ui/textinput_background_test.go
+new file mode 100644
 --- /dev/null
 +++ b/vendor/github.com/egoist/mygo/ui/textinput_background_test.go
 @@ -0,0 +1,52 @@
@@ -237,7 +260,7 @@
 +import "testing"
 +
 +func TestTextRangeBackgroundKeepsShapeKey(t *testing.T) {
-+	ed := newEditor()
++	ed := newPatchEditor()
 +	ed.setText("abcdefghij")
 +	key := func(ranges ...TextRange) string {
 +		ed.ranges, ed.apart = append(ed.ranges[:0], ranges...), false
@@ -261,7 +284,7 @@
 +}
 +
 +func TestTextRangeBackgroundCompositionSplit(t *testing.T) {
-+	ed := newEditor()
++	ed := newPatchEditor()
 +	ed.setText("abcdef")
 +	ed.caret, ed.compose = 3, "中文😀"
 +	bg := RGB(230, 200, 50)
@@ -284,22 +307,28 @@
 +		}
 +	}
 +}
+diff --git a/vendor/github.com/egoist/mygo/ui/textinput_styles_test.go b/vendor/github.com/egoist/mygo/ui/textinput_styles_test.go
+new file mode 100644
 --- /dev/null
 +++ b/vendor/github.com/egoist/mygo/ui/textinput_styles_test.go
-@@ -0,0 +1,187 @@
+@@ -0,0 +1,191 @@
 +package ui
 +
 +import (
 +	"slices"
 +	"testing"
++	"time"
 +
 +	"github.com/egoist/mygo/internal/text"
 +)
 +
++// newPatchEditor 供补丁回归测试构造编辑器；这些测试只看布局与绘制，时钟取零值。
++func newPatchEditor() *editor { return newEditor(func() time.Time { return time.Time{} }) }
++
 +func TestTextRangeStylesMergeIndependently(t *testing.T) {
 +	red, blue, yellow := RGB(220, 30, 40), RGB(20, 60, 220), RGB(240, 220, 80)
 +	base := TextRange{Start: 0, End: 10, Font: "serif", Italic: true, Underline: true, WavyUnderline: true, DecorationColor: red, Color: red, Background: yellow, Weight: 400}
-+	ed := newEditor()
++	ed := newPatchEditor()
 +	ed.ranges = []TextRange{
 +		base,
 +		{Start: 2, End: 8, Font: "monospace"},
@@ -357,7 +386,7 @@
 +		{"weight", TextRange{Weight: 700}, text.Span{Weight: 700}},
 +	} {
 +		t.Run(tc.name, func(t *testing.T) {
-+			ed := newEditor()
++			ed := newPatchEditor()
 +			r := tc.rangeStyle
 +			r.Start, r.End = 2, 8
 +			ed.ranges = []TextRange{r}
@@ -388,7 +417,7 @@
 +}
 +
 +func TestTextRangePaintStylesKeepShapeKey(t *testing.T) {
-+	ed := newEditor()
++	ed := newPatchEditor()
 +	key := func(ranges ...TextRange) string {
 +		ed.ranges, ed.apart = append(ed.ranges[:0], ranges...), false
 +		key, _ := ed.rangeSpans(0, 10)
@@ -426,7 +455,7 @@
 +		{Underline: true}, {WavyUnderline: true}, {DecorationColor: color},
 +	} {
 +		r.Start, r.End = 1, 4
-+		ed := newEditor()
++		ed := newPatchEditor()
 +		ed.ranges = []TextRange{r}
 +		key, paint := ed.rangeSpans(0, 6)
 +		if key != "" || paint == nil {
@@ -454,7 +483,7 @@
 +		{"after", 8, []text.Span{{End: 1}, {End: 7, Family: r.Font, Italic: true, Weight: 700}}, []Span{{}, styled}},
 +	} {
 +		t.Run(tc.name, func(t *testing.T) {
-+			ed := newEditor()
++			ed := newPatchEditor()
 +			ed.setText("甲乙丙丁戊己庚辛壬癸")
 +			ed.ranges = []TextRange{r}
 +			before, _ := ed.rangeSpans(1, 9)

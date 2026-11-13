@@ -18,7 +18,7 @@ func drawCanvases(s *scene.Scene) {
 		cs.Width, cs.Height = c.W, c.H
 		img := NewImage(c.W, c.H)
 		var r Renderer
-		r.d.draw(img, cs, image.Rect(0, 0, c.W, c.H), r.opBounds(cs, nil))
+		r.d.draw(img, cs, image.Rect(0, 0, c.W, c.H), r.opBounds(cs))
 		if len(c.Pix) != 4*c.W*c.H {
 			c.Pix = make([]byte, 4*c.W*c.H)
 		}

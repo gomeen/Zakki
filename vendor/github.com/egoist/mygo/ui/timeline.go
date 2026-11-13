@@ -70,6 +70,11 @@ type TimelineOptions struct {
 	// is not. Set one of them at most.
 	Seek     *time.Duration
 	Progress *float32
+	// NonMotion says that the timeline's tweens move nothing on screen,
+	// as fades and blurs: it still plays while the desktop asks for less
+	// motion, as Animation's NonMotion does. Give what moves a timeline
+	// of its own, which goes to rest at once.
+	NonMotion bool
 }
 
 // Timeline returns the timeline the element keeps under key, playing it
@@ -87,10 +92,11 @@ type TimelineOptions struct {
 // valid while the view builds this frame.
 //
 // While the desktop asks for less motion (Preferences.ReduceMotion), a
-// timeline that would play is at once where it would come to rest, but
-// Seek, Progress and Paused still put and hold its playhead, as a drag
-// still moves a Draggable element. DisableAnimations does not change a
-// timeline, which plays on its own, as Keyframes do: jump it with Seek.
+// timeline that would play is at once where it would come to rest, unless
+// o's NonMotion says it moves nothing, but Seek, Progress and Paused still
+// put and hold its playhead, as a drag still moves a Draggable element.
+// DisableAnimations does not change a timeline, which plays on its own,
+// as Keyframes do: jump it with Seek.
 func (e *node) Timeline(key any, o TimelineOptions) *Timeline {
 	if o.Repeat < RepeatForever || o.Delay < 0 || o.RepeatDelay < 0 {
 		panic("ui: a Timeline Repeat must be RepeatForever or nonnegative, and its delays nonnegative")
@@ -391,7 +397,7 @@ func (t *Timeline) cue(o TimelineOptions) {
 		// A scrubber puts the playhead where it asks, also on a timeline
 		// that less motion put at once where it comes to rest.
 		st.over = false
-	} else if !o.Paused && c.rt.preferences().ReduceMotion {
+	} else if !o.Paused && !o.NonMotion && c.rt.preferences().ReduceMotion {
 		// Values and poses go to their targets at once, and a sequence
 		// ends at its last value: a timeline that would play is over where
 		// it would have come to rest, in this frame. What the view asks of

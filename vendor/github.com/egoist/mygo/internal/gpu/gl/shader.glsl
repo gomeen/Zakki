@@ -27,7 +27,7 @@ layout(location = 10) in vec4 aParams; // kind, dashed or grayscale, sigma or pa
 
 layout(location = 11) in vec4 aTransform0;
 layout(location = 12) in vec4 aTransform1;
-layout(location = 13) in vec4 aTransform2; // the projective row's g and h
+layout(location = 13) in vec4 aTransform2; // the projective row's g and h, and 1 where its constant is -1
 
 uniform vec2 uSize;
 
@@ -53,7 +53,7 @@ flat out vec4 vParams;
 // frameH returns the frame point of local p, in homogeneous coordinates.
 vec3 frameH(vec2 p) {
 	return vec3(dot(aTransform0.xyz, vec3(p, 1.0)), dot(aTransform1.xyz, vec3(p, 1.0)),
-				dot(vec3(aTransform2.xy, 1.0), vec3(p, 1.0)));
+				dot(vec3(aTransform2.xy, 1.0 - 2.0 * aTransform2.z), vec3(p, 1.0)));
 }
 
 void main() {
@@ -121,6 +121,9 @@ uniform sampler2D uMask;
 uniform sampler2D uColor;
 uniform sampler2D uImage;
 uniform sampler2D uClipMask;
+// The stops of the frame's gradients (gpu.Builder.Stops): two texels each,
+// the color, straight sRGB, then its place and its color in Oklab.
+uniform highp sampler2D uStops;
 uniform vec2 uSize; // the frame's size in pixels
 
 // The color and, for dual-source blending, the source's alpha of each
@@ -168,7 +171,7 @@ Frame frameOf() {
 	// In perspective, the pixel's center, as interpolating drifts: the
 	// frame's y goes down, the window's up.
 	f.s = f.persp ? vec2(gl_FragCoord.x, uSize.y - gl_FragCoord.y) : vWorld.xy / vWorld.z;
-	vec3 r0 = vTransform0.xyz, r1 = vTransform1.xyz, r2 = vec3(vTransform2.xy, 1.0);
+	vec3 r0 = vTransform0.xyz, r1 = vTransform1.xyz, r2 = vec3(vTransform2.xy, 1.0 - 2.0 * vTransform2.z);
 	f.c0 = cross(r1, r2);
 	f.c1 = cross(r2, r0);
 	f.c2 = cross(r0, r1);
@@ -263,12 +266,6 @@ vec4 premul(vec4 c) { return vec4(c.rgb * c.a, c.a); }
 
 vec3 unpremul(vec4 c) { return c.a > 0.0 ? c.rgb / c.a : vec3(0.0); }
 
-#endif
-
-// What follows is the renderer's own; effects (effect.glsl) take what is
-// above.
-#ifdef FRAGMENT
-
 // textCoverage corrects the coverage a of a glyph of straight color c as
 // Direct2D blends text (scene.TextCoverage): it enhances the contrast,
 // the more the darker c is, and corrects for gamma with the ratios g.
@@ -277,6 +274,34 @@ float textCoverage(float a, vec3 c, float contrast, float boost, vec4 g) {
 	a = a * (k + 1.0) / (a * k + 1.0);
 	float f = dot(c, vec3(0.25, 0.5, 0.25));
 	return clamp(a + a * (1.0 - a) * ((g.x * f + g.y) * a + (g.z * f + g.w)), 0.0, 1.0);
+}
+
+#endif
+
+// What follows is the renderer's own; effects (effect.glsl) take what is
+// above.
+#ifdef FRAGMENT
+
+// The chroma of an image that is a frame of video in NV12, whose luma
+// uImage holds (gpu.ImageYUV).
+uniform sampler2D uChroma;
+
+// yuvToRGB converts the samples of a frame of video in YCbCr to RGB, as
+// scene.YUVMatrix.YUVToRGB does: m is the matrix, 0 to 2 for BT.601, 709
+// and 2020 in the limited range, plus 3 for the full range.
+vec3 yuvToRGB(float y, vec2 c, float m) {
+	float full = m > 2.5 ? 1.0 : 0.0;
+	float std = m - 3.0 * full;
+	vec2 k = std < 0.5 ? vec2(0.299, 0.114) : std < 1.5 ? vec2(0.2126, 0.0722) : vec2(0.2627, 0.0593);
+	c -= 128.0 / 255.0;
+	if (full < 0.5) {
+		y = (y - 16.0 / 255.0) * (255.0 / 219.0);
+		c *= 255.0 / 224.0;
+	}
+	float r = y + 2.0 * (1.0 - k.x) * c.y;
+	float b = y + 2.0 * (1.0 - k.y) * c.x;
+	float g = (y - k.x * r - k.y * b) / (1.0 - k.x - k.y);
+	return clamp(vec3(r, g, b), 0.0, 1.0);
 }
 
 // subpixelCoverage does the same for each subpixel of a subpixel glyph.
@@ -356,11 +381,76 @@ vec3 fromOklab(vec3 lab) {
 					   -0.0041960863 * lms.x - 0.7034186147 * lms.y + 1.7076147010 * lms.z));
 }
 
+// stop returns texel k of the stops.
+vec4 stop(int k) {
+	return texelFetch(uStops, ivec2(k % 1024, k / 1024), 0);
+}
+
+// stopsAt returns the color at t of the gradient whose stops uStops holds
+// from first, n of them (gpu.Builder.Stops): the first stop's before it,
+// the last's after it, and between two the colors of both mixed,
+// premultiplied, in sRGB, or in Oklab, as internal/raster's stopsAt.
+vec4 stopsAt(vec4 c2, float t, bool lab) {
+	int first = int(c2.x);
+	int n = int(c2.y);
+	if (n <= 0) {
+		return vec4(0.0);
+	}
+	vec4 a = stop(2 * first);
+	vec4 ap = stop(2 * first + 1);
+	if (t <= ap.x) {
+		return premul(a);
+	}
+	vec4 last = stop(2 * (first + n - 1));
+	vec4 lastp = stop(2 * (first + n - 1) + 1);
+	if (t >= lastp.x) {
+		return premul(last);
+	}
+	vec4 b = last;
+	vec4 bp = lastp;
+	for (int i = 1; i < n - 1; i++) {
+		vec4 c = stop(2 * (first + i));
+		vec4 cp = stop(2 * (first + i) + 1);
+		if (t < cp.x) {
+			b = c;
+			bp = cp;
+			break;
+		}
+		a = c;
+		ap = cp;
+	}
+	float f = clamp((t - ap.x) / max(bp.x - ap.x, 1e-6), 0.0, 1.0);
+	float alpha = mix(a.a, b.a, f);
+	if (!lab) {
+		return vec4(mix(a.rgb * a.a, b.rgb * b.a, f), alpha);
+	}
+	if (alpha <= 0.0) {
+		return vec4(0.0);
+	}
+	return vec4(clamp(fromOklab(mix(ap.yzw * a.a, bp.yzw * b.a, f) / alpha), 0.0, 1.0) * alpha, alpha);
+}
+
 // paint returns the premultiplied color at p of plain color, a gradient
-// mixed in sRGB (1) or Oklab (2), or stripes (3), as scene.Paint says.
+// mixed in sRGB (1) or Oklab (2), stripes (3), or a gradient of stops,
+// linear (4, 5), conic (6, 7) or radial (8, 9), mixed in sRGB or in
+// Oklab, as scene.Paint says.
 vec4 paint(vec2 p, float mode, vec4 rect, vec4 c1, vec4 c2, vec4 g) {
 	if (mode < 0.5) {
 		return premul(c1);
+	}
+	if (mode > 3.5) {
+		float t;
+		if (mode < 5.5) {
+			vec2 d = g.zw - g.xy;
+			t = dot(p - g.xy, d) / max(dot(d, d), 0.0001);
+		} else if (mode < 7.5) {
+			vec2 d = p - g.xy;
+			t = (atan(d.x, -d.y) - g.z) * 0.15915494309189535;
+			t -= floor(t);
+		} else {
+			t = length(p - g.xy) / max(g.z, 0.0001);
+		}
+		return stopsAt(c2, t, mode > 4.5 && mode < 5.5 || mode > 6.5 && mode < 7.5 || mode > 8.5);
 	}
 	if (mode < 2.5) {
 		vec2 d = g.zw - g.xy;
@@ -439,16 +529,21 @@ void main() {
 	// https://bugzilla.mozilla.org/show_bug.cgi?id=2081240. The shape is load-bearing.
 	if (kind < 0.5) {
 		float outer = localCoverage(p, vRect, vRadii, vTransform0.w, fr);
-		res = paint(p, vParams.z, vRect, vColor, vColor2, vGrad) * outer;
+		// vParams.y: 1 dashes the border, 2 paints it with the gradient (the
+		// inside with plain color), 3 both.
+		bool borderPaint = vParams.y > 1.5;
+		vec4 pc = paint(p, vParams.z, vRect, vColor, vColor2, vGrad);
+		res = (borderPaint ? premul(vColor) : pc) * outer;
 		vec4 bw = vWidths; // top, right, bottom, left
 		if (any(greaterThan(bw, vec4(0.0)))) {
 			vec4 ir = vec4(vRect.xy + bw.wx, vRect.zw - bw.yz - bw.wx);
 			float innerCov = (ir.z > 0.0 && ir.w > 0.0) ? localCoverage(p, ir, vInner, vTransform0.w, fr) : 0.0;
 			float bc = clamp(outer - innerCov, 0.0, 1.0);
-			if (vParams.y > 0.5) {
+			float dashed = vParams.y - (borderPaint ? 2.0 : 0.0);
+			if (dashed > 0.5) {
 				bc *= dash(p, vRect, bw);
 			}
-			vec4 b = premul(vBorder) * bc;
+			vec4 b = (borderPaint ? pc * vec4(vBorder.rgb * vBorder.a, vBorder.a) : premul(vBorder)) * bc;
 			res = b + res * (1.0 - b.a);
 		}
 		fragColor = res * clip * vParams.w;
@@ -508,9 +603,25 @@ void main() {
 		return;
 	}
 	if (kind < 4.5) {
-		res = sampleImage(uImage, tex, vWidths, vParams.z, dtex);
-		if (vParams.y > 0.5) {
-			res.rgb = vec3(dot(res.rgb, vec3(0.2126, 0.7152, 0.0722)));
+		if (vParams.y > 1.5) {
+			// A frame of video: its luma and its chroma, converted.
+			float code = vParams.y - 2.0;
+			float gray = code > 7.5 ? 1.0 : 0.0;
+			// The chroma covers twice its size in luma, a column or row
+			// more than an odd size has.
+			vec2 cs = vec2(textureSize(uImage, 0)) / (2.0 * vec2(textureSize(uChroma, 0)));
+			res = vec4(yuvToRGB(sampleImage(uImage, tex, vWidths, vParams.z, dtex).r,
+								sampleImage(uChroma, tex * cs, vWidths * cs.xyxy, vParams.z, dtex * cs).rg,
+								code - 8.0 * gray),
+					   1.0);
+			if (gray > 0.5) {
+				res.rgb = vec3(dot(res.rgb, vec3(0.2126, 0.7152, 0.0722)));
+			}
+		} else {
+			res = sampleImage(uImage, tex, vWidths, vParams.z, dtex);
+			if (vParams.y > 0.5) {
+				res.rgb = vec3(dot(res.rgb, vec3(0.2126, 0.7152, 0.0722)));
+			}
 		}
 		res = tint(res, vColor) * localCoverage(p, vRect, vRadii, vTransform0.w, fr);
 		fragColor = res * clip * vParams.w;
@@ -564,14 +675,17 @@ void main() {
 #ifdef DOWN
 
 // down averages the square of the area that texel stands for, repeating
-// the area's last pixels past its far edges. The area of the frame (from
+// the area's last pixels past its far edges, or, for an image blurred
+// (uMode & 1), reading them as transparent. The area of the frame (from
 // uOrigin to uLimit) is copied to uSrc from the bottom row up: the row y
-// of the frame is uShift.y - y there, and the column x is x - uShift.x.
+// of the frame is uShift.y - y there, and the column x is x - uShift.x;
+// an image whose rows go down (uMode & 2) has its row y at y - uShift.y.
 uniform sampler2D uSrc;
 uniform ivec2 uOrigin;
 uniform ivec2 uLimit;
 uniform ivec2 uShift;
 uniform int uDown;
+uniform int uMode;
 
 out vec4 passColor;
 
@@ -580,8 +694,13 @@ void main() {
 	vec4 c = vec4(0.0);
 	for (int y = 0; y < uDown; y++) {
 		for (int x = 0; x < uDown; x++) {
-			ivec2 at = min(o + ivec2(x, y), uLimit);
-			c += texelFetch(uSrc, ivec2(at.x - uShift.x, uShift.y - at.y), 0);
+			ivec2 at = o + ivec2(x, y);
+			if ((uMode & 1) != 0 && (at.x > uLimit.x || at.y > uLimit.y)) {
+				continue;
+			}
+			at = min(at, uLimit);
+			int row = (uMode & 2) != 0 ? at.y - uShift.y : uShift.y - at.y;
+			c += texelFetch(uSrc, ivec2(at.x - uShift.x, row), 0);
 		}
 	}
 	passColor = c * (1.0 / float(uDown * uDown));
@@ -591,12 +710,14 @@ void main() {
 
 #ifdef BLUR
 
-// blur blurs along a row or a column, clamping at its ends.
+// blur blurs along a row or a column, clamping at its ends, or, for an
+// image blurred (uMode & 1), transparent beyond them.
 uniform sampler2D uSrc;
 uniform ivec2 uLimit;
 uniform ivec2 uDir;
 uniform int uRadius;
 uniform float uSigma;
+uniform int uMode;
 
 out vec4 passColor;
 
@@ -607,8 +728,12 @@ void main() {
 	for (int o = -uRadius; o <= uRadius; o++) {
 		float x = float(o);
 		float w = uSigma > 0.0 ? exp(-(x * x) / (2.0 * uSigma * uSigma)) : 1.0;
-		c += texelFetch(uSrc, clamp(at + uDir * o, ivec2(0), uLimit), 0) * w;
+		ivec2 q = at + uDir * o;
 		sum += w;
+		if ((uMode & 1) != 0 && (any(lessThan(q, ivec2(0))) || any(greaterThan(q, uLimit)))) {
+			continue;
+		}
+		c += texelFetch(uSrc, clamp(q, ivec2(0), uLimit), 0) * w;
 	}
 	passColor = c / sum;
 }

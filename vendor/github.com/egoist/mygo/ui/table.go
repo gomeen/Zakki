@@ -25,7 +25,17 @@ type TableColumn struct {
 	// Fixed keeps the column where it is and as wide as it is: the user
 	// neither moves nor resizes it.
 	Fixed bool
+	// RowHeader marks a column of row headers, as a spreadsheet's row
+	// numbers: in a table choosing cells (ListState.CellSelect), a click or
+	// a drag on its cells chooses whole rows, with every column, and a
+	// click on its header chooses every row. It does not sort, and is
+	// never Cells.Cursor.
+	RowHeader bool
 }
+
+// sortable reports whether a click on the column's header sorts by it: a
+// RowHeader column does not.
+func (col *TableColumn) sortable() bool { return col.Sortable && !col.RowHeader }
 
 func (col *TableColumn) id() string {
 	if col.ID != "" {
@@ -99,14 +109,29 @@ func clampWidth(col *TableColumn, w float32) float32 {
 	return max(w, col.MinWidth, 16)
 }
 
+// equal reports whether l gives the columns the order and the widths o
+// does.
+func (l *TableLayout) equal(o *TableLayout) bool {
+	return slices.Equal(l.Order, o.Order) && maps.Equal(l.Widths, o.Widths)
+}
+
 // tableDrag is a press on a table's header: the column pressed, by ID,
 // how far the pointer moved since, and whether it moves the column.
 type tableDrag struct {
 	id     string
 	dx     float32
 	moving bool
-	// fit is the column to fit to its cells in this frame, by ID.
-	fit string
+	// resizing is the column whose edge is pressed, by ID.
+	resizing string
+	// from is the layout as the move or the resize began, for its end to
+	// tell whether it changed it. The table gives the layout a new slice
+	// or map as it changes, so these are the ones it had then.
+	from TableLayout
+	// fit is the column to fit to its cells in this frame, by ID, and
+	// fitted reports that a fit changed its width, for the next build to
+	// report.
+	fit    string
+	fitted bool
 }
 
 // Table creates a table of n rows under a header of columns, whose rows
@@ -123,7 +148,9 @@ type tableDrag struct {
 // the rows of its section scroll under it.
 //
 // The user resizes columns by dragging the edges of their headers, and
-// moves them by dragging the headers, which s.Columns keeps; columns wider
+// moves them by dragging the headers, which s.Columns keeps; Changed
+// reports the new layout once the user lets go, or once a double click
+// fits a column to its cells, for the app to save. Columns wider
 // than the table scroll sideways, the header with them. With s.Sort, a
 // click on the header of a Sortable column sorts the rows by it; with
 // s.SortBy, a Cmd-click or a Shift-click sorts by it after the others;
@@ -161,9 +188,30 @@ func table(c *context, s *ListState, columns []TableColumn, n int, cell func(row
 		s = coreLocal(table, "rows", func() ListState { return ListState{} })
 	}
 	drag := coreLocal(table, "drag", func() tableDrag { return tableDrag{} })
+	if drag.fitted {
+		// The last frame fitted a column to its cells as it laid out.
+		drag.fitted = false
+		table.st.markChanged()
+	}
 	s.syncSort()
 	layout := &s.Columns
 	order := layout.arrange(columns)
+	// The block of cells chosen (CellSelect): its columns' places, from lo
+	// to hi, and the Cursor's.
+	cellSel := s.choosesCells()
+	lo, hi, cur := 0, -1, -1
+	s.tableCols = s.tableCols[:0]
+	if cellSel {
+		if c.rt.cellClick == nil {
+			c.rt.cellClick, c.rt.cellInBlock = (*listFrame).clickCell, (*listFrame).cellInBlockAt
+		}
+		for _, j := range order {
+			s.tableCols = append(s.tableCols, tableCol{id: columns[j].id(), col: j, rowHeader: columns[j].RowHeader})
+		}
+		s.fixCells()
+		lo, hi = s.block()
+		cur = s.colIndex(s.Cells.Cursor)
+	}
 	// The least width of the rows: the columns', those sharing the room
 	// left at their least.
 	flexMin := t.Space(15)
@@ -180,11 +228,14 @@ func table(c *context, s *ListState, columns []TableColumn, n int, cell func(row
 	// cells builds a row's cells, with fill building the content of each.
 	cells := func(role Role, fill func(col int)) []*node {
 		boxes := make([]*node, 0, len(order))
-		for _, j := range order {
+		for k, j := range order {
 			col := &columns[j]
 			// Keyed by its column, a cell keeps its state as the columns
 			// move: a header being dragged keeps the press.
 			box := coreRow(c).Key(col.id()).Padding(t.Space(1.5), t.Space(2.5)).AlignItems(Center).Shrink(0).Clip().Role(role)
+			if role == RoleCell && col.RowHeader {
+				box.Role(RoleRowHeader) // naming its row
+			}
 			if w, ok := layout.width(col); ok {
 				box.Width(w)
 			} else {
@@ -196,7 +247,51 @@ func table(c *context, s *ListState, columns []TableColumn, n int, cell func(row
 			case End:
 				box.Justify(End)
 			}
-			box.Children(func() { fill(j) })
+			box.Children(func() {
+				fill(j)
+				if role == RoleColumnHeader && s.HeaderCell != nil {
+					s.HeaderCell(wrapElement(box), j)
+				}
+			})
+			if menu := s.CellMenu; menu != nil && role == RoleCell && c.row != nil {
+				row := c.row.i
+				box.ContextMenu(func(m *Menu) { menu(m, row, j) })
+			}
+			if cellSel && role == RoleCell && c.row != nil {
+				// A cell of the block shows as a chosen row does, and a row
+				// header with its whole row; the Cursor's, in the row the
+				// keys move from, has a border while the table has the
+				// focus. A cell holding the focus, as an editor in it, shows
+				// what it holds. CellsStyle paints the block in its own
+				// colors instead.
+				on := c.row.chosen && k >= lo && k <= hi && (!col.RowHeader || s.Cells.All)
+				at := k == cur && *s.cursor() == c.row.i
+				box.checked = 1 + int8(b2f(on))
+				style := s.CellsStyle
+				bg, fg := c.accent(t), t.AccentText
+				if style.Cell != Transparent {
+					bg = style.Cell
+				}
+				if style.CellText != Transparent {
+					fg = style.CellText
+				}
+				switch {
+				case !on && !at, box.FocusWithin():
+				case on && at:
+					// The border in the text's color, on the cell's own.
+					box.Background(bg).TextColor(fg).DrawOver(cursorBorder(table, fg))
+				case on:
+					box.Background(bg).TextColor(fg)
+				case at:
+					// The border in the block's own color, the accent
+					// without one.
+					border := style.Cell
+					if border == Transparent {
+						border = t.Accent
+					}
+					box.DrawOver(cursorBorder(table, border))
+				}
+			}
 			if drag.fit != "" && drag.fit == col.id() {
 				fitting = append(fitting, box)
 			}
@@ -216,7 +311,9 @@ func table(c *context, s *ListState, columns []TableColumn, n int, cell func(row
 		head.Children(func() {
 			heads := cells(RoleColumnHeader, func(j int) {
 				col := &columns[j]
-				coreText(c, col.Title).SingleLine().FontWeight(600).TextColor(t.TextMuted)
+				// The header is named by its title, which needs no node
+				// of its own beside it.
+				coreText(c, col.Title).SingleLine().FontWeight(600).TextColor(t.TextMuted).Role(RoleNone)
 				if at, descending := s.sortPlace(col); at >= 0 {
 					place := 0
 					if s.SortBy != nil && len(*s.SortBy) > 1 {
@@ -226,6 +323,9 @@ func table(c *context, s *ListState, columns []TableColumn, n int, cell func(row
 				}
 			})
 			for k, j := range order {
+				if cellSel {
+					s.tableCols[k].head = heads[k].id
+				}
 				tableHeader(c, table, heads[k], j, s, drag, heads, order, columns)
 			}
 		})
@@ -236,6 +336,8 @@ func table(c *context, s *ListState, columns []TableColumn, n int, cell func(row
 		list.widget = "List"
 		list.flags |= flagScrollX
 		list.rowMinW = least
+		// The table's Scrollbars and KeepScrollbars are its rows'.
+		list.barsFrom = table
 		head.followX = list
 		buildList(c, list, table, s, n, func(i int) {
 			row := coreRow(c).MinHeight(tableRow).AlignItems(Stretch)
@@ -264,11 +366,11 @@ func table(c *context, s *ListState, columns []TableColumn, n int, cell func(row
 		}, kind)
 	})
 	if id := drag.fit; id != "" {
-		table.colFit = &tableFit{id: id, cells: fitting, layout: layout, drag: drag}
+		table.colFit = &tableFit{id: id, cells: fitting, layout: layout, drag: drag, rt: c.rt}
 	}
 	table.DrawOver(func(p *Painter, r Rect) {
 		if table.FocusVisible() {
-			p.FocusRing(r, [4]float32{})
+			p.focusRingOf(table, r, [4]float32{})
 		}
 	})
 	return table
@@ -284,7 +386,25 @@ func tableHeader(c *context, table, h *node, j int, s *ListState, drag *tableDra
 	if menu := s.HeaderMenu; menu != nil {
 		h.ContextMenu(func(m *Menu) { menu(m, j) })
 	}
-	if s.sorts() && col.Sortable {
+	sorts, choosesAll := s.sorts() && col.sortable(), col.RowHeader && s.choosesCells()
+	if sorts || choosesAll {
+		h.flags |= flagClickable | flagHover
+		h.styleFn = func(h *node) {
+			if h.Hovered() {
+				h.bg = t.SurfaceHover
+			}
+		}
+	}
+	if choosesAll {
+		h.afterInput(func() {
+			if f := &s.frame; h.Clicked() {
+				f.chooseAll()
+				f.chooseAllColumns()
+				table.focus(false)
+			}
+		})
+	}
+	if sorts {
 		h.sort = 0
 		if at, descending := s.sortPlace(col); at >= 0 {
 			h.sort = 1
@@ -293,17 +413,11 @@ func tableHeader(c *context, table, h *node, j int, s *ListState, drag *tableDra
 			}
 		}
 		h.Label(col.Title) // the title alone, not the place number beside it
-		h.flags |= flagClickable | flagHover
-		h.styleFn = func(h *node) {
-			if h.Hovered() {
-				h.bg = t.SurfaceHover
-			}
-		}
 	}
 	// Moving the column, once the pointer went a few DIPs.
 	if dx, _, held := h.Dragged(); held && !col.Fixed {
 		if drag.id != id {
-			*drag = tableDrag{id: id}
+			*drag = tableDrag{id: id, from: s.Columns}
 		}
 		drag.dx += dx
 		if !drag.moving && abs(drag.dx) > 4 {
@@ -314,15 +428,19 @@ func tableHeader(c *context, table, h *node, j int, s *ListState, drag *tableDra
 			h.Left(drag.dx).Background(t.SurfacePressed).Opacity(0.9)
 		}
 	} else if drag.id == id && !held {
-		// Released: a click, unless it moved the column.
-		moved := drag.moving
-		*drag = tableDrag{fit: drag.fit}
+		// Released: a click, unless it moved the column, which the
+		// table reports if it took another place.
+		moved, from := drag.moving, drag.from
+		*drag = tableDrag{fit: drag.fit, fitted: drag.fitted}
 		if moved {
 			h.st.clicks = 0
+			if !s.Columns.equal(&from) {
+				table.st.markChanged()
+			}
 		}
 	}
 	h.afterInput(func() {
-		if s.sorts() && col.Sortable && h.Clicked() {
+		if sorts && h.Clicked() {
 			if s.SortBy != nil {
 				// Cmd-click as Finder, Shift-click as web grids (TanStack
 				// Table, AG Grid, MUI).
@@ -337,6 +455,11 @@ func tableHeader(c *context, table, h *node, j int, s *ListState, drag *tableDra
 	if col.Fixed {
 		return
 	}
+	if _, ok := s.Columns.width(col); !ok && j == order[len(order)-1] {
+		// The last column sharing the room left ends at the table's end:
+		// an edge there would resize nothing, as AppKit's has none.
+		return
+	}
 	// The edge, which resizes the column, and fits it to its cells on a
 	// double click.
 	grip := t.Space(2)
@@ -348,7 +471,18 @@ func tableHeader(c *context, table, h *node, j int, s *ListState, drag *tableDra
 			drag.fit = id
 			c.rt.consumed = true
 		}
-		if dx, _, held := edge.Dragged(); held && dx != 0 {
+		dx, _, held := edge.Dragged()
+		switch {
+		case held && drag.resizing != id:
+			drag.resizing, drag.from = id, s.Columns
+		case !held && drag.resizing == id:
+			// Released: the table reports a new width.
+			if !s.Columns.equal(&drag.from) {
+				table.st.markChanged()
+			}
+			drag.resizing, drag.from = "", TableLayout{}
+		}
+		if held && dx != 0 {
 			if rtl {
 				// The edge is on the left: dragging it left widens.
 				dx = -dx
@@ -446,6 +580,7 @@ type tableFit struct {
 	cells  []*node
 	layout *TableLayout
 	drag   *tableDrag
+	rt     *engine
 	done   bool
 }
 
@@ -458,11 +593,19 @@ func (tf *tableFit) apply() {
 	tf.done, tf.drag.fit = true, ""
 	var w float32
 	for _, cell := range tf.cells {
+		rt := cell.c.rt
+		journalKeep(rt, &cell.width)
+		journalKeep(rt, &cell.grow)
+		journalKeep(rt, &cell.shrink)
 		cell.width = length{}
 		w = max(w, intrinsic(cell, true))
 	}
 	for _, cell := range tf.cells {
 		cell.width, cell.grow, cell.shrink = px(w), 0, 0
+		cell.parent.forgetIntrinsic()
+	}
+	if old, ok := tf.layout.Widths[tf.id]; ok && old == w {
+		return
 	}
 	if tf.layout.Widths == nil {
 		tf.layout.Widths = map[string]float32{}
@@ -470,6 +613,13 @@ func (tf *tableFit) apply() {
 		tf.layout.Widths = maps.Clone(tf.layout.Widths)
 	}
 	tf.layout.Widths[tf.id] = w
+	// The next frame builds the table again, which reports the width: the
+	// release of the press that fitted it reports no more.
+	tf.drag.fitted = true
+	if tf.drag.resizing == tf.id {
+		tf.drag.from = *tf.layout
+	}
+	tf.rt.animating = true
 }
 
 // syncSort keeps Sort, when set with SortBy, the first column SortBy sorts
@@ -491,7 +641,7 @@ func (s *ListState) sorts() bool { return s.Sort != nil || s.SortBy != nil }
 // sortPlace returns the place of col among the columns the rows are sorted
 // by, from 0, and whether it sorts them descending, or -1.
 func (s *ListState) sortPlace(col *TableColumn) (int, bool) {
-	if !col.Sortable {
+	if !col.sortable() {
 		return -1, false
 	}
 	id := col.id()
@@ -563,8 +713,8 @@ func (e *node) Selected(on bool) *node {
 		e.checked = 1
 		return e
 	}
-	t := e.c.theme
+	t := e.theme()
 	e.checked = 2
-	e.Background(t.Accent).TextColor(t.AccentText)
+	e.Background(e.c.accent(t)).TextColor(t.AccentText)
 	return e
 }

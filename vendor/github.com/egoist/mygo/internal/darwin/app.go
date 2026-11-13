@@ -20,6 +20,10 @@ type Backend struct {
 	source   uintptr
 	mainLoop uintptr
 
+	// background is AppOptions.Background: the app does not come to the
+	// front as it finishes launching.
+	background bool
+
 	// Lookup tables for Objective-C callbacks. Main thread only.
 	byDelegate map[id]*window
 	byWebView  map[id]*window
@@ -38,11 +42,17 @@ type Backend struct {
 	notifyDelegate id
 	// notifyAnswered records that the user has answered whether the app
 	// may show notifications; notifyWaiting holds those shown meanwhile.
-	notifyAnswered bool
-	notifyWaiting  []waitingNotification
+	notifyAnswered  bool
+	notifyWaiting   []waitingNotification
+	notifyPreparing map[string]func()
 
 	stepping       int
 	quitAfterModal bool
+
+	// orderingChildren tells that child windows are being ordered above
+	// their parent, or out with it (child_window.go): what AppKit tells
+	// of their ordering then orders nothing more.
+	orderingChildren bool
 
 	dockProgress dockProgress
 	// openedAtLogin records whether the system started the app as a login
@@ -95,8 +105,23 @@ func activationPolicy(p string) uintptr {
 
 func (b *Backend) Init(h platform.AppHandler, opts platform.AppOptions) error {
 	b.h = h
+	b.background = opts.Background
 	theBackend = b
 	registerClasses()
+
+	// AppKit's AutoFill heuristics watch every text input client for
+	// contact and password fields, in a helper process ("AutoFill (App)")
+	// and with sync calls that cost CPU and stall scrolling on macOS 26.
+	// MyGo draws its own text fields, which never take those suggestions.
+	// Ghostty, Zed and Chromium turn it off the same way. macOS 26 reads
+	// NSAutoFillHeuristicControllerEnabled; macOS 27 reads only
+	// NSAutoFillHeuristicsEnabled, and without it starts Safari's AutoFill
+	// helper as soon as a view takes text input.
+	no := nsBool(false)
+	send(send(class("NSUserDefaults"), "standardUserDefaults"), "registerDefaults:",
+		uintptr(send(class("NSDictionary"), "dictionaryWithObjects:forKeys:",
+			uintptr(nsArray(no, no)),
+			uintptr(nsArray(nsString("NSAutoFillHeuristicControllerEnabled"), nsString("NSAutoFillHeuristicsEnabled"))))))
 
 	b.app = send(class("NSApplication"), "sharedApplication")
 	send(b.app, "setActivationPolicy:", activationPolicy(opts.ActivationPolicy))
@@ -129,9 +154,12 @@ func (b *Backend) Init(h platform.AppHandler, opts platform.AppOptions) error {
 		uintptr(nsString("NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification")), 0)
 	// The languages and regional formats of the user: Foundation tells of
 	// a new current locale, and System Settings of new languages, a new
-	// time and date format, which the current locale may not change.
+	// time and date format, which the current locale may not change. The
+	// time format's notification comes before the current locale has the
+	// new format, so the region is read again at the current locale's,
+	// which Foundation posts under the constant's value, not its name.
 	send(center, "addObserver:selector:name:object:", uintptr(b.delegate), uintptr(sel("localeChanged:")),
-		uintptr(nsString("NSCurrentLocaleDidChangeNotification")), 0)
+		uintptr(currentLocaleDidChange()), 0)
 	distributed := send(class("NSDistributedNotificationCenter"), "defaultCenter")
 	for _, name := range []string{"AppleLanguagePreferencesChangedNotification", "AppleTimePreferencesChangedNotification", "AppleDatePreferencesChangedNotification"} {
 		send(distributed, "addObserver:selector:name:object:", uintptr(b.delegate), uintptr(sel("localeChanged:")), uintptr(nsString(name)), 0)
@@ -271,7 +299,7 @@ func registerAppDelegate() {
 		}),
 		method("applicationDidFinishLaunching:", func(self id, _ objc.SEL, n id) {
 			b := theBackend
-			if send(b.app, "activationPolicy") == nsApplicationActivationPolicyRegular {
+			if send(b.app, "activationPolicy") == nsApplicationActivationPolicyRegular && !b.background {
 				// Plain executables (go run) do not come to the front on
 				// their own.
 				send(b.app, "activateIgnoringOtherApps:", 1)
@@ -342,6 +370,7 @@ func registerAppDelegate() {
 		method("applicationShouldTerminateAfterLastWindowClosed:", func(self id, _ objc.SEL, app id) bool { return false }),
 		method("observeValueForKeyPath:ofObject:change:context:", func(self id, _ objc.SEL, keyPath, object, change id, ctx uintptr) {
 			if goString(keyPath) == "effectiveAppearance" {
+				theBackend.refreshSystemBackings()
 				theBackend.h.ThemeChanged()
 			}
 		}),
@@ -349,6 +378,7 @@ func registerAppDelegate() {
 			theBackend.h.DisplaysChanged()
 		}),
 		method("preferencesChanged:", func(self id, _ objc.SEL, n id) {
+			theBackend.refreshSystemBackings()
 			theBackend.h.ThemeChanged()
 		}),
 		method("localeChanged:", func(self id, _ objc.SEL, n id) {
@@ -366,10 +396,13 @@ func (a appController) SetActivationPolicy(p string) {
 	}
 }
 
-func (a appController) Activate()      { send(a.b.app, "activateIgnoringOtherApps:", 1) }
-func (a appController) Hide()          { send(a.b.app, "hide:", 0) }
-func (a appController) Unhide()        { send(a.b.app, "unhide:", 0) }
-func (a appController) IsHidden() bool { return sendBool(a.b.app, "isHidden") }
+func (a appController) Activate()                               { send(a.b.app, "activateIgnoringOtherApps:", 1) }
+func (a appController) AllowForeground()                        {}
+func (a appController) WithActivationToken(_ string, fn func()) { fn() }
+func (a appController) Hide()                                   { send(a.b.app, "hide:", 0) }
+func (a appController) Unhide()                                 { send(a.b.app, "unhide:", 0) }
+func (a appController) IsHidden() bool                          { return sendBool(a.b.app, "isHidden") }
+func (a appController) IsActive() bool                          { return sendBool(a.b.app, "isActive") }
 
 func (a appController) SetBadge(label string) {
 	tile := send(a.b.app, "dockTile")
@@ -466,14 +499,8 @@ func (a appController) Package() (platform.PackageInfo, bool) {
 	return info, ok
 }
 
-func (a appController) ClearBrowsingData(done func(error)) {
-	withPool(func() {
-		store := send(class("WKWebsiteDataStore"), "defaultDataStore")
-		types := send(class("WKWebsiteDataStore"), "allWebsiteDataTypes")
-		blk := newBlock(func(_ objc.Block) { a.b.runOnMain(func() { done(nil) }) })
-		send(store, "removeDataOfTypes:modifiedSince:completionHandler:", uintptr(types), uintptr(send(class("NSDate"), "distantPast")), uintptr(blk))
-		blk.Release()
-	})
+func (a appController) ClearBrowsingData(store platform.DataStore, types platform.SiteData, done func(error)) {
+	a.removeData(store, types, done)
 }
 
 // AddRecentDocument and ClearRecentDocuments use the shared document

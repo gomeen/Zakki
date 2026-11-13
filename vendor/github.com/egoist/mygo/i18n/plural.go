@@ -272,10 +272,10 @@ func search(list []string, s string) (int, bool) {
 // stripExtensions returns a normalized tag without its extensions and
 // private use subtags, as "-u-ca-buddhist".
 func stripExtensions(tag string) string {
-	parts := strings.Split(tag, "-")
-	for i, p := range parts {
-		if i > 0 && len(p) == 1 {
-			return strings.Join(parts[:i], "-")
+	for i := 1; i < len(tag); i++ {
+		// A one-letter subtag: "-x-", or "-x" at the end.
+		if tag[i-1] == '-' && tag[i] != '-' && (i+1 == len(tag) || tag[i+1] == '-') {
+			return tag[:i-1]
 		}
 	}
 	return tag

@@ -30,6 +30,10 @@ var singleInstance struct {
 type secondInstanceMessage struct {
 	Args       []string `json:"args"`
 	WorkingDir string   `json:"workingDir"`
+	// ActivationToken lets the first instance focus a window for this
+	// launch on Wayland, which only grants the focus with the launcher's
+	// token.
+	ActivationToken string `json:"activationToken,omitempty"`
 }
 
 // RequestSingleInstanceLock makes sure a single instance of the app runs.
@@ -54,10 +58,21 @@ func (a *Application) RequestSingleInstanceLock() bool {
 	}
 	path := singleInstanceSocket(singleInstanceKey(a.Name()))
 	wd, _ := os.Getwd()
-	msg, _ := json.Marshal(secondInstanceMessage{Args: os.Args[1:], WorkingDir: wd})
+	// Read before GTK starts in this process: it takes the token from the
+	// environment.
+	token := os.Getenv("XDG_ACTIVATION_TOKEN")
+	if token == "" {
+		token = os.Getenv("DESKTOP_STARTUP_ID")
+	}
+	msg, _ := json.Marshal(secondInstanceMessage{Args: os.Args[1:], WorkingDir: wd, ActivationToken: token})
 	for attempt := 0; attempt < 5; attempt++ {
 		if conn, err := net.DialTimeout("unix", path, time.Second); err == nil {
 			// Another instance owns the lock: hand over our arguments.
+			// On Windows the first instance, in the background, could not
+			// bring its windows to the front from OnSecondInstance: this
+			// launch, which the user just started, passes its right to
+			// the foreground on before it exits.
+			backend().App().AllowForeground()
 			_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
 			_, _ = conn.Write(msg)
 			if uc, ok := conn.(*net.UnixConn); ok {
@@ -123,10 +138,12 @@ func acceptSecondInstances(ln net.Listener) {
 				return
 			}
 			postMain(func() {
-				for _, fn := range singleInstance.handlers.snapshot() {
-					fn(msg.Args, msg.WorkingDir)
-				}
-				deliverArgs(msg.Args, msg.WorkingDir)
+				backend().App().WithActivationToken(msg.ActivationToken, func() {
+					for _, fn := range singleInstance.handlers.snapshot() {
+						fn(msg.Args, msg.WorkingDir)
+					}
+					deliverArgs(msg.Args, msg.WorkingDir)
+				})
 			})
 		}()
 	}

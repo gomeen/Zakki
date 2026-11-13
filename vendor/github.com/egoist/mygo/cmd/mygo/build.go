@@ -10,37 +10,46 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/egoist/mygo/internal/update"
 )
 
 type buildOptions struct {
-	debug        bool
-	sign         string // macOS signing identity
-	skipDMG      bool
-	skipNotarize bool
-	pkg          string            // directory of the main package
-	work         string            // for generated files
-	overlay      map[string]string // go build -overlay entries (the frontend)
+	debug         bool
+	sign          string // macOS signing identity
+	skipDMG       bool
+	skipNotarize  bool
+	skipInstaller bool              // no Windows installer, nor NSIS for it
+	pkg           string            // directory of the main package
+	work          string            // for generated files
+	overlay       map[string]string // go build -overlay entries (the frontend)
 }
 
 func runBuild(args []string) error {
 	flags := newFlags("build", "[flags] [dir]", `Builds a production app for each platform. It runs buildCommand from
 mygo.json, then compiles the app with the frontendDist files embedded, served
 at mygo://localhost/. macOS gets a signed .app bundle and a
-"<name> <version> <arch>.dmg" disk image, without the arch for
-darwin/universal, whose window invites dragging the app to Applications;
-other platforms get an executable. Linux also gets a Debian
-package, and the app as <name>-<version>-linux-<arch>.tar.gz with
-install.sh, which installs it for the user in ~/.local, where it can update
-itself. The contents of the
+"<slug>-<version>-<arch>.dmg" disk image (slug in mygo.json, by default
+the name in lower case), without the arch for darwin/universal, whose
+window invites dragging the app to Applications; other platforms get an
+executable. Linux also gets the app as
+<slug>-<version>-linux-<arch>.tar.gz with install.sh, which installs it
+for the user in ~/.local, where it can update itself, and the packages of
+linux.formats in mygo.json, by default all of them: a Debian package, an
+RPM package and a PKGBUILD, from which makepkg -si packages the archive
+for Arch Linux and installs it. The contents of the
 resources directory and the resources listed in mygo.json are copied into
 the bundle's Contents/Resources, or next to the executable, and the programs
 among them are signed with the app. Directories of resources named after a
 platform, such as resources/darwin or resources/linux-amd64, only ship with
 that platform's apps; darwin/universal combines darwin-arm64 and
-darwin-amd64. MyGo needs no cgo, so any platform can be compiled from any
-machine; signing and disk images need macOS. Windows also gets
-"<name> Setup <version> <arch>.exe", made with NSIS, which mygo build
-downloads on Windows when it is not installed.
+darwin-amd64. Go source files in resources, and the paths there that match
+resourcesExclude in mygo.json, such as "**/*.psd", are left out. MyGo needs
+no cgo, so any platform can be compiled from any machine; signing and disk
+images need macOS. Windows also gets
+"<slug>-setup-<version>-<arch>.exe", made with NSIS, which mygo build
+downloads on Windows when it is not installed; -skip-installer leaves both
+out.
 
 Set macos.signingIdentity in mygo.json (or -sign) to a Developer ID to ship
 outside the Mac App Store, and macos.notarize to notarize the disk image.
@@ -58,10 +67,15 @@ WebAssembly, named by its content: a static site, to serve from anywhere.`)
 	skipBuildCommand := flags.Bool("skip-build-command", false, "do not run buildCommand")
 	skipDMG := flags.Bool("skip-dmg", false, "do not create a disk image for macOS")
 	skipNotarize := flags.Bool("skip-notarize", false, "do not notarize even when macos.notarize is set")
+	skipInstaller := flags.Bool("skip-installer", false, "do not create the Windows installer (<slug>-setup-<version>-<arch>.exe), nor download NSIS for it")
 	sign := flags.String("sign", "", `macOS signing identity (default: macos.signingIdentity, or "-" for ad hoc)`)
 	out := flags.String("o", "", "output directory (default: out from mygo.json or dist)")
 	upload := flags.Bool("upload", false, "upload the installers and updates to the GitHub release of this version (updates.github), as a draft, or to the bucket of updates.s3")
 	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	targets, err := buildPlatforms(*platforms)
+	if err != nil {
 		return err
 	}
 	c, err := loadConfig(dirArg(flags.Args()))
@@ -80,12 +94,16 @@ WebAssembly, named by its content: a static site, to serve from anywhere.`)
 			return err
 		}
 	}
-	opts := buildOptions{debug: *debug, sign: c.MacOS.SigningIdentity, skipDMG: *skipDMG, skipNotarize: *skipNotarize}
+	opts := buildOptions{debug: *debug, sign: c.MacOS.SigningIdentity, skipDMG: *skipDMG, skipNotarize: *skipNotarize, skipInstaller: *skipInstaller}
 	if *sign != "" {
 		opts.sign = *sign
 	}
 	if c.MacOS.Notarize != nil && !opts.skipNotarize && opts.sign == "-" {
 		return fmt.Errorf("notarization needs a Developer ID signing identity: set macos.signingIdentity or pass -sign")
+	}
+	if c.MacOS.ProvisioningProfile != "" && opts.sign == "-" && slices.ContainsFunc(targets, func(p string) bool { return strings.HasPrefix(p, "darwin/") }) {
+		// Before building anything, as codesign would.
+		return errProfileAdHoc
 	}
 
 	con.startBanner("build")
@@ -130,7 +148,7 @@ WebAssembly, named by its content: a static site, to serve from anywhere.`)
 	}
 
 	var built []string
-	for _, p := range splitList(*platforms) {
+	for _, p := range targets {
 		if isWebPlatform(p) {
 			paths, err := buildWeb(c, opts)
 			built = append(built, paths...)
@@ -139,14 +157,20 @@ WebAssembly, named by its content: a static site, to serve from anywhere.`)
 			}
 			continue
 		}
-		goos, goarch, ok := strings.Cut(p, "/")
-		if !ok {
-			return fmt.Errorf("invalid platform %q, want GOOS/GOARCH", p)
-		}
+		goos, goarch, _ := strings.Cut(p, "/")
 		paths, err := buildPlatform(c, goos, goarch, opts)
 		built = append(built, paths...)
 		if err != nil {
 			return err
+		}
+	}
+	if c.Updates != nil {
+		sums, err := writeChecksums(c.path(c.Out), built)
+		if err != nil {
+			return err
+		}
+		if sums != "" {
+			built = append(built, sums)
 		}
 	}
 	con.println(buildSummary(c, built, time.Since(started)))
@@ -154,6 +178,30 @@ WebAssembly, named by its content: a static site, to serve from anywhere.`)
 		return publish(c, built)
 	}
 	return nil
+}
+
+// buildPlatforms checks the whole list before generation or a frontend build.
+// Go checks the architectures; the CLI only packages its supported platforms.
+func buildPlatforms(raw string) ([]string, error) {
+	targets := splitList(raw)
+	if len(targets) == 0 {
+		return nil, fmt.Errorf("-platform requires at least one target")
+	}
+	for _, p := range targets {
+		if isWebPlatform(p) {
+			continue
+		}
+		goos, goarch, ok := strings.Cut(p, "/")
+		if !ok || goos == "" || goarch == "" || strings.Contains(goarch, "/") {
+			return nil, fmt.Errorf("invalid platform %q, want GOOS/GOARCH or web", p)
+		}
+		switch goos {
+		case "darwin", "linux", "windows":
+		default:
+			return nil, fmt.Errorf("unsupported build platform %q: use darwin, linux, windows or web", p)
+		}
+	}
+	return targets, nil
 }
 
 // buildSummary lists what a build made, by directory, with sizes.
@@ -213,6 +261,7 @@ func buildPlatform(c *Config, goos, goarch string, opts buildOptions) ([]string,
 		// A GUI app, not a console one.
 		ldflags += " -H=windowsgui"
 	}
+	ldflags += extraLDFlags()
 	compile := func(arch, out string) error {
 		t := con.start("Compiling " + goos + "/" + arch)
 		err := func() error {
@@ -237,6 +286,10 @@ func buildPlatform(c *Config, goos, goarch string, opts buildOptions) ([]string,
 		return t.end(err, "Compiled "+goos+"/"+arch)
 	}
 
+	if err := prepareNative(c, goos, goarch, nativeRelease); err != nil {
+		return nil, err
+	}
+	defer func() { c.native = nil }()
 	name := c.executableName()
 	var artifacts []string
 	switch goos {
@@ -262,10 +315,8 @@ func buildPlatform(c *Config, goos, goarch string, opts buildOptions) ([]string,
 		if err != nil {
 			return nil, err
 		}
-		var icns []byte
-		if car != nil && car.icns != nil {
-			icns = car.icns // the .icon's own rendering for older macOS
-		} else if icns, err = appIcon(c); err != nil {
+		icns, err := bundleICNS(c, car)
+		if err != nil {
 			return nil, err
 		}
 		app, err := writeBundle(c, stage, bin, icns, car, res)
@@ -315,11 +366,11 @@ func buildPlatform(c *Config, goos, goarch string, opts buildOptions) ([]string,
 		}
 		artifacts = append(artifacts, exe)
 	default:
-		exe := filepath.Join(stage, slugify(name))
+		exe := filepath.Join(stage, c.slug())
 		if err := compile(goarch, exe); err != nil {
 			return nil, err
 		}
-		files, err := writeLinuxDesktop(c, stage, slugify(name))
+		files, err := writeLinuxDesktop(c, stage, c.slug())
 		if err != nil {
 			return nil, err
 		}
@@ -342,8 +393,14 @@ func buildPlatform(c *Config, goos, goarch string, opts buildOptions) ([]string,
 		for _, e := range all {
 			installed = append(installed, e.Name())
 		}
+		// The list of what this version installs, from which the update to
+		// the next one knows what to remove.
+		if err := update.WriteFileList(stage, installed); err != nil {
+			return nil, err
+		}
+		installed = append(installed, update.FileList)
 	}
-	if goos == "windows" {
+	if goos == "windows" && !opts.skipInstaller {
 		setup, err := writeInstaller(c, stage, opts.work, name+".exe", goarch, installed)
 		if err != nil {
 			return nil, err
@@ -357,20 +414,31 @@ func buildPlatform(c *Config, goos, goarch string, opts buildOptions) ([]string,
 			artifacts = append(artifacts, setup)
 		}
 	}
-	if _, ok := debArch[goarch]; goos == "linux" && ok {
-		deb, err := writeDeb(c, stage, slugify(name), goarch, installed)
-		if err != nil {
-			return nil, err
-		}
-		artifacts = append(artifacts, deb)
+	var files []string
+	if goos == "linux" {
+		files, err = writeLinuxPackages(c, stage, target, goarch, installed)
+	} else {
+		files, err = writeArchive(c, stage, target, installed)
 	}
-	files, err := writeArchive(c, stage, target, installed)
 	if err != nil {
 		return nil, err
 	}
 	artifacts = append(artifacts, files...)
-	if goos == "linux" {
+	// install.sh installs on Linux, and with updates on macOS; install.ps1
+	// runs the Windows installer of the latest version, so a build without
+	// one has none.
+	if goos == "linux" || goos == "darwin" && c.Updates != nil {
 		script, err := writeInstallScript(c, stage)
+		if err != nil {
+			return nil, err
+		}
+		artifacts = append(artifacts, script)
+	}
+	if goos == "windows" && c.Updates != nil && opts.skipInstaller {
+		warnf("Not writing install.ps1, which runs the installer that -skip-installer leaves out")
+	}
+	if goos == "windows" && c.Updates != nil && slices.ContainsFunc(artifacts, func(a string) bool { return filepath.Base(a) == installerFileName(c, goarch) }) {
+		script, err := writeInstallPS1(c, stage)
 		if err != nil {
 			return nil, err
 		}
@@ -398,8 +466,46 @@ func buildPlatform(c *Config, goos, goarch string, opts buildOptions) ([]string,
 	return artifacts, nil
 }
 
+// writeLinuxPackages writes the Linux app in stage, the files of installed,
+// as the packages of linux.formats for goarch and their archive with its
+// update files, which install.sh installs and updates from, and returns
+// their paths.
+func writeLinuxPackages(c *Config, stage, target, goarch string, installed []string) ([]string, error) {
+	var written []string
+	if _, ok := debArch[goarch]; ok && c.Linux.builds("deb") {
+		deb, err := writeDeb(c, stage, c.slug(), goarch, installed)
+		if err != nil {
+			return nil, err
+		}
+		written = append(written, deb)
+	}
+	if _, ok := rpmArch[goarch]; ok && c.Linux.builds("rpm") {
+		rpm, err := writeRpm(c, stage, c.slug(), goarch, installed)
+		if err != nil {
+			return nil, err
+		}
+		written = append(written, rpm)
+	}
+	files, err := writeArchive(c, stage, target, installed)
+	if err != nil {
+		return nil, err
+	}
+	written = append(written, files...)
+	// Arch Linux packages the app from its archive, as the Debian package
+	// has it.
+	if _, ok := archArch[goarch]; ok && c.Linux.builds("pkgbuild") {
+		archive := files[slices.IndexFunc(files, func(f string) bool { return strings.HasSuffix(f, ".tar.gz") })]
+		pkg, err := writePKGBUILD(c, stage, c.slug(), goarch, installed, archive)
+		if err != nil {
+			return nil, err
+		}
+		written = append(written, pkg...)
+	}
+	return written, nil
+}
+
 // inspectorTag leaves the inspector of native UI out of a build (package
-// ui's inspector_off.go), some 250 KB of a binary: production builds have
+// ui's inspector_off.go), some 400 KB of a binary: production builds have
 // their developer tools off.
 const inspectorTag = "mygo_noinspector"
 
@@ -407,11 +513,16 @@ const inspectorTag = "mygo_noinspector"
 // production builds, as to look into one with DevToolsEnabled.
 func keepInspector() bool { return os.Getenv("MYGO_INSPECTOR") == "1" }
 
+// noDownloadTag leaves out of a build what downloads native libraries for
+// programs that are not packaged apps (package ffi's fetch.go), and HTTP
+// with it: packaged apps carry theirs.
+const noDownloadTag = "mygo_nodownload"
+
 // productionTags returns the -tags of a build: those GOFLAGS sets, which a
-// -tags flag would override, and the inspector's in a production build
-// unless it keeps it.
+// -tags flag would override, the downloader's, and the inspector's in a
+// production build unless it keeps it.
 func productionTags(debug bool) []string {
-	if debug || keepInspector() {
+	if debug {
 		return nil
 	}
 	var tags []string
@@ -420,7 +531,21 @@ func productionTags(debug bool) []string {
 			tags = append(tags, v)
 		}
 	}
-	return []string{"-tags", strings.Join(append(tags, inspectorTag), ",")}
+	tags = append(tags, noDownloadTag)
+	if !keepInspector() {
+		tags = append(tags, inspectorTag)
+	}
+	return []string{"-tags", strings.Join(tags, ",")}
+}
+
+// extraLDFlags returns the -ldflags of MYGO_LDFLAGS, which a build adds
+// after its own, so that its -X flags win: GOFLAGS cannot give any, as
+// the -ldflags of mygo build override those of GOFLAGS.
+func extraLDFlags() string {
+	if f := strings.TrimSpace(os.Getenv("MYGO_LDFLAGS")); f != "" {
+		return " " + f
+	}
+	return ""
 }
 
 // packageFlags are the -ldflags that link what mygo.json says about the app
@@ -557,6 +682,10 @@ func writeLinuxDesktop(c *Config, dir, name string) ([]string, error) {
 // have them in (mygo.appName, mygo.appDescription), which launchers show
 // for the system's locale.
 func linuxDesktopEntry(c *Config, exec, icon string) string {
+	// The WM_CLASS of the window is the basename of argv[0], which the
+	// .deb and the PKGBUILD name with its path in /opt, before the arguments
+	// of a file or URL land in Exec.
+	wmClass := filepath.Base(exec)
 	categories := c.Linux.Categories
 	if len(categories) == 0 {
 		categories = []string{"Utility"}
@@ -596,6 +725,11 @@ func linuxDesktopEntry(c *Config, exec, icon string) string {
 		exec += " %U"
 	}
 	b.WriteString("Exec=" + exec + "\nIcon=" + icon + "\nCategories=" + strings.Join(categories, ";") + ";\nTerminal=false\n")
+	// The window of a GTK app is its executable's, whose WM_CLASS is the
+	// program name: an X11 session groups a window with the entry that names
+	// it here, and shows its icon in the taskbar. Wayland matches by app id,
+	// which GTK takes from the same name.
+	b.WriteString("StartupWMClass=" + wmClass + "\n")
 	if len(mime) > 0 {
 		b.WriteString("MimeType=" + strings.Join(mime, ";") + ";\n")
 	}

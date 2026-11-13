@@ -3,14 +3,18 @@ package ui
 import (
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/internal/text"
 )
 
+// newPatchEditor 供补丁回归测试构造编辑器；这些测试只看布局与绘制，时钟取零值。
+func newPatchEditor() *editor { return newEditor(func() time.Time { return time.Time{} }) }
+
 func TestTextRangeStylesMergeIndependently(t *testing.T) {
 	red, blue, yellow := RGB(220, 30, 40), RGB(20, 60, 220), RGB(240, 220, 80)
 	base := TextRange{Start: 0, End: 10, Font: "serif", Italic: true, Underline: true, WavyUnderline: true, DecorationColor: red, Color: red, Background: yellow, Weight: 400}
-	ed := newEditor()
+	ed := newPatchEditor()
 	ed.ranges = []TextRange{
 		base,
 		{Start: 2, End: 8, Font: "monospace"},
@@ -68,7 +72,7 @@ func TestTextRangeLayoutStylesShapeKey(t *testing.T) {
 		{"weight", TextRange{Weight: 700}, text.Span{Weight: 700}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ed := newEditor()
+			ed := newPatchEditor()
 			r := tc.rangeStyle
 			r.Start, r.End = 2, 8
 			ed.ranges = []TextRange{r}
@@ -99,7 +103,7 @@ func TestTextRangeLayoutStylesShapeKey(t *testing.T) {
 }
 
 func TestTextRangePaintStylesKeepShapeKey(t *testing.T) {
-	ed := newEditor()
+	ed := newPatchEditor()
 	key := func(ranges ...TextRange) string {
 		ed.ranges, ed.apart = append(ed.ranges[:0], ranges...), false
 		key, _ := ed.rangeSpans(0, 10)
@@ -137,7 +141,7 @@ func TestTextRangeDecorationOnlyPaint(t *testing.T) {
 		{Underline: true}, {WavyUnderline: true}, {DecorationColor: color},
 	} {
 		r.Start, r.End = 1, 4
-		ed := newEditor()
+		ed := newPatchEditor()
 		ed.ranges = []TextRange{r}
 		key, paint := ed.rangeSpans(0, 6)
 		if key != "" || paint == nil {
@@ -165,7 +169,7 @@ func TestTextRangeStylesCompositionSplitAndRestore(t *testing.T) {
 		{"after", 8, []text.Span{{End: 1}, {End: 7, Family: r.Font, Italic: true, Weight: 700}}, []Span{{}, styled}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ed := newEditor()
+			ed := newPatchEditor()
 			ed.setText("甲乙丙丁戊己庚辛壬癸")
 			ed.ranges = []TextRange{r}
 			before, _ := ed.rangeSpans(1, 9)

@@ -84,7 +84,8 @@ func (d *inotifyWatch) Add(t platform.FileWatchTarget) error {
 		return platform.ErrUnsupported
 	}
 	if !t.Directory {
-		return nil
+		// The watch of its directory names what changes in a file.
+		return platform.ErrUnsupported
 	}
 	fd, err := syscall.Open(t.Path, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
 	if err != nil {

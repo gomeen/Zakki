@@ -69,7 +69,7 @@ func (*Backend) NewFileWatch(notify func(platform.FileWatchNotice)) (platform.Fi
 
 func (d *directoryWatch) Add(t platform.FileWatchTarget) error {
 	if !t.Directory {
-		return nil // files are watched through their directory
+		return platform.ErrUnsupported // files are watched through their directory
 	}
 	path, err := syscall.UTF16PtrFromString(t.Path)
 	if err != nil {

@@ -24,9 +24,14 @@ type CloseEvent struct {
 }
 
 // QuitEvent is passed to Application.OnBeforeQuit and OnWillQuit listeners.
-// Preventing it cancels the quit.
+// Preventing it cancels the quit, unless SessionEnding is set.
 type QuitEvent struct {
 	Preventable
+	// SessionEnding is true when the OS ends the session (logout, restart,
+	// shutdown) on Windows and macOS: the quit cannot be canceled, and the
+	// process may end once the quit listeners return, so they must do
+	// their work synchronously (see Application.OnBeforeQuit).
+	SessionEnding bool
 }
 
 // NavigateEvent is passed to Page.OnWillNavigate listeners. Preventing it
@@ -35,7 +40,9 @@ type NavigateEvent struct {
 	Preventable
 	URL string
 	// UserInitiated is true when the navigation was triggered by a user
-	// gesture such as clicking a link.
+	// gesture such as clicking a link, or a click whose handler sets
+	// location.href. It is false for a page's script navigating on its
+	// own, as from a timer.
 	UserInitiated bool
 }
 

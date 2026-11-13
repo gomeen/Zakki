@@ -73,7 +73,7 @@ func bufferInputBase(c *context, value *TextBuffer, multiline bool) *node {
 	}
 	st := e.st
 	if st.editor == nil || st.editor.document != value {
-		st.editor = newEditor()
+		st.editor = newEditor(c.rt.now)
 		st.editor.document = value
 		st.editor.loadBuffer(value.Snapshot())
 		st.editor.caret, st.editor.anchor = st.editor.buf.n, st.editor.buf.n

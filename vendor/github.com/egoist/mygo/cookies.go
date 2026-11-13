@@ -1,6 +1,7 @@
 package mygo
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
 	"net/url"
@@ -63,13 +64,38 @@ type CookieFilter struct {
 	Path string
 }
 
-// CookiesModule reads and changes the cookies of the app's pages. Use the
-// Cookies singleton.
-type CookiesModule struct{}
+// CookiesModule reads and changes the cookies of a session's pages. Use
+// the Cookies singleton for the default session, or Session.Cookies.
+type CookiesModule struct {
+	s *Session // nil for the default session
+	// calls does the work of the methods. It is not a part of every app:
+	// PageOptions reach Session, whose exported methods and those of its
+	// fields' types an app that binds a service keeps (see "Binary size"
+	// in the architecture guide), so the methods reach the cookie code
+	// only through what Cookies and the constructors of sessions hold.
+	calls *cookieCalls
+}
+
+// cookieCalls are the functions of CookiesModule's methods, and of
+// Session.ClearData.
+type cookieCalls struct {
+	list      func(CookiesModule, CookieFilter) ([]Cookie, error)
+	set       func(CookiesModule, Cookie) error
+	delete    func(CookiesModule, Cookie) error
+	clear     func(CookiesModule) error
+	clearData func(*Session, SiteData) error
+}
+
+var sessionCalls = cookieCalls{listCookies, setCookie, deleteCookie, clearCookies, clearSessionData}
+
+// errNoSession is what the methods of a CookiesModule the app made itself
+// fail with.
+var errNoSession = errors.New("mygo: cookies: a CookiesModule of no session; use mygo.Cookies or Session.Cookies")
 
 // Cookies reads and changes the cookies of the app's pages, HTTPOnly ones
-// included: the default cookie store, which every window shares, and
-// which outlives the app as the system webview keeps it. Set one, e.g., to
+// included: those of the default session, which every window shares
+// unless its PageOptions.Session names another, and which outlives the
+// app as the system webview keeps it. Set one, e.g., to
 // sign the pages in with a token the backend got, before the first page
 // loads:
 //
@@ -80,14 +106,21 @@ type CookiesModule struct{}
 // main thread the app keeps handling events while they wait. Cookies may
 // carry the user's credentials: bind a backend method that does what the
 // page needs rather than giving the page the cookies.
-var Cookies CookiesModule
+var Cookies = CookiesModule{calls: &sessionCalls}
 
 // List returns the cookies f chooses, sorted by domain, path and name:
 //
 //	all, err := mygo.Cookies.List(mygo.CookieFilter{})
 //	sent, err := mygo.Cookies.List(mygo.CookieFilter{URL: "https://example.com/account"})
 //	sessions, err := mygo.Cookies.List(mygo.CookieFilter{Name: "session", Domain: "example.com"})
-func (CookiesModule) List(f CookieFilter) ([]Cookie, error) {
+func (m CookiesModule) List(f CookieFilter) ([]Cookie, error) {
+	if m.calls == nil {
+		return nil, errNoSession
+	}
+	return m.calls.list(m, f)
+}
+
+func listCookies(m CookiesModule, f CookieFilter) ([]Cookie, error) {
 	needsApp("Cookies.List")
 	if f.URL != "" {
 		u, err := url.Parse(f.URL)
@@ -99,8 +132,12 @@ func (CookiesModule) List(f CookieFilter) ([]Cookie, error) {
 		f.URL = u.String()
 	}
 	domain := strings.ToLower(strings.TrimPrefix(f.Domain, "."))
-	result := cookieCall(func(done func(cookieResult)) {
-		backend().App().ListCookies(f.URL, func(values []platform.Cookie, err error) {
+	result := nativeCall(func(done func(nativeResult)) {
+		store, ok := m.store(done)
+		if !ok {
+			return
+		}
+		backend().App().ListCookies(store, f.URL, func(values []platform.Cookie, err error) {
 			out := make([]Cookie, 0, len(values))
 			for _, c := range values {
 				c.Domain = strings.ToLower(c.Domain)
@@ -120,7 +157,7 @@ func (CookiesModule) List(f CookieFilter) ([]Cookie, error) {
 				}
 				return strings.Compare(a.Name, b.Name)
 			})
-			done(cookieResult{out, err})
+			done(nativeResult{cookies: out, err: err})
 		})
 	})
 	return result.cookies, result.err
@@ -133,18 +170,27 @@ func (CookiesModule) List(f CookieFilter) ([]Cookie, error) {
 // ";" or spaces at either end, and the name no "=". An Expires in the past
 // deletes the cookie. The engine may still drop the cookie or expire it
 // earlier, as it would one a server set.
-func (CookiesModule) Set(c Cookie) error {
+func (m CookiesModule) Set(c Cookie) error {
+	if m.calls == nil {
+		return errNoSession
+	}
+	return m.calls.set(m, c)
+}
+
+func setCookie(m CookiesModule, c Cookie) error {
 	needsApp("Cookies.Set")
 	c, err := normalizeCookie(c)
 	if err != nil {
 		return err
 	}
 	if !c.Expires.IsZero() && !c.Expires.After(time.Now()) {
-		return Cookies.Delete(c)
+		return deleteCookie(m, c)
 	}
 	p := platform.Cookie{Name: c.Name, Value: c.Value, Domain: c.Domain, Path: c.Path, Expires: c.Expires, Secure: c.Secure, HTTPOnly: c.HTTPOnly, SameSite: string(c.SameSite)}
-	return cookieCall(func(done func(cookieResult)) {
-		backend().App().SetCookie(p, func(err error) { done(cookieResult{err: err}) })
+	return nativeCall(func(done func(nativeResult)) {
+		if store, ok := m.store(done); ok {
+			backend().App().SetCookie(store, p, func(err error) { done(nativeResult{err: err}) })
+		}
 	}).err
 }
 
@@ -153,68 +199,102 @@ func (CookiesModule) Set(c Cookie) error {
 // matched without regard to case and with its leading dot, if any:
 // "example.com" and ".example.com" are different cookies. An empty path
 // is "/". Deleting a cookie that does not exist is not an error.
-func (CookiesModule) Delete(c Cookie) error {
+func (m CookiesModule) Delete(c Cookie) error {
+	if m.calls == nil {
+		return errNoSession
+	}
+	return m.calls.delete(m, c)
+}
+
+func deleteCookie(m CookiesModule, c Cookie) error {
 	needsApp("Cookies.Delete")
 	key, err := normalizeCookieKey(c.Name, c.Domain, c.Path)
 	if err != nil {
 		return err
 	}
-	return cookieCall(func(done func(cookieResult)) {
-		backend().App().DeleteCookie(key, func(err error) { done(cookieResult{err: err}) })
+	return nativeCall(func(done func(nativeResult)) {
+		if store, ok := m.store(done); ok {
+			backend().App().DeleteCookie(store, key, func(err error) { done(nativeResult{err: err}) })
+		}
 	}).err
 }
 
 // Clear deletes every cookie, and nothing else the pages stored, unlike
-// App.ClearBrowsingData. Pages may set new ones meanwhile.
-func (CookiesModule) Clear() error {
+// App.ClearBrowsingData and Session.ClearData. Pages may set new ones
+// meanwhile.
+func (m CookiesModule) Clear() error {
+	if m.calls == nil {
+		return errNoSession
+	}
+	return m.calls.clear(m)
+}
+
+func clearCookies(m CookiesModule) error {
 	needsApp("Cookies.Clear")
-	return cookieCall(func(done func(cookieResult)) {
-		backend().App().ClearCookies(func(err error) { done(cookieResult{err: err}) })
+	return nativeCall(func(done func(nativeResult)) {
+		if store, ok := m.store(done); ok {
+			backend().App().ClearCookies(store, func(err error) { done(nativeResult{err: err}) })
+		}
 	}).err
 }
 
-type cookieResult struct {
+// store returns the data store of the module's session, nil for the
+// default one, or fails the call with why there is none. Main thread
+// only.
+func (m CookiesModule) store(done func(nativeResult)) (platform.DataStore, bool) {
+	store, err := m.s.dataStore()
+	if err != nil {
+		done(nativeResult{err: err})
+		return nil, false
+	}
+	return store, true
+}
+
+// nativeResult is what an asynchronous call of the backend gives: the
+// cookies of Cookies.List, or the list CompileContentRules made.
+type nativeResult struct {
 	cookies []Cookie
+	list    any
 	err     error
 }
 
-// cookieCalls are the calls waiting for the backend, which may never
-// complete them once the app quits: stopCookieCalls fails them. It is
-// used on the main thread only.
-var cookieCalls = struct {
+// nativeCalls are the calls waiting for the backend, of Cookies and
+// CompileContentRules, which it may never complete once the app quits:
+// stopNativeCalls fails them. It is used on the main thread only.
+var nativeCalls = struct {
 	stopped bool
 	next    uint64
-	pending map[uint64]func(cookieResult)
-}{pending: make(map[uint64]func(cookieResult))}
+	pending map[uint64]func(nativeResult)
+}{pending: make(map[uint64]func(nativeResult))}
 
-func cookieCall(start func(func(cookieResult))) cookieResult {
-	ch := make(chan cookieResult, 1)
+func nativeCall(start func(func(nativeResult))) nativeResult {
+	ch := make(chan nativeResult, 1)
 	if !postMain(func() {
-		if cookieCalls.stopped {
-			deliver(ch, cookieResult{err: errLoopStopped})
+		if nativeCalls.stopped {
+			deliver(ch, nativeResult{err: errLoopStopped})
 			return
 		}
-		cookieCalls.next++
-		id := cookieCalls.next
-		done := func(r cookieResult) {
-			if _, ok := cookieCalls.pending[id]; !ok {
+		nativeCalls.next++
+		id := nativeCalls.next
+		done := func(r nativeResult) {
+			if _, ok := nativeCalls.pending[id]; !ok {
 				return
 			}
-			delete(cookieCalls.pending, id)
+			delete(nativeCalls.pending, id)
 			deliver(ch, r)
 		}
-		cookieCalls.pending[id] = done
+		nativeCalls.pending[id] = done
 		start(done)
 	}) {
-		return cookieResult{err: errLoopStopped}
+		return nativeResult{err: errLoopStopped}
 	}
 	return await(ch)
 }
 
-func stopCookieCalls() {
-	cookieCalls.stopped = true
-	for _, done := range cookieCalls.pending {
-		done(cookieResult{err: errLoopStopped})
+func stopNativeCalls() {
+	nativeCalls.stopped = true
+	for _, done := range nativeCalls.pending {
+		done(nativeResult{err: errLoopStopped})
 	}
 }
 

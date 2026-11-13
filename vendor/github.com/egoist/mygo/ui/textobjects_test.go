@@ -12,7 +12,7 @@ import (
 func closeObject(a, b float32) bool { return math.Abs(float64(a-b)) < 0.1 }
 
 func TestTextInputObjectDimensionsMergeAndIME(t *testing.T) {
-	ed := newEditor()
+	ed := newPatchEditor()
 	ed.setText("a\uFFFCb")
 	e := &node{st: &state{editor: ed}, flags: flagEditable}
 	e.TextRanges(TextRange{Start: 0, End: 99, ObjectWidth: 41, ObjectHeight: 20},
@@ -213,7 +213,7 @@ func TestTextObjectIndexedGrowingHeightInvalidation(t *testing.T) {
 }
 
 func TestTextObjectAtomicEditing(t *testing.T) {
-	ed := newEditor()
+	ed := newPatchEditor()
 	ed.setText("a\uFFFCb")
 	ed.move(2, false)
 	ed.insert("x")

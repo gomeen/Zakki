@@ -8,8 +8,12 @@ import (
 // FileWatchTarget is a file or directory the core enrolls in a FileWatch.
 // IDs are never reused within a FileWatch.
 type FileWatchTarget struct {
-	ID        uint64
-	Path      string
+	ID   uint64
+	Path string
+	// Directory says the target is a directory. A backend that watches a
+	// file only through its directory, which the core enrolls before it
+	// lists it, returns ErrUnsupported for a target that isn't one, and
+	// the core enrolls no more files.
 	Directory bool
 	// Info is what the core's scan saw at Path. Backends open the target
 	// and check it is still the same file, so that a replacement racing

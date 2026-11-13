@@ -154,8 +154,6 @@ type itemDrag struct {
 	items []int
 }
 
-func (d *itemDrag) dragCount() int { return len(d.items) }
-
 // dragged returns the items a drag from item i moves: those chosen when it
 // is one of them, else item i.
 func (s *GridState) dragged(i, n int) []int {
@@ -268,7 +266,10 @@ func (s *GridState) cell(c *context, grid *node, i, n int, height float32, item 
 	}
 	s.built[cell.id], s.rt = i, c.rt
 	if s.Reorder != nil {
-		cell.dragFrom(func() any { return &itemDrag{s: s, items: s.dragged(i, n)} })
+		cell.dragFrom(func() any {
+			items := s.dragged(i, n)
+			return countedDrag{&itemDrag{s: s, items: items}, len(items)}
+		})
 		if cell.Dragging() {
 			cell.Opacity(0.4)
 		}
@@ -277,8 +278,8 @@ func (s *GridState) cell(c *context, grid *node, i, n int, height float32, item 
 		cell.flags |= flagClickable | flagHover | flagChoosable
 		cell.afterInput(func() {
 			if cell.Clicked() {
-				s.click(grid, i, cell.ClickModifiers())
-				grid.Focus()
+				s.click(grid, i, n, cell.ClickModifiers())
+				grid.focus(false)
 			}
 			if cell.DoubleClicked() {
 				grid.st.markSubmitted()
@@ -303,7 +304,7 @@ func (s *GridState) cell(c *context, grid *node, i, n int, height float32, item 
 			// Where the keys moved without choosing.
 			cell.DrawOver(func(p *Painter, r Rect) {
 				if grid.FocusVisible() {
-					p.FocusRing(Rect{r.X + 3, r.Y + 3, r.W - 6, r.H - 6}, cell.radius)
+					p.focusRingOf(grid, Rect{r.X + 3, r.Y + 3, r.W - 6, r.H - 6}, cell.radius)
 				}
 			})
 		}
@@ -320,13 +321,13 @@ func (s *GridState) chosen(i int) bool {
 	return s.Selected != nil && *s.Selected == i
 }
 
-// click chooses item i as a click with mods does.
-func (s *GridState) click(grid *node, i int, mods Modifiers) {
+// click chooses item i of n as a click with mods does.
+func (s *GridState) click(grid *node, i, n int, mods Modifiers) {
 	switch {
 	case s.Selection == nil:
 		s.choose(grid, i)
 	case mods&Shift != 0:
-		s.extend(grid, i)
+		s.extend(grid, i, n)
 	case mods&Cmd != 0:
 		s.Selection.set(s.key(i), !s.Selection.has(s.key(i)))
 		*s.Selected, s.pivot = i, i
@@ -352,10 +353,11 @@ func (s *GridState) choose(grid *node, i int) {
 	}
 }
 
-// extend chooses the items from the pivot to i.
-func (s *GridState) extend(grid *node, i int) {
+// extend chooses the items from the pivot to i, of n: i alone when the
+// pivot is past them, as after the app took items out.
+func (s *GridState) extend(grid *node, i, n int) {
 	p := s.pivot
-	if p < 0 || s.Selection == nil {
+	if p < 0 || p >= n || s.Selection == nil {
 		s.choose(grid, i)
 		return
 	}
@@ -429,7 +431,7 @@ func (s *GridState) keys(grid *node, n int) {
 		if s.pivot < 0 || !in {
 			s.pivot = max(at, 0)
 		}
-		s.extend(grid, to)
+		s.extend(grid, to, n)
 	} else {
 		s.choose(grid, to)
 	}

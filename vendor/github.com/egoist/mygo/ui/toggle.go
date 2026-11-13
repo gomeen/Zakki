@@ -145,6 +145,8 @@ func (p segmentedParts) Segment(i int) *node {
 // click chooses a segment, as do the arrows while it has the focus, and
 // Changed reports a new choice. Assistive technology sees a radio group;
 // name it with Label. For icons, build the segments with SegmentedBase.
+// Its segments are as wide as their labels; FillEqually makes it as wide
+// as its parent, its segments sharing the width.
 //
 //	ui.Segmented(c, &app.view, "List", "Grid").Label("View")
 func coreSegmented(c *context, selected *int, labels ...string) *node {
@@ -166,4 +168,24 @@ func coreSegmented(c *context, selected *int, labels ...string) *node {
 	})
 	c.buttons = saved
 	return g
+}
+
+// FillEqually makes a Segmented or a ToggleGroup as wide as its parent's
+// content, as FillWidth does, and shares that width equally among its
+// segments, as AppKit's fillEqually distribution: the one chosen takes
+// its share, its label in the middle, and a label longer than its share
+// ends with an ellipsis. The segments look and behave as they do
+// otherwise, disabled ones too. Call it on SegmentedBase's Track after
+// building its segments; on other elements it is FillWidth. A width set
+// after it sets the control's, which its segments share still.
+//
+//	ui.Segmented(c, &app.theme, "Light", "Dark", "System").FillEqually().Label("Appearance")
+func (e *node) FillEqually() *node {
+	e.width = percent(100)
+	for s := e.first; s != nil; s = s.next {
+		if s.segment {
+			s.Grow(1)
+		}
+	}
+	return e
 }

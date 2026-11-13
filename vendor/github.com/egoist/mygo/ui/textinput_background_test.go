@@ -3,7 +3,7 @@ package ui
 import "testing"
 
 func TestTextRangeBackgroundKeepsShapeKey(t *testing.T) {
-	ed := newEditor()
+	ed := newPatchEditor()
 	ed.setText("abcdefghij")
 	key := func(ranges ...TextRange) string {
 		ed.ranges, ed.apart = append(ed.ranges[:0], ranges...), false
@@ -27,7 +27,7 @@ func TestTextRangeBackgroundKeepsShapeKey(t *testing.T) {
 }
 
 func TestTextRangeBackgroundCompositionSplit(t *testing.T) {
-	ed := newEditor()
+	ed := newPatchEditor()
 	ed.setText("abcdef")
 	ed.caret, ed.compose = 3, "中文😀"
 	bg := RGB(230, 200, 50)

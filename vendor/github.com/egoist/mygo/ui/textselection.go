@@ -70,7 +70,7 @@ func (e *node) prepareSelectable() {
 	}
 	ed := e.st.editor
 	if ed == nil {
-		ed = newEditor()
+		ed = newEditor(e.c.rt.now)
 		ed.readOnly, ed.multiline = true, true
 		e.st.editor = ed
 	}
@@ -98,7 +98,7 @@ func (e *node) prepareSelectable() {
 // (absolute children paint last). Inline children are already in their
 // paragraph's text, and must not be copied a second time.
 func (rt *engine) collectSelectable(e *node, hidden bool) {
-	hidden = hidden || e.flags&(flagInvisible|flagInert) != 0
+	hidden = hidden || e.flags&(flagInvisible|flagInert) != 0 || e.hidden || e.ignoreInput
 	if !hidden && e.kind == kindText && !e.isInline() && e.st.flags&flagDisabled == 0 && e.flags&flagSelectable != 0 {
 		rt.texts = append(rt.texts, e.st)
 	}
@@ -313,7 +313,7 @@ func (rt *engine) pressTextSelection(s *state, x, y float32, mods Modifiers, cli
 	s = rt.states[p.id]
 	rt.focused, rt.focusVisible = s.id, false
 	rt.pressed = s
-	s.pressed, s.pressMods = true, mods
+	s.pressed, s.pressButton, s.pressMods = true, 0, mods
 	s.editor.dragging = false
 	return true
 }

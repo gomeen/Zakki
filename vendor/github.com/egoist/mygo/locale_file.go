@@ -33,7 +33,7 @@ func readLocaleFile() string {
 	if err != nil {
 		return ""
 	}
-	data, err := os.ReadFile(path)
+	data, err := readAppFile(path)
 	if err != nil {
 		return ""
 	}
@@ -55,6 +55,6 @@ func writeLocaleFile(tag string) {
 		return
 	}
 	if err := os.WriteFile(path+".tmp", []byte(tag+"\n"), 0o644); err == nil {
-		_ = os.Rename(path+".tmp", path)
+		_ = replaceAppFile(path+".tmp", path)
 	}
 }

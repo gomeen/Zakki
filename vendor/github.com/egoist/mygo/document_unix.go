@@ -15,6 +15,10 @@ func fileLinks(info os.FileInfo) int {
 	return 1
 }
 
+// openShared opens the file at path to read it, which other apps may
+// rename or replace meanwhile, as everywhere on Unix.
+func openShared(path string) (*os.File, error) { return os.Open(path) }
+
 // fileWritable reports whether the user may write the file at path.
 func fileWritable(path string) bool { return syscall.Access(path, 2 /* W_OK */) == nil }
 

@@ -1,4 +1,4 @@
-//go:build windows
+//go:build windows && (amd64 || arm64)
 
 package text
 
@@ -17,10 +17,11 @@ import (
 
 var iidIDWriteInlineObject = guid{0x8339fde3, 0x106f, 0x47ab, [8]byte{0x83, 0x73, 0x1c, 0x62, 0x95, 0xeb, 0x10, 0xb3}}
 
-// dwObject is an IDWriteInlineObject of a box of w×h DIPs.
+// dwObject is an IDWriteInlineObject of a box w DIPs wide, h above the
+// baseline and d below it.
 type dwObject struct {
-	vtbl *[7]uintptr
-	w, h float32
+	vtbl    *[7]uintptr
+	w, h, d float32
 }
 
 var (
@@ -64,7 +65,7 @@ func objectGetMetrics(this, out uintptr) uintptr {
 		width, height, baseline float32
 		sideways                int32
 	})(ptr(out))
-	m.width, m.height, m.baseline, m.sideways = o.w, o.h, o.h, 0
+	m.width, m.height, m.baseline, m.sideways = o.w, o.h+o.d, o.h, 0
 	return 0
 }
 
@@ -117,7 +118,7 @@ func setObjects(layout uintptr, spans []Span, units []uint32) {
 		if sp.ObjectWidth > 0 {
 			for i := from; i < to; i++ {
 				o := &lo.objects[k]
-				*o = dwObject{vtbl: vtbl, w: sp.ObjectWidth, h: sp.ObjectHeight}
+				*o = dwObject{vtbl: vtbl, w: sp.ObjectWidth, h: sp.ObjectHeight, d: sp.ObjectDescent}
 				k++
 				r := uintptr(units[i]) | uintptr(units[i+1]-units[i])<<32
 				call(layout, layoutSetInlineObject, uintptr(unsafe.Pointer(o)), r)
@@ -146,7 +147,7 @@ func objectRuns(layout uintptr, lines []shapedLine, ends []uint32, spans []Span,
 				var hit dwHitTestMetrics
 				call(layout, layoutHitTestTextPosition, uintptr(pos), 0, uintptr(unsafe.Pointer(&x)), uintptr(unsafe.Pointer(&y)), uintptr(unsafe.Pointer(&hit)))
 				g := Glyph{X: hit.left, Advance: sp.ObjectWidth, Cluster: index[pos], RTL: hit.bidiLevel&1 != 0}
-				// Runs are in visual order, as DirectWrite draws them.
+				// Runs are in visual order, their glyphs too (shape).
 				runs := lines[li].runs
 				at := 0
 				for at < len(runs) && (len(runs[at].glyphs) == 0 || runs[at].glyphs[0].X < g.X) {

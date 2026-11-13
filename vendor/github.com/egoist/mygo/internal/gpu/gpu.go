@@ -27,6 +27,7 @@ package gpu
 
 import (
 	"fmt"
+	"image"
 	"math"
 	"slices"
 	"strings"
@@ -92,9 +93,15 @@ type Instance struct {
 	// markFill): the shaders then skip computing it.
 	// Transform2 holds the projective row's g and h, the frame point of
 	// local (x, y) being Transform0's and Transform1's dot products with
-	// (x, y, 1) over g*x + h*y + 1: shaders interpolate in perspective.
+	// (x, y, 1) over g*x + h*y + 1, or g*x + h*y - 1 when Transform2.z is
+	// 1 (scene.Affine.Behind): shaders interpolate in perspective.
 	Transform0, Transform1, Transform2 [4]float32
 }
+
+// BackdropImage is the image of a shader of package ui/shader that holds
+// its backdrop, when it reads it (internal/shader.BackdropImage):
+// renderers bind their backdrop's texture in its place.
+const BackdropImage = 2
 
 // InstanceSize is the size of an Instance in bytes.
 const InstanceSize = int(unsafe.Sizeof(Instance{}))
@@ -111,8 +118,12 @@ func (s Scissor) Empty() bool { return s.Right <= s.Left || s.Bottom <= s.Top }
 type Batch struct {
 	Start, Count int
 	Scissor      Scissor
-	// Image is the renderer's texture of the batch's image, or 0.
-	Image uintptr
+	// Image is the renderer's texture of the batch's image, or 0, and
+	// Chroma, for a video frame in NV12 (scene.SurfaceNV12), the texture of
+	// its chroma, whose luma Image is: the shaders sample it as their
+	// image's second plane (texture 3), and convert what they sample with
+	// the matrix the instance says (ImageYUV).
+	Image, Chroma uintptr
 	// ClipMask is a cached nested clip texture, sampled in frame coordinates.
 	ClipMask uintptr
 	// Effect is the effect of the batch's one instance, drawn with a
@@ -121,6 +132,13 @@ type Batch struct {
 	// drawing it.
 	Effect   *scene.Effect
 	Backdrop int
+	// Shader is the effect's op, for a shader's (Effect.Shader), and
+	// Textures the renderer's textures of its images, 0 for none.
+	Shader   *scene.EffectOp
+	Textures [4]uintptr
+	// Uniforms are the words of the shader's uniforms the batch draws
+	// with: the op's, or its wide ones for a wide gamut (Wide).
+	Uniforms []uint32
 	// Hole tells that the batch's instances make their shapes transparent
 	// (scene.OpHole): renderers blend them with a source factor of zero.
 	Hole bool
@@ -136,6 +154,11 @@ type Batch struct {
 	// not specialize their shader ignore them.
 	Class      Class
 	Continuous bool
+	// Joined, for a batch of ClassGeneral that joined small batches of
+	// other classes (see joinLast), has a bit (1 << Class) for each
+	// class among them: a renderer may draw it with a shader holding
+	// only their paths, which draws the same pixels. 0 is every path.
+	Joined uint32
 }
 
 // Class says which paths of the fragment shader a batch's instances take.
@@ -207,6 +230,19 @@ type Builder struct {
 	Instances []Instance
 	Batches   []Batch
 	Backdrops []scene.Backdrop
+	// Stops holds the stops of the gradients the instances draw with
+	// (scene.Stop), two RGBA texels of 32-bit floats each, StopsWidth to
+	// a row: the color, straight sRGB, then its place and its color in
+	// Oklab. An instance painting with stops has the first's index and
+	// how many in Color2.
+	Stops []float32
+	// BlurredImage, unless nil, returns the texture of an image's area
+	// blurred as bk says (scene.ImageBlur), bk.Size() texels, rows going
+	// down, which the renderer computes before the frame's pass: the
+	// image's texture averaged over squares, blurred along rows and along
+	// columns (ImageDownPass, ImageBlurPass). Without it, images draw
+	// unblurred.
+	BlurredImage func(img *scene.Image, bk scene.Backdrop) uintptr
 	// Wide draws the colors of scenes outside the sRGB gamut
 	// (Scene.Wide), for a target that keeps them, as Metal's float16
 	// drawables do; without it, their nearest sRGB colors.
@@ -216,10 +252,21 @@ type Builder struct {
 	// NoRingSplit draws every border-only fill as one instance (see
 	// addFill), for tests that compare the two.
 	NoRingSplit bool
+	// NoCornerSplit draws every shape with continuous corners as one
+	// instance (see addCorners), for tests that compare the two.
+	NoCornerSplit bool
+	cutCorners    func(b *Builder, in Instance, image uintptr, m scene.Affine)
+	// contClips tells that the renderer's shader cuts a clip with
+	// continuous corners (SplitCorners), which analyticClip may then
+	// leave to it rather than to a mask.
+	contClips bool
+	// bands are the bands planBands planned last, and bandsTry its scratch.
+	bands, bandsTry []band
 	// NoClasses puts every batch in ClassGeneral, for tests and
 	// measurements that compare the specialized shaders with the general one.
 	NoClasses bool
-	// Classes separates batches for renderers with specialized fragment shaders.
+	// Classes separates batches for renderers with specialized fragment shaders
+	// (Metal's and Direct3D 11's).
 	Classes bool
 	// GeneralClasses has a bit (1 << Class) for each class that draws with the
 	// general shader, for tests that find which specialized one differs.
@@ -239,9 +286,21 @@ type Builder struct {
 	GeneralFill, NoClipSkip bool
 	// ClipSkip enables the clip-coverage flag understood by the Metal shader.
 	ClipSkip bool
+	// NoJoin keeps the batches of each class apart, however small (see
+	// joinLast), for tests and measurements that compare the two.
+	NoJoin bool
+	// NoFold draws the ops that only translate under their transforms (see
+	// scene.TranslationFolder), for tests that compare the two.
+	NoFold bool
+	// OpStart holds, for each op of the scene built, the index of its
+	// first instance in Instances, and then their number: the instances of
+	// op i are those from OpStart[i] to OpStart[i+1].
+	OpStart []int32
 	// Culled is how many ops the last Build left out as covered.
 	Culled, OpaqueCores int
+	fold                scene.TranslationFolder
 	opaque              bool
+	joinSmall           bool // whether the last batch joinLast saw covers few pixels
 	culled              []bool
 	plan                []cullInfo
 	planStack           []clip
@@ -249,8 +308,14 @@ type Builder struct {
 	splitScissor        Scissor
 	stack               []clip
 	// encloses tells, for each op of the scene, that it pushes a clip with
-	// a transformed op or glyph inside it.
-	encloses     []bool
+	// an op or glyph inside it that a transform does more than move
+	// (scene.Reshaped).
+	encloses []bool
+	// cuts tells, for each op of the scene, that it pushes a clip that
+	// reaches into the rounded corners of a clip around it
+	// (scene.ClipCorners), which the scissor rectangles don't cut.
+	cuts         []bool
+	corners      scene.ClipCorners
 	pushes       []int
 	clipShapes   []scene.ClipShape
 	maskSlots    []clipMaskSlot
@@ -258,7 +323,25 @@ type Builder struct {
 	frame        uint64
 	imageTexture func(*scene.Image) uintptr
 	preparedMask uintptr
+	// Chroma, unless nil, returns the texture of the chroma of an image
+	// showing a frame in NV12 (scene.SurfaceNV12), after the image's
+	// texture, its luma, was asked for: renderers that sample such frames
+	// set it. Without it, or where it returns 0, the image draws from its
+	// pixels in RGBA, as other images do.
+	Chroma func(*scene.Image) uintptr
+	// chroma is the chroma texture of the image an instance being added
+	// draws, for its batch.
+	chroma uintptr
 }
+
+// ImageYUV is the code an image instance's Params[1] holds for a frame of
+// NV12, plus its matrix (scene.YUVMatrix), plus ImageYUVGray for one in
+// grayscale: the shaders sample its chroma from texture 3 and convert.
+// Params[1] is otherwise 1 for grayscale, or 0.
+const (
+	ImageYUV     = 2
+	ImageYUVGray = 8
+)
 
 // Pass is what a pass computing a backdrop reads, the layout of the
 // shaders' Pass: down reads the area from Origin to Limit, frame pixels,
@@ -268,8 +351,43 @@ type Builder struct {
 type Pass struct {
 	Origin, Limit, Shift, Dir [2]int32
 	Down, Radius              int32
-	Sigma, _                  float32
+	Sigma                     float32
+	// Mode is PassClear for passes reading an image to blur (scene.Op's
+	// Blur), and PassUnflipped for those of OpenGL reading an image whose
+	// rows go down.
+	Mode int32
 }
+
+// Modes of passes (Pass.Mode).
+const (
+	// PassClear reads what lies beyond the area (down) or the texels
+	// (blur) as transparent, where it would repeat the last ones.
+	PassClear = 1 << iota
+	// PassUnflipped tells OpenGL's pass down that its source's rows go
+	// down, as an image uploaded: its row y is y less Shift.y.
+	PassUnflipped
+)
+
+// ImageDownPass returns the pass averaging the squares of an image's
+// area that bk blurs (scene.ImageBlur), reading its texture's texels
+// where they are, transparent beyond the area.
+func ImageDownPass(bk scene.Backdrop) Pass {
+	p := DownPass(bk, [2]int32{})
+	p.Mode = PassClear
+	return p
+}
+
+// ImageBlurPass returns the pass blurring the texels of an image's blur
+// along rows (dir 1, 0) or columns (0, 1), transparent beyond them.
+func ImageBlurPass(bk scene.Backdrop, dir [2]int32) Pass {
+	p := BlurPass(bk, dir)
+	p.Mode = PassClear
+	return p
+}
+
+// StopsWidth is how many texels a row of the texture of a frame's stops
+// holds (Builder.Stops).
+const StopsWidth = 1024
 
 // DownPass returns the pass averaging the squares of bk's area, whose
 // frame pixel (x, y) is at (x, y) less shift in the texture it reads.
@@ -306,23 +424,33 @@ type clip struct {
 	scissor Scissor
 	shape   scene.ClipShape
 	// moved tells that this clip or one it is nested in is transformed,
-	// which the scissor rectangles don't follow.
-	moved       bool
-	masked      bool
-	maskSlot    int
-	maskTexture uintptr
+	// which the scissor rectangles don't follow, and masks that this clip
+	// or one it is nested in is masked by a gradient or an image
+	// (scene.ClipShape.Masks), which the shaders don't evaluate.
+	moved, masks bool
+	masked       bool
+	maskSlot     int
+	maskTexture  uintptr
+	// maskArea are the frame pixels the clip's mask covers, with
+	// maskTexture.
+	maskArea image.Rectangle
 }
 
-// pushed returns the clip that op (an OpPushClip) makes within top, without
-// a mask slot or texture.
-func (b *Builder) pushed(top *clip, op *scene.Op, encloses bool) clip {
-	bounds := top.bounds.Intersect(op.Transform.Bounds(op.Rect))
+// pushed returns the clip that op (an OpPushClip) of s makes within top,
+// without a mask slot or texture.
+func (b *Builder) pushed(s *scene.Scene, top *clip, op *scene.Op, i int) clip {
+	shape := scene.ClipShapeOf(op, s.Stops)
+	rect, transform := shape.Rect, shape.Transform
+	bounds := top.bounds.Intersect(transform.Bounds(rect))
 	// The innermost clip shapes its edges in the shader, the others cut
-	// with the scissor rectangle.
-	c := clip{rect: op.Rect, radii: scene.Corners(op.Rect, op.Radii, op.Continuous), bounds: bounds,
-		shape: scene.ClipShape{Rect: op.Rect, Radii: op.Radii, Transform: op.Transform, Continuous: op.Continuous}, maskSlot: -1}
-	c.moved = top.moved || op.Transform.Set
-	c.masked = c.moved || encloses && (top.masked || c.radii != [4]float32{})
+	// with the scissor rectangle; a clip masked by a gradient or an image,
+	// and those inside it, with a mask of the clips, as a clip reaching
+	// into the rounded corners of one around it, which is then masked too
+	// (markEnclosing).
+	c := clip{rect: rect, radii: scene.Corners(rect, op.Radii, op.Continuous), bounds: bounds, shape: shape, maskSlot: -1}
+	c.moved = top.moved || transform.Set
+	c.masks = top.masks || shape.Masks()
+	c.masked = c.moved || c.masks || b.cuts[i] || b.encloses[i] && (top.masked || c.radii != [4]float32{})
 	if bounds.W > 0 && bounds.H > 0 {
 		c.scissor = Scissor{int32(math.Floor(float64(bounds.X))), int32(math.Floor(float64(bounds.Y))),
 			int32(math.Ceil(float64(bounds.X + bounds.W))), int32(math.Ceil(float64(bounds.Y + bounds.H)))}
@@ -334,9 +462,14 @@ func (b *Builder) pushed(top *clip, op *scene.Op, encloses bool) clip {
 // and composing transforms in the vertex shader. Nested affine clips use
 // cached masks; stationary clipping never rasterizes again as content moves.
 // A clip is masked only when it is transformed, nested in a transformed
-// clip, or rounded (or masked) with transformed content inside: the others
-// cut in the shader as in a scene without transforms.
+// clip, rounded (or masked) with content inside that a transform scales,
+// turns, skews or shows in perspective, or reaches into the rounded
+// corners of a clip around it: the others, and those holding content
+// only moved, cut in the shader as in a scene without transforms.
 func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) *scene.Scene {
+	if !b.NoFold {
+		s = b.fold.Fold(s)
+	}
 	b.markEnclosing(s)
 	b.imageTexture = image
 	b.maskUsed = 0
@@ -345,19 +478,23 @@ func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) *scene
 	b.Instances = b.Instances[:0]
 	b.Batches = b.Batches[:0]
 	b.Backdrops = b.Backdrops[:0]
+	b.Stops = b.Stops[:0]
 	b.OpaqueCores = 0
+	b.joinSmall = false
 	everything := scene.Rect{X: -1e6, Y: -1e6, W: 2e6, H: 2e6}
 	b.stack = append(b.stack[:0], clip{rect: everything, bounds: scene.Rect{W: float32(s.Width), H: float32(s.Height)},
 		scissor: Scissor{0, 0, int32(s.Width), int32(s.Height)}})
 	b.planCull(s)
+	b.OpStart = b.OpStart[:0]
 	for i := range s.Ops {
 		op := &s.Ops[i]
+		b.OpStart = append(b.OpStart, int32(len(b.Instances)))
 		if b.culled[i] {
 			continue
 		}
 		switch op.Kind {
 		case scene.OpPushClip:
-			c := b.pushed(&b.stack[len(b.stack)-1], op, b.encloses[i])
+			c := b.pushed(s, &b.stack[len(b.stack)-1], op, i)
 			if c.masked {
 				c.maskSlot = b.maskUsed
 				b.maskUsed++
@@ -386,10 +523,18 @@ func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) *scene
 			if op.Dashed {
 				dashed = 1
 			}
+			if op.BorderPaint {
+				// Its gradient paints the border.
+				dashed += 2
+			}
 			w := b.wideOf(s, op.Wide)
+			c2 := wideColor(w, scene.WideColor2, op.Color2)
+			if op.Paint.HasStops() {
+				c2 = b.addStops(s, op)
+			}
 			b.addFill(s, Instance{
 				Rect: rect(op.Rect), Radii: radii, Inner: inner,
-				Color: wideColor(w, scene.WideColor, op.Color), Color2: wideColor(w, scene.WideColor2, op.Color2), Border: wideColor(w, scene.WideBorder, op.BorderColor), Grad: op.Gradient,
+				Color: wideColor(w, scene.WideColor, op.Color), Color2: c2, Border: wideColor(w, scene.WideBorder, op.BorderColor), Grad: op.Gradient,
 				UV:     bw,
 				Params: [4]float32{0, dashed, float32(op.Paint), opacity(op.Opacity)},
 			}, op)
@@ -430,11 +575,14 @@ func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) *scene
 			}
 			b.addShadow(in, op, sigma)
 		case scene.OpGlyphs:
-			grad := op.Paint == scene.PaintLinear || op.Paint == scene.PaintOklab
+			grad := op.Paint == scene.PaintLinear || op.Paint == scene.PaintOklab || op.Paint.HasStops()
 			var c1, c2 [4]float32
 			if grad {
 				w := b.wideOf(s, op.Wide)
 				c1, c2 = wideColor(w, scene.WideColor, op.Color), wideColor(w, scene.WideColor2, op.Color2)
+				if op.Paint.HasStops() {
+					c2 = b.addStops(s, op)
+				}
 			}
 			for _, g := range s.Glyphs[op.Start:op.End] {
 				a, kind, contrast := s.MaskAtlas, float32(2), s.Text.Contrast
@@ -482,14 +630,36 @@ func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) *scene
 			if img == nil || op.Rect.Empty() || img.W == 0 || img.H == 0 {
 				continue
 			}
-			tex := image(img)
+			src := op.Src
+			iw, ih := float32(img.W), float32(img.H)
+			var tex uintptr
+			// A video frame sampled as its planes draws unblurred: the
+			// passes blurring an image read its texture as RGBA.
+			yuv := img.Surface != nil && img.Surface.Format == scene.SurfaceNV12 && b.Chroma != nil
+			if op.Blur > 0 && b.BlurredImage != nil && !yuv {
+				// The image's area blurred, which the op samples.
+				bk := scene.ImageBlur(scene.ImageArea(op.Src, img.W, img.H), op.Blur)
+				w, h := bk.Size()
+				if w <= 0 || h <= 0 {
+					continue
+				}
+				tex = b.BlurredImage(img, bk)
+				src, iw, ih = bk.ImageSrc(op.Src), float32(w), float32(h)
+			} else {
+				tex = image(img)
+			}
 			if tex == 0 {
 				continue
 			}
-			iw, ih := float32(img.W), float32(img.H)
 			gray, nearest := float32(0), float32(0)
 			if op.Grayscale {
 				gray = 1
+			}
+			b.chroma = 0
+			if yuv {
+				if b.chroma = b.Chroma(img); b.chroma != 0 {
+					gray = ImageYUV + float32(img.Surface.Matrix) + ImageYUVGray*gray
+				}
 			}
 			if op.Pixelated {
 				nearest = 1
@@ -498,46 +668,157 @@ func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) *scene
 			if op.Color != (scene.Color{}) {
 				tint = straight(op.Color)
 			}
-			b.add(Instance{
+			in := Instance{
 				Rect:   rect(op.Rect),
 				Radii:  scene.Corners(op.Rect, op.Radii, op.Continuous),
 				Color:  tint,
-				UV:     [4]float32{op.Src.X / iw, op.Src.Y / ih, (op.Src.X + op.Src.W) / iw, (op.Src.Y + op.Src.H) / ih},
+				UV:     [4]float32{src.X / iw, src.Y / ih, (src.X + src.W) / iw, (src.Y + src.H) / ih},
 				Params: [4]float32{4, gray, nearest, opacity(op.Opacity)},
-			}, tex, op.Transform)
+			}
+			b.addCut(in, tex, op.Transform)
+			b.chroma = 0
 		}
 	}
 
+	b.OpStart = append(b.OpStart, int32(len(b.Instances)))
+	b.joinLast()
 	b.dropIdleMasks(idleMaskBytes)
 	b.imageTexture = nil
 	return s
 }
 
-// markEnclosing sets b.encloses for the ops of s.
+// joinArea is the most pixels a batch may cover for joinLast to join it
+// with its neighbors of other classes. On an M5 a draw call costs about 1.1 µs
+// of the CPU and 0.1 µs of the GPU, and a plain fill drawn with the shader of
+// joined classes costs the GPU 0.02 ns a pixel more with glyphs or shadows,
+// 0.04 with other fills and 0.075 with the general shader: at this many
+// pixels, the worst of them costs what the call it saves does.
+const joinArea = 128 * 128
+
+// joinLast joins the last batch, which no instance joins any more, into the
+// one before it when they differ only in their class and each batch they
+// were made of covers few pixels (joinArea): one batch of the general
+// class, Joined holding their classes. Scenes that interleave classes op by
+// op (each box a shadow then its fill, each row a fill then its label) would
+// otherwise draw a call per instance, which costs the CPU more than drawing
+// their few pixels with a shader of several classes costs the GPU. Batches
+// covering more keep their class, and their shader specialized for it.
+func (b *Builder) joinLast() {
+	n := len(b.Batches)
+	if n == 0 || !b.Classes || b.NoClasses || b.NoJoin {
+		return
+	}
+	bt := &b.Batches[n-1]
+	// The pixels of its quads (as the vertex shader grows them), at most.
+	area := float32(0)
+	for _, in := range b.Instances[bt.Start : bt.Start+bt.Count] {
+		e := float32(1)
+		if in.Params[0] == 1 {
+			e += 3 * in.Params[2]
+		}
+		if area += (in.Rect[2] + 2*e) * (in.Rect[3] + 2*e); area > joinArea {
+			break
+		}
+	}
+	fits := area <= joinArea
+	if last := &b.Batches[max(n-2, 0)]; n > 1 && b.joinSmall && fits && last.Scissor == bt.Scissor &&
+		last.ClipMask == bt.ClipMask && last.Opaque == bt.Opaque && last.Effect == nil && bt.Effect == nil && !last.Hole && !bt.Hole &&
+		(last.Image == 0 || bt.Image == 0 || last.Image == bt.Image) {
+		if j := last.Classes() | bt.Classes(); j != 1<<last.Class {
+			last.Class, last.Joined = ClassGeneral, j
+			if j&1 != 0 {
+				last.Joined = 0 // a general batch among them: every path
+			}
+		}
+		last.Count += bt.Count
+		last.Continuous = last.Continuous || bt.Continuous
+		last.Image |= bt.Image
+		last.Chroma |= bt.Chroma
+		b.Batches = b.Batches[:n-1]
+	}
+	b.joinSmall = fits
+}
+
+// Classes returns the classes of the instances of b, a bit (1 << Class) for
+// each (see Joined).
+func (b *Batch) Classes() uint32 {
+	if b.Joined != 0 {
+		return b.Joined
+	}
+	return 1 << b.Class
+}
+
+// addStops adds the stops of op's gradient to b.Stops, at most
+// scene.MaxStops of them, and returns the instance's Color2 pointing at
+// them: the first's index and how many.
+func (b *Builder) addStops(s *scene.Scene, op *scene.Op) [4]float32 {
+	a, e := int(op.Stops[0]), int(op.Stops[1])
+	if a < 0 || e > len(s.Stops) || a >= e {
+		return [4]float32{}
+	}
+	e = min(e, a+scene.MaxStops)
+	first := len(b.Stops) / 8
+	for _, st := range s.Stops[a:e] {
+		lab := scene.Oklab(st.Color)
+		c := st.Color
+		b.Stops = append(b.Stops, float32(c.R)/255, float32(c.G)/255, float32(c.B)/255, float32(c.A)/255,
+			st.At, lab[0], lab[1], lab[2])
+	}
+	return [4]float32{float32(first), float32(e - a), 0, 0}
+}
+
+// StopsSize returns how large the texture of the frame's stops must be,
+// in texels, for Stops: StopsWidth across, or 0 by 0 for none.
+func (b *Builder) StopsSize() (w, h int) {
+	n := len(b.Stops) / 4
+	if n == 0 {
+		return 0, 0
+	}
+	return StopsWidth, (n + StopsWidth - 1) / StopsWidth
+}
+
+// markEnclosing sets b.encloses and b.cuts for the ops of s.
 func (b *Builder) markEnclosing(s *scene.Scene) {
 	b.encloses = slices.Grow(b.encloses[:0], len(s.Ops))[:len(s.Ops)]
 	clear(b.encloses)
+	b.cuts = slices.Grow(b.cuts[:0], len(s.Ops))[:len(s.Ops)]
+	clear(b.cuts)
 	b.pushes = b.pushes[:0]
+	b.corners.Reset()
 	for i := range s.Ops {
 		op := &s.Ops[i]
 		if op.Kind == scene.OpPopClip {
 			if n := len(b.pushes); n > 0 {
 				b.pushes = b.pushes[:n-1]
 			}
+			b.corners.Pop()
 			continue
 		}
-		transformed := op.Transform.Set
-		if op.Kind == scene.OpGlyphs {
-			for _, g := range s.Glyphs[op.Start:op.End] {
-				transformed = transformed || g.Transform.Set
-			}
-		}
+		// The shaders cut the innermost clip in the frame's coordinates,
+		// whatever transform the drawing has, and the clips around it with
+		// the scissor rectangle; their masks keep the rounded ones' corners
+		// for drawing that is scaled, turned, skewed or in perspective
+		// (zoomed content filling a card). Drawing or a clip only moved,
+		// as a label by a fraction of a pixel, which glyphs are not folded
+		// by, is cut as drawing that is not: no mask around it (#1002).
+		transformed := scene.Reshaped(s, op)
 		// Every clip open around it encloses it, from the innermost out to
 		// the first already marked, whose own are.
 		for j := len(b.pushes) - 1; transformed && j >= 0 && !b.encloses[b.pushes[j]]; j-- {
 			b.encloses[b.pushes[j]] = true
 		}
 		if op.Kind == scene.OpPushClip {
+			// A clip reaching into the rounded corners of one around it
+			// (#1418), which the scissor rectangles don't cut: what it
+			// holds is cut with a mask of the clips, a rectangle's being
+			// that of the clip it is in, so the clips around it are
+			// masked as for drawing transformed.
+			if b.corners.Push(op) >= 0 {
+				b.cuts[i] = true
+				for j := len(b.pushes) - 1; j >= 0 && !b.encloses[b.pushes[j]]; j-- {
+					b.encloses[b.pushes[j]] = true
+				}
+			}
 			b.pushes = append(b.pushes, i)
 		}
 	}
@@ -567,11 +848,13 @@ func (b *Builder) add(in Instance, image uintptr, m scene.Affine) {
 		// code of those that need more.
 		b.Batches[n-1].Continuous = b.Batches[n-1].Continuous || continuous
 	} else {
+		b.joinLast()
 		b.Batches = append(b.Batches, Batch{Start: len(b.Instances), Scissor: sc, Image: image, ClipMask: b.preparedMask, Opaque: b.opaque, Class: class, Continuous: continuous})
-		n++
+		n = len(b.Batches)
 	}
 	if image != 0 {
 		b.Batches[n-1].Image = image
+		b.Batches[n-1].Chroma = b.chroma
 	}
 	b.Instances = append(b.Instances, in)
 	b.Batches[n-1].Count++
@@ -645,26 +928,37 @@ func (s Scissor) area() int64 {
 }
 
 // addShadow appends the instance of a shadow. A large shadow of a box
-// (Cast) is drawn as up to four instances around the core of that box,
-// each with a scissor rectangle of its own, so that the renderers shade no
-// fragment of the core, where the shadow is multiplied by zero and the
+// (Cast) is drawn as several instances around that box, each with a
+// scissor rectangle of its own (in bands of rows where its corners are
+// round, planBands, else around its core), so that the renderers shade no
+// fragment inside it, where the shadow is multiplied by zero and the
 // pixels are the same either way. A shadow of a box that fills the window
 // would otherwise shade, with its blur, all of it, once for each layer of
 // an elevation.
 func (b *Builder) addShadow(in Instance, op *scene.Op, sigma float32) {
 	cur := &b.stack[len(b.stack)-1]
 	if b.NoShadowSplit || op.Cast.Empty() || op.Transform.Set || cur.scissor.Empty() {
-		b.add(in, 0, op.Transform)
+		b.addCut(in, 0, op.Transform)
 		return
 	}
-	core := shadowCore(op.Cast, scene.Corners(op.Cast, op.CastRadii, op.Continuous), op.Continuous)
-	reach := 3 * sigma // what the vertex shader grows the quad by; shadowSupport bounds it
+	reach := 3*sigma + 1 // what the vertex shader grows the quad by; shadowSupport bounds it
 	quad := Scissor{
 		Left: int32(math.Floor(float64(op.Rect.X - reach))), Top: int32(math.Floor(float64(op.Rect.Y - reach))),
 		Right: int32(math.Ceil(float64(op.Rect.X + op.Rect.W + reach))), Bottom: int32(math.Ceil(float64(op.Rect.Y + op.Rect.H + reach))),
 	}.intersect(cur.scissor)
+	if !op.Continuous {
+		// In bands that follow round corners (bands.go).
+		cast := [1]rounded{{op.Cast, in.Inner}}
+		if !b.planBands(quad, nil, cast[:]) {
+			b.addCut(in, 0, op.Transform)
+			return
+		}
+		b.addBands(in, op.Transform)
+		return
+	}
+	core := shadowCore(op.Cast, in.Inner, true)
 	if !worthSplitting(core, quad) {
-		b.add(in, 0, op.Transform)
+		b.addCut(in, 0, op.Transform)
 		return
 	}
 	b.addAround(in, op.Transform, core)
@@ -674,7 +968,8 @@ func (b *Builder) addShadow(in Instance, op *scene.Op, sigma float32) {
 // scissor rectangle of its own: they tile the current clip's scissor
 // rectangle less core, whatever the renderer's quad is (core must lie inside
 // the quad). The pixels are the same as drawing it whole, for an instance
-// that leaves the destination as it is within core.
+// that leaves the destination as it is within core. Each is cut into corners
+// and their twin (addCut).
 func (b *Builder) addAround(in Instance, m scene.Affine, core Scissor) {
 	cur := &b.stack[len(b.stack)-1]
 	whole := cur.scissor
@@ -691,7 +986,7 @@ func (b *Builder) addAround(in Instance, m scene.Affine, core Scissor) {
 			continue
 		}
 		b.scissorBatches(st, true)
-		b.add(in, 0, m)
+		b.addCut(in, 0, m)
 	}
 }
 
@@ -724,7 +1019,7 @@ const opaqueMin = 16384
 func (b *Builder) addOpaque(in Instance, m scene.Affine, core Scissor) {
 	b.scissorBatches(core, true)
 	b.opaque = true
-	b.add(in, 0, m)
+	b.addCut(in, 0, m)
 	b.scissorBatches(Scissor{}, false)
 	b.opaque = false
 	b.OpaqueCores++
@@ -754,14 +1049,16 @@ func ringCore(r scene.Rect, radii, bw [4]float32, continuous bool) Scissor {
 }
 
 // addFill appends the instance of a fill. A fill that draws only its border
-// (a transparent solid color, a border of some width: focus rings, outlines
-// and card borders around window-sized panels) is drawn as up to four
-// instances around the core inside its border, as addShadow does, so that
-// the renderers shade no fragment where the shader writes exactly nothing: the
-// outer and inner coverages are both 1 there, the border's is their
-// difference, and the color is transparent. Without it a 2 pixel ring around
-// a 5 Mpx panel shaded the whole panel, twice over, through the general
-// path. The pixels are identical.
+// (a transparent solid color, a border of some width: focus rings, outlines,
+// card borders around window-sized panels, and circles) is drawn as
+// several instances around the core inside its border, as addShadow does,
+// so that the renderers shade no fragment where the shader writes exactly
+// nothing: the outer and inner coverages are both 1 there, the border's is
+// their difference, and the color is transparent. Where its corners are
+// round, it is drawn in bands of rows that leave out what lies outside its
+// outer edge too, where both coverages are 0 (planBands). Without it a 2
+// pixel ring around a 5 Mpx panel shaded the whole panel, twice over,
+// through the general path. The pixels are identical.
 //
 // An opaque fill with a large core is drawn as that core, in a batch
 // renderers draw without blending, and blended pieces around it (addOpaque).
@@ -781,7 +1078,7 @@ func (b *Builder) addFill(s *scene.Scene, in Instance, op *scene.Op) {
 	}
 	if b.NoRingSplit || op.Transform.Set || op.Paint != scene.PaintSolid || in.Color[3] != 0 || !scene.HasBorder(in.UV) ||
 		op.Rect.Empty() || cur.scissor.Empty() {
-		b.add(in, 0, op.Transform)
+		b.addCut(in, 0, op.Transform)
 		return
 	}
 	// A fill's quad reaches a pixel out of its rectangle (see the vertex shader).
@@ -789,9 +1086,20 @@ func (b *Builder) addFill(s *scene.Scene, in Instance, op *scene.Op) {
 		Left: int32(math.Floor(float64(op.Rect.X - 1))), Top: int32(math.Floor(float64(op.Rect.Y - 1))),
 		Right: int32(math.Ceil(float64(op.Rect.X + op.Rect.W + 1))), Bottom: int32(math.Ceil(float64(op.Rect.Y + op.Rect.H + 1))),
 	}.intersect(cur.scissor)
-	core := ringCore(op.Rect, in.Radii, in.UV, op.Continuous)
+	if !op.Continuous {
+		// In bands that follow round corners (bands.go).
+		inner, innerRadii := scene.InnerRadii(op.Rect, in.Radii, in.UV)
+		edges := [2]rounded{{op.Rect, in.Radii}, {inner, innerRadii}}
+		if !b.planBands(quad, &edges[0], edges[:]) {
+			b.addCut(in, 0, op.Transform)
+			return
+		}
+		b.addBands(in, op.Transform)
+		return
+	}
+	core := ringCore(op.Rect, in.Radii, in.UV, true)
 	if !worthSplitting(core, quad) {
-		b.add(in, 0, op.Transform)
+		b.addCut(in, 0, op.Transform)
 		return
 	}
 	b.addAround(in, op.Transform, core)
@@ -805,6 +1113,10 @@ func (b *Builder) addEffect(s *scene.Scene, op *scene.Op) {
 		return
 	}
 	fx := &s.Effects[op.Start]
+	if fx.Masked() {
+		b.addMaskedEffect(s, op, fx, cur)
+		return
+	}
 	p := &fx.Params
 	in := Instance{
 		Rect: rect(op.Rect), Radii: scene.Corners(op.Rect, op.Radii, op.Continuous),
@@ -816,8 +1128,16 @@ func (b *Builder) addEffect(s *scene.Scene, op *scene.Op) {
 		return
 	}
 	batch := Batch{Start: len(b.Instances), Count: 1, Scissor: cur.scissor, Effect: fx.Effect, ClipMask: b.preparedMask}
+	if fx.Effect.Shader != nil {
+		batch.Shader, batch.Uniforms = fx, b.uniformsOf(fx)
+		for i, img := range fx.Images {
+			if img != nil && img.W > 0 && img.H > 0 && b.imageTexture != nil {
+				batch.Textures[i] = b.imageTexture(img)
+			}
+		}
+	}
 	if fx.Effect.Backdrop {
-		bk := scene.BackdropOf(op.Transform.Bounds(op.Rect), fx.Blur, s.Width, s.Height)
+		bk := s.BackdropOf(op.Transform.Bounds(op.Rect), fx.Blur, s.Width, s.Height)
 		if bk.Area.Empty() {
 			return
 		}
@@ -829,6 +1149,62 @@ func (b *Builder) addEffect(s *scene.Scene, op *scene.Op) {
 	}
 	b.Batches = append(b.Batches, batch)
 	b.Instances = append(b.Instances, in)
+}
+
+// addMaskedEffect appends the instances of a shader's effect filling mask
+// glyphs (scene.EffectOp.Glyphs), in a batch of their own: each glyph's,
+// as OpGlyphs has it, with 1 in Params[1], and the point the shader's
+// positions start from in Grad.
+func (b *Builder) addMaskedEffect(s *scene.Scene, op *scene.Op, fx *scene.EffectOp, cur *clip) {
+	a := s.MaskAtlas
+	if a == nil || fx.Effect.Shader == nil || fx.Effect.Backdrop {
+		return
+	}
+	batch := Batch{Start: len(b.Instances), Scissor: cur.scissor, Effect: fx.Effect, Shader: fx, Uniforms: b.uniformsOf(fx)}
+	for i, img := range fx.Images {
+		if img != nil && img.W > 0 && img.H > 0 && b.imageTexture != nil {
+			batch.Textures[i] = b.imageTexture(img)
+		}
+	}
+	aw, ah := float32(a.W), float32(a.H)
+	first := true
+	for _, g := range s.Glyphs[fx.Glyphs[0]:fx.Glyphs[1]] {
+		if g.Colored || g.Subpixel {
+			continue
+		}
+		boost := float32(0)
+		if g.Thin {
+			boost = scene.ThinBoost
+		}
+		in := Instance{
+			Rect:   [4]float32{float32(math.Round(float64(g.X))), float32(math.Round(float64(g.Y))), float32(g.UW), float32(g.VH)},
+			Radii:  s.Text.GammaRatios,
+			Inner:  [4]float32{s.Text.Contrast, boost},
+			UV:     [4]float32{float32(g.U) / aw, float32(g.V) / ah, float32(g.U+g.UW) / aw, float32(g.V+g.VH) / ah},
+			Grad:   [4]float32{fx.Origin[0], fx.Origin[1], 1, 0},
+			Params: [4]float32{6, 1, 0, opacity(op.Opacity)},
+		}
+		if !b.prepare(&in, op.Transform.Mul(g.Transform), cur) {
+			continue
+		}
+		if first {
+			batch.ClipMask, first = b.preparedMask, false
+		}
+		b.Instances = append(b.Instances, in)
+		batch.Count++
+	}
+	if batch.Count > 0 {
+		b.Batches = append(b.Batches, batch)
+	}
+}
+
+// uniformsOf returns the words of fx's uniforms to draw with: its wide
+// ones, for a wide gamut, when it has them.
+func (b *Builder) uniformsOf(fx *scene.EffectOp) []uint32 {
+	if b.Wide && fx.WideUniforms != nil {
+		return fx.WideUniforms
+	}
+	return fx.Uniforms
 }
 
 // addHole appends a hole within the current clip, in a batch of holes:

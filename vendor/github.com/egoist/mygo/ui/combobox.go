@@ -23,7 +23,9 @@ type comboboxParts struct {
 	// pointer is where the pointer was when it last highlighted an option.
 	// typed is set while the text is what the user typed since the popup
 	// opened, which Filtering reports. shown is the option last scrolled
-	// into view as the highlight moved to it.
+	// into view as the highlight moved to it. empty is set while the
+	// popup shows no options but something else, as a row saying that
+	// nothing matches, which assistive technology was told.
 	highlight *int
 	values    *[]string
 	next      []string
@@ -31,6 +33,7 @@ type comboboxParts struct {
 	pointer   *[2]float32
 	typed     *bool
 	shown     *string
+	empty     *bool
 	chosen    string
 	isChosen  bool
 }
@@ -40,7 +43,9 @@ type comboboxParts struct {
 // as the user types, clicks it or presses Down. Up and Down move among the
 // options, Enter or a click chooses one, which Chosen reports, and
 // Escape, or the input losing the focus, closes the popup. Assistive
-// technology sees a combo box, and follows the option the arrows are on.
+// technology sees a combo box, and follows the option the arrows are on;
+// tell it with AutoComplete when the options are those matching what was
+// typed (AutoCompleteList).
 //
 //	cb := ui.ComboboxBase(c, &app.query)
 //	cb.Input.Padding(6, 10).Border(1, gray).Label("Font")
@@ -77,6 +82,7 @@ func comboboxBase(c *context, text *string, first bool) *comboboxParts {
 		pointer:   coreLocal(in, "pointer", func() [2]float32 { return [2]float32{} }),
 		typed:     coreLocal(in, "typed", func() bool { return false }),
 		shown:     coreLocal(in, "shown", func() string { return "" }),
+		empty:     coreLocal(in, "empty", func() bool { return false }),
 	}
 	in.afterInput(func() {
 		p.chosen, p.isChosen = "", false
@@ -166,13 +172,21 @@ func (p *comboboxParts) SetOpen(o bool) {
 func (p *comboboxParts) Filtering() bool { return *p.typed }
 
 // Popup shows the popup below the input, at least as wide, while it is
-// open: fn styles the panel and builds the options with Item. It returns
-// the panel, or nil while closed or without options.
+// open: fn styles the panel and builds the options with Item. A popup
+// without options shows only while it holds something else to read, as a
+// row saying that nothing matches, which assistive technology reads out
+// as it appears:
+//
+//	if len(matches) == 0 {
+//		ui.Text(c, "No matches found").Padding(6, 10)
+//	}
+//
+// It returns the panel, or nil while it does not show.
 func (p *comboboxParts) Popup(fn func(panel *node)) *node {
 	c := p.c
 	p.next, p.items = p.next[:0], p.items[:0]
 	if !*p.open {
-		*p.values, *p.shown = (*p.values)[:0], ""
+		*p.values, *p.shown, *p.empty = (*p.values)[:0], "", false
 		return nil
 	}
 	b := p.anchor.Bounds()
@@ -196,9 +210,22 @@ func (p *comboboxParts) Popup(fn func(panel *node)) *node {
 	if h := *p.highlight; h >= 0 && h < n {
 		p.Input.activeDescendant = p.items[h]
 	}
-	if n == 0 {
+	if n > 0 {
+		*p.empty = false
+		return panel
+	}
+	// No options: the keys have none to move to, and the focus stays in
+	// the input. What else the panel holds, as a row saying that nothing
+	// matches, shows, and is read out as it appears.
+	text := panel.innerText()
+	if text == "" {
 		panel.flags |= flagInvisible // nothing to show
+		p.Input.expanded, *p.empty = false, false
 		return nil
+	}
+	if !*p.empty {
+		*p.empty = true
+		c.Announce(text)
 	}
 	return panel
 }
@@ -279,7 +306,10 @@ func styleOptions(c *context, p *comboboxParts, options []string) *node {
 
 // field creates the box around a field's input, with the look of a text
 // input, which builds the input with fn; a click in it focuses the input.
-// Its Label names the input.
+// Its Label names the input, and it acts as the input does for the focus:
+// its Focus and AutoFocus focus the input, and its Focused reports the
+// input's focus. Its shortcuts take the keys pressed in the input, which
+// it holds, as a text input's do; the input's own come first.
 func field(c *context, fn func() *node) (*node, *node) {
 	t := c.theme
 	f := coreRow(c).AlignItems(Center).Gap(t.Space(1.5)).Padding(t.Space(1.5), t.Space(2.5)).
@@ -288,9 +318,10 @@ func field(c *context, fn func() *node) (*node, *node) {
 	var in *node
 	f.Children(func() { in = fn() })
 	in.nameFrom = f
+	f.focusTo = in
 	f.styleFn = func(f *node) { inputBorder(t, f, in) }
 	if f.Clicked() {
-		in.Focus()
+		in.focus(false)
 	}
 	return f, in
 }
@@ -322,12 +353,13 @@ func coreCombobox(c *context, selected *string, options []string) *node {
 		text = coreLocal(c.parent, "combobox", func() string { return *selected })
 		p = comboboxBase(c, text, true)
 		p.Input.Grow(1).MinWidth(t.Space(25))
+		p.Input.autoComplete = AutoCompleteList // typing filters the options
 		arrow := chevronDown(c)
 		arrow.flags |= flagClickable | flagKeepFocus
 		arrow.afterInput(func() {
 			if arrow.Clicked() {
 				p.SetOpen(!p.Open())
-				p.Input.Focus()
+				p.Input.focus(false)
 				if p.Open() {
 					// As a click in the text opening them does.
 					p.Input.st.editor.selectAll()
@@ -379,6 +411,7 @@ func coreCombobox(c *context, selected *string, options []string) *node {
 func coreAutocomplete(c *context, value *string, suggestions []string) *node {
 	p := comboboxBase(c, value, false)
 	in := p.Input
+	in.autoComplete = AutoCompleteList
 	t := c.theme
 	in.Padding(t.Space(1.5), t.Space(2.5)).Radius(t.Radius).Background(t.Surface).Border(1, t.Border)
 	in.styleFn = func(e *node) { inputBorder(t, e, e) }
@@ -407,8 +440,8 @@ func coreAutocomplete(c *context, value *string, suggestions []string) *node {
 // SearchField creates a field for searching, editing *query: a magnifying
 // glass, the text, and a button clearing it while it holds any, as Escape
 // does then. Enter is its Submitted, and Changed reports a change. It
-// shows Search while empty, and assistive technology sees a search field;
-// name it with Label.
+// shows Search while empty, or what Placeholder sets, and assistive
+// technology sees a search field; name it with Label.
 //
 //	if ui.SearchField(c, &app.query).Label("Search mail").Changed() {
 //		app.filter()
@@ -435,7 +468,7 @@ func coreSearchField(c *context, query *string) *node {
 					*query = ""
 					in.st.editor.setText("")
 					in.st.markChanged()
-					in.Focus()
+					in.focus(false)
 					c.rt.consumed = true
 				}
 			})
@@ -528,6 +561,8 @@ func coreTokenField(c *context, tokens *[]string, suggestions []string) *node {
 			in = p.Input
 			if len(suggestions) == 0 {
 				in.role = RoleAuto // a text field
+			} else {
+				in.autoComplete = AutoCompleteList
 			}
 			in.st.editor.leaveEmptyBackspace = true
 			in.afterInput(func() {

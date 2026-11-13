@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -31,6 +32,11 @@ func writeBundle(c *Config, dir, bin string, icns []byte, car *assetCatalog, res
 			return "", err
 		}
 	}
+	if p := c.MacOS.ProvisioningProfile; p != "" {
+		if err := copyFile(c.path(p), filepath.Join(contents, "embedded.provisionprofile"), 0o644); err != nil {
+			return "", fmt.Errorf("provisioning profile %s: %w", p, err)
+		}
+	}
 	if err := os.Rename(bin, filepath.Join(contents, "MacOS", name)); err != nil {
 		return "", err
 	}
@@ -49,6 +55,9 @@ func writeBundle(c *Config, dir, bin string, icns []byte, car *assetCatalog, res
 		}
 	}
 	if err := copyResources(res, filepath.Join(contents, "Resources")); err != nil {
+		return "", err
+	}
+	if err := installNative(c, app); err != nil {
 		return "", err
 	}
 	langs, err := c.languages()
@@ -77,7 +86,11 @@ func bundleExecutable(app string) string {
 // app ships into the Resources of its bundle, named as Xcode names them,
 // which make AppKit say its own texts in the language and System Settings
 // list the language for the app; the InfoPlist.strings of each names the
-// app in the language where its catalog does (mygo.appName).
+// app in the language where its catalog does (mygo.appName). An
+// InfoPlist.strings the app's resources put there already is kept, and
+// the name added to it where it has none: its strings translate those of
+// Info.plist, such as the reasons the system shows as it asks for a
+// permission.
 func writeLocalizations(c *Config, resources string, langs []appLanguage) error {
 	for _, l := range langs {
 		dir := filepath.Join(resources, lprojName(l.Tag)+".lproj")
@@ -85,8 +98,22 @@ func writeLocalizations(c *Config, resources string, langs []appLanguage) error 
 			return err
 		}
 		names := map[string]any{}
+		path := filepath.Join(dir, "InfoPlist.strings")
+		if data, err := os.ReadFile(path); err == nil {
+			own, err := parseStrings(data)
+			if err != nil {
+				return fmt.Errorf("%s.lproj/InfoPlist.strings of the resources: %w", lprojName(l.Tag), err)
+			}
+			for k, v := range own {
+				names[k] = v
+			}
+		}
 		if l.Name != "" && l.Name != c.Name {
-			names["CFBundleName"], names["CFBundleDisplayName"] = l.Name, l.Name
+			for _, k := range []string{"CFBundleName", "CFBundleDisplayName"} {
+				if names[k] == nil {
+					names[k] = l.Name
+				}
+			}
 		}
 		var b bytes.Buffer
 		b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>
@@ -95,7 +122,11 @@ func writeLocalizations(c *Config, resources string, langs []appLanguage) error 
 `)
 		writePlistValue(&b, names, "")
 		b.WriteString("</plist>\n")
-		if err := os.WriteFile(filepath.Join(dir, "InfoPlist.strings"), b.Bytes(), 0o644); err != nil {
+		// The copy of the resources keeps links: write a new file, not through one.
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if err := os.WriteFile(path, b.Bytes(), 0o644); err != nil {
 			return err
 		}
 	}
@@ -118,6 +149,26 @@ func appIcon(c *Config) ([]byte, error) {
 	return icns, nil
 }
 
+// bundleICNS returns the .icns of the bundle: the one actool rendered from
+// the .icon of car, macos.icon when it is an .icns, or the configured icon
+// rendered, or nil without any.
+func bundleICNS(c *Config, car *assetCatalog) ([]byte, error) {
+	if car != nil && car.icns != nil {
+		return car.icns, nil // the .icon's own rendering for older macOS
+	}
+	if src := c.MacOS.Icon; strings.EqualFold(filepath.Ext(src), ".icns") {
+		data, err := os.ReadFile(c.path(src))
+		if err == nil && !bytes.HasPrefix(data, []byte("icns")) {
+			err = errors.New("not an .icns file")
+		}
+		if err != nil {
+			return nil, fmt.Errorf("macos.icon %s: %w", src, err)
+		}
+		return data, nil
+	}
+	return appIcon(c)
+}
+
 // assetCatalog is a compiled asset catalog, Assets.car, whose app icon is
 // named AppIcon, with the .icns that actool rendered from the same icon
 // (nil for an Assets.car of the configuration).
@@ -128,10 +179,10 @@ type assetCatalog struct {
 // appCatalog returns the asset catalog of macos.icon, or nil without one: an
 // Assets.car as it is, or an Icon Composer .icon compiled with actool. A
 // .icon that cannot be compiled, off macOS or without Xcode, leaves the app
-// with its .icns.
+// with its .icns. An .icns is no catalog: bundleICNS takes it.
 func appCatalog(c *Config) (*assetCatalog, error) {
 	src := c.MacOS.Icon
-	if src == "" {
+	if src == "" || strings.EqualFold(filepath.Ext(src), ".icns") {
 		return nil, nil
 	}
 	if !strings.EqualFold(filepath.Ext(src), ".icon") {
@@ -256,6 +307,11 @@ func infoPlist(c *Config, executable, icon, iconName string) []byte {
 		}
 		d["CFBundleURLTypes"] = []any{map[string]any{"CFBundleURLName": c.Identifier, "CFBundleURLSchemes": schemes}}
 	}
+	if c.native != nil {
+		for k, v := range c.native.info {
+			d[k] = v // the native modules' keys
+		}
+	}
 	for k, v := range c.MacOS.InfoPlist {
 		d[k] = v // the app's own keys win
 	}
@@ -331,10 +387,18 @@ func codesignArgs(path, identity, entitlements string, production bool) []string
 	return append(args, path)
 }
 
+var errProfileAdHoc = errors.New("macos.provisioningProfile needs a signing identity, not ad-hoc signing: set macos.signingIdentity or pass -sign")
+
 // codesign signs a bundle, and the code among its resources. Signing needs
 // macOS: elsewhere only the executable's ad-hoc signature from the Go linker
 // remains.
 func codesign(c *Config, path, identity string, production bool) error {
+	if c.MacOS.ProvisioningProfile != "" && identity == "-" {
+		if production {
+			return errProfileAdHoc
+		}
+		return fmt.Errorf(`macos.provisioningProfile needs a signing identity, not ad-hoc signing: pass -sign, or leave the profile out when the command is "dev"`)
+	}
 	if runtime.GOOS != "darwin" {
 		if identity != "-" {
 			warnf("Not signing %s: code signing needs macOS", filepath.Base(path))
@@ -344,9 +408,12 @@ func codesign(c *Config, path, identity string, production bool) error {
 	if err := signNestedCode(c, path, identity, production); err != nil {
 		return err
 	}
-	entitlements := ""
-	if c.MacOS.Entitlements != "" {
-		entitlements = c.path(c.MacOS.Entitlements)
+	entitlements, err := nativeEntitlements(c, filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	if entitlements != "" && c.native != nil && len(c.native.entitlements) > 0 {
+		defer os.Remove(entitlements)
 	}
 	out, err := exec.Command("codesign", codesignArgs(path, identity, entitlements, production)...).CombinedOutput()
 	if err != nil {
@@ -367,7 +434,7 @@ func replacePath(src, dst string) error {
 			return err
 		}
 	}
-	if err := os.Rename(src, dst); err != nil {
+	if err := renamePackageStage(src, dst); err != nil {
 		if old != "" {
 			_ = os.Rename(old, dst)
 		}

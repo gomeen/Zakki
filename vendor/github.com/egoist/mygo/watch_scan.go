@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync/atomic"
 
 	"github.com/egoist/mygo/internal/platform"
 )
@@ -31,15 +32,17 @@ type fileWatchScan struct {
 	name     string
 	// entries are what the scan saw, by slash-separated path relative to
 	// the root ("." for the root), and children the names in each listed
-	// directory.
-	entries  map[string]os.FileInfo
+	// directory; targets what it enrolled.
+	entries  map[string]fileWatchEntry
 	children map[string]map[string]bool
-	targets  map[string]platform.FileWatchTarget
+	targets  map[string]fileWatchTargetRef
 	ids      map[uint64]string
 	next     uint64
 	// subtree says the root's target watches the whole tree (Windows), so
 	// no other directory is enrolled; noSubtree that the backend can't.
-	subtree, noSubtree bool
+	// noFiles says the backend watches files only through their
+	// directories, so no file is enrolled.
+	subtree, noSubtree, noFiles bool
 	// What to look at again in the next update: directories to list,
 	// entries to stat, entries the system said were written, and whether
 	// to list every directory, after the system lost changes.
@@ -49,19 +52,63 @@ type fileWatchScan struct {
 	// are reported as written.
 	races map[string]bool
 	// ignored holds the directories Ignore ignored, by name in each
-	// listed directory, so that notices about what is in them are dropped.
+	// listed directory that has some, so that notices about what is in
+	// them are dropped.
 	ignored map[string]map[string]bool
-	// before holds what an update changed, as it was before (nil for an
-	// entry that didn't exist).
-	before map[string]os.FileInfo
+	// before holds what an update changed, as it was before; removed is
+	// the watched file the last update found gone.
+	before  map[string]fileWatchBefore
+	removed fileWatchGone
+}
+
+// fileWatchEntry is what the scan keeps of a file or directory: its
+// identity, and what says its content changed. It holds no pointer, so a
+// snapshot of many costs little memory and nothing for the collector to
+// scan.
+type fileWatchEntry struct {
+	id    fileWatchID
+	size  int64
+	mtime int64
+	mode  fs.FileMode
+}
+
+func (e fileWatchEntry) isDir() bool { return e.mode.IsDir() }
+
+// fileWatchUnknown numbers the entries whose identity can't be read, none
+// on the systems that watch, so that each is a file of its own.
+var fileWatchUnknown atomic.Uint64
+
+// fileWatchEntryOf returns what the scan keeps of info, a stat taken now:
+// its identity is read now (StatIdentity), not when it is compared.
+func fileWatchEntryOf(info os.FileInfo) fileWatchEntry {
+	id, ok := fileWatchIdentity(StatIdentity(info))
+	if !ok {
+		id = fileWatchID{volume: ^uint64(0), index: fileWatchUnknown.Add(1)}
+	}
+	id.typ = info.Mode().Type()
+	return fileWatchEntry{id: id, size: info.Size(), mtime: info.ModTime().UnixNano(), mode: info.Mode()}
+}
+
+// fileWatchBefore is an entry as it was before an update; ok is false for
+// one that didn't exist.
+type fileWatchBefore struct {
+	entry fileWatchEntry
+	ok    bool
+}
+
+// fileWatchTargetRef is what the scan keeps of a target it enrolled.
+type fileWatchTargetRef struct {
+	id                 uint64
+	identity           fileWatchID
+	directory, subtree bool
 }
 
 func newFileWatchScan(w *FileWatcher) *fileWatchScan {
 	return &fileWatchScan{
 		w:        w,
-		entries:  map[string]os.FileInfo{},
+		entries:  map[string]fileWatchEntry{},
 		children: map[string]map[string]bool{},
-		targets:  map[string]platform.FileWatchTarget{},
+		targets:  map[string]fileWatchTargetRef{},
 		ids:      map[uint64]string{},
 		lists:    map[string]bool{},
 		stats:    map[string]bool{},
@@ -118,12 +165,13 @@ func (s *fileWatchScan) start() ([]FileEvent, error) {
 			return nil, err
 		}
 	}
-	s.before = map[string]os.FileInfo{}
-	if err = s.visit(".", info); err != nil {
+	// The initial contents are not events, so what the scan sees is not
+	// kept as it was before (touch).
+	s.before = nil
+	if err = s.visit(s.root, ".", info); err != nil {
 		return nil, err
 	}
-	// The initial contents are not events.
-	clear(s.before)
+	s.before = map[string]fileWatchBefore{}
 	return s.events(), nil
 }
 
@@ -149,6 +197,8 @@ func (s *fileWatchScan) watchParent() error {
 
 // gone reports whether the watched directory, or the directory of the
 // watched file, went away or was replaced.
+func (s *fileWatchScan) removedFile() fileWatchGone { return s.removed }
+
 func (s *fileWatchScan) gone() bool {
 	info, err := os.Lstat(s.dir)
 	return errors.Is(err, fs.ErrNotExist) || err == nil && (!info.IsDir() || !os.SameFile(StatIdentity(info), s.identity))
@@ -156,11 +206,11 @@ func (s *fileWatchScan) gone() bool {
 
 // goneEvents are the last events of a watch whose directory went away.
 func (s *fileWatchScan) goneEvents() []FileEvent {
-	info := s.entries["."]
-	if info == nil {
+	e, ok := s.entries["."]
+	if !ok {
 		return nil // a watched file that was already gone
 	}
-	return []FileEvent{{Op: FileRemove, Path: ".", IsDir: info.IsDir()}}
+	return []FileEvent{{Op: FileRemove, Path: ".", IsDir: e.isDir()}}
 }
 
 // osPath is the path of p for root.
@@ -169,6 +219,38 @@ func (s *fileWatchScan) osPath(p string) string {
 		return s.name
 	}
 	return filepath.FromSlash(p)
+}
+
+// base is the name of p in its directory: "." for the watched directory,
+// and the watched file's name.
+func (s *fileWatchScan) base(p string) string {
+	if s.file {
+		return s.name
+	}
+	return path.Base(p)
+}
+
+// lstat stats p, without following a symlink, in dir, the directory that
+// has it: one call by its name, where the root would open every directory
+// above it in turn.
+func (s *fileWatchScan) lstat(dir *os.Root, p string) (os.FileInfo, error) {
+	info, err := dir.Lstat(s.base(p))
+	return info, s.pathError(err, p)
+}
+
+// entryInfo returns what entry, child read from d, is, as lstat would.
+func (s *fileWatchScan) entryInfo(d *fileWatchDir, entry fs.DirEntry, child string) (os.FileInfo, error) {
+	info, err := fileWatchEntryInfo(d.root, entry)
+	return info, s.pathError(err, child)
+}
+
+// pathError names p, from the root, in err, which names it relative to the
+// directory that has it.
+func (s *fileWatchScan) pathError(err error, p string) error {
+	if e, ok := err.(*os.PathError); ok {
+		e.Path = s.osPath(p)
+	}
+	return err
 }
 
 // ignores reports whether p is in a directory Ignore ignored.
@@ -184,12 +266,12 @@ func (s *fileWatchScan) ignores(p string) bool {
 
 // skip reports whether Ignore ignores child, and remembers in ignored the
 // directories it does.
-func (s *fileWatchScan) skip(child string, isDir bool, ignored map[string]bool) bool {
+func (s *fileWatchScan) skip(child string, isDir bool) bool {
 	if s.w.opts.Ignore == nil || !s.w.opts.Ignore(child, isDir) {
 		return false
 	}
 	if isDir {
-		ignored[path.Base(child)] = true
+		s.ignoredIn(path.Dir(child))[path.Base(child)] = true
 	}
 	return true
 }
@@ -241,7 +323,7 @@ func (s *fileWatchScan) mark(n platform.FileWatchNotice) error {
 		return nil
 	}
 	t := s.targets[p]
-	listable := t.Directory && (p == "." || s.w.opts.Recursive)
+	listable := t.directory && (p == "." || s.w.opts.Recursive)
 	if n.Kind == platform.FileWatchLost {
 		// The next update enrolls it again if it still exists, and looks
 		// at everything if it watched the whole tree.
@@ -262,7 +344,7 @@ func (s *fileWatchScan) mark(n platform.FileWatchNotice) error {
 		}
 		return nil
 	}
-	if !validWatchName(n.Name, t.Subtree) {
+	if !validWatchName(n.Name, t.subtree) {
 		return errors.New("mygo: invalid name in a file watch notice")
 	}
 	// Statting a child lists its directory if it appeared, went away or
@@ -321,7 +403,7 @@ func (s *fileWatchScan) update() ([]FileEvent, error) {
 	if err = s.watchParent(); err != nil {
 		return nil, err
 	}
-	s.before = map[string]os.FileInfo{}
+	s.before = map[string]fileWatchBefore{}
 	if s.file {
 		all := s.all
 		s.all = false
@@ -335,8 +417,8 @@ func (s *fileWatchScan) update() ([]FileEvent, error) {
 	}
 	if s.all {
 		s.all = false
-		for p, info := range s.entries {
-			if info.IsDir() && (p == "." || s.w.opts.Recursive) {
+		for p, e := range s.entries {
+			if e.isDir() && (p == "." || s.w.opts.Recursive) {
 				s.lists[p] = true
 			}
 		}
@@ -347,6 +429,7 @@ func (s *fileWatchScan) update() ([]FileEvent, error) {
 		}
 	}
 	// Parents first: listing a directory again can replace those below it.
+	// Listing a directory lists those to list in it, from it.
 	dirs := make([]string, 0, len(s.lists))
 	for p := range s.lists {
 		dirs = append(dirs, p)
@@ -358,10 +441,11 @@ func (s *fileWatchScan) update() ([]FileEvent, error) {
 		return dirs[i] < dirs[j]
 	})
 	for _, p := range dirs {
-		if s.entries[p] == nil {
-			continue // removed with its parent
+		if !s.lists[p] || !s.listable(p) {
+			continue // listed, removed or replaced with its parent
 		}
-		if err := s.list(p); err != nil {
+		delete(s.lists, p)
+		if err := s.list(nil, p); err != nil {
 			return nil, err
 		}
 	}
@@ -378,24 +462,20 @@ func (s *fileWatchScan) events() []FileEvent {
 		writes[p] = true
 	}
 	for p := range writes {
-		if s.entries[p] != nil {
+		if _, ok := s.entries[p]; ok {
 			s.touch(p)
 		}
 	}
-	before := make(map[string]os.FileInfo, len(s.before))
-	after := make(map[string]os.FileInfo, len(s.before))
-	for p, info := range s.before {
-		if info != nil {
-			before[p] = info
-		}
-		if info := s.entries[p]; info != nil {
-			after[p] = info
-		}
-	}
-	events := fileWatchDiff(before, after, writes)
-	if a, b := before["."], after["."]; s.file && a != nil && b != nil && !a.IsDir() && !b.IsDir() && !os.SameFile(a, b) {
+	events := fileWatchDiff(s.before, s.entries, writes)
+	a := s.before["."]
+	b, ok := s.entries["."]
+	if s.file && a.ok && ok && !a.entry.isDir() && !b.isDir() && a.entry.id != b.id {
 		// A file replaced, as editors save, is written.
 		events = []FileEvent{{Op: FileWrite, Path: "."}}
+	}
+	s.removed = fileWatchGone{}
+	if s.file && a.ok && !ok {
+		s.removed = fileWatchGone{a.entry.id, true}
 	}
 	clear(s.before)
 	clear(s.writes)
@@ -405,10 +485,10 @@ func (s *fileWatchScan) events() []FileEvent {
 
 // statFile looks at the watched file again.
 func (s *fileWatchScan) statFile() error {
-	old := s.entries["."]
+	old, known := s.entries["."]
 	info, err := s.root.Lstat(s.name)
 	if errors.Is(err, fs.ErrNotExist) {
-		if old != nil {
+		if known {
 			s.removeTree(".")
 		}
 		return nil
@@ -419,27 +499,27 @@ func (s *fileWatchScan) statFile() error {
 	if err != nil {
 		return err
 	}
-	if old != nil && os.SameFile(old, info) {
+	if known && old.id == fileWatchEntryOf(info).id {
 		s.set(".", info)
 		return s.enroll(".", info)
 	}
-	if old != nil {
+	if known {
 		s.removeTree(".")
 	}
-	return s.visit(".", info)
+	return s.visit(s.root, ".", info)
 }
 
 // stat looks at p again. For an entry it didn't know, or one that is gone
 // or was replaced, it lists the directory that has it instead.
 func (s *fileWatchScan) stat(p string) error {
 	known := p
-	for known != "." && s.entries[known] == nil {
+	for known != "." && !s.has(known) {
 		known = path.Dir(known)
 	}
 	if known != p && path.Dir(p) == known && s.w.opts.Ignore != nil && s.listable(known) {
 		// Something new that Ignore may ignore, which needs no listing.
 		info, err := s.root.Lstat(filepath.FromSlash(p))
-		if err == nil && s.skip(p, info.IsDir(), s.ignoredIn(known)) {
+		if err == nil && s.skip(p, info.IsDir()) {
 			return nil
 		}
 	}
@@ -450,7 +530,7 @@ func (s *fileWatchScan) stat(p string) error {
 	p = known
 	old := s.entries[p]
 	info, err := s.root.Lstat(filepath.FromSlash(p))
-	if err == nil && os.SameFile(old, info) {
+	if err == nil && old.id == fileWatchEntryOf(info).id {
 		s.set(p, info)
 		return s.enroll(p, info)
 	}
@@ -480,47 +560,58 @@ func (s *fileWatchScan) ignoredIn(p string) map[string]bool {
 	return s.ignored[p]
 }
 
-// listable reports whether p is a directory the watch lists.
-func (s *fileWatchScan) listable(p string) bool {
-	info := s.entries[p]
-	return info != nil && s.descends(p, info)
+// has reports whether the scan knows p.
+func (s *fileWatchScan) has(p string) bool {
+	_, ok := s.entries[p]
+	return ok
 }
 
-// list lists directory p again: what appeared or was replaced in it is
-// visited, what is gone removed, and the rest stat'ed again.
-func (s *fileWatchScan) list(p string) error {
-	dir, info, err := s.openDir(p, s.entries[p])
+// listable reports whether p is a directory the watch lists.
+func (s *fileWatchScan) listable(p string) bool {
+	e, ok := s.entries[p]
+	return ok && s.descends(p, e.isDir())
+}
+
+// list lists directory p again, in dir, the directory that has it, or
+// from the root when dir is nil: what appeared or was replaced in it is
+// visited, what is gone removed, and the rest stat'ed again. The
+// directories in it still to list are listed from it.
+func (s *fileWatchScan) list(dir *os.Root, p string) error {
+	name := s.base(p)
+	if dir == nil {
+		dir, name = s.root, filepath.FromSlash(p)
+	}
+	d, err := s.openDir(dir, name, p, s.entries[p])
 	if err != nil {
 		if p == "." {
 			return err
 		}
 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, errWatchRootChanged) {
 			// Gone or replaced: what has it knows.
-			return s.list(path.Dir(p))
+			return s.list(nil, path.Dir(p))
 		}
 		if s.inaccessible(p, err) {
 			return nil
 		}
 		return err
 	}
-	defer dir.Close()
-	if err := s.enroll(p, info); err != nil {
+	defer d.close()
+	if err := s.enroll(p, d.info); err != nil {
 		return err
 	}
-	s.set(p, info)
+	s.set(p, d.info)
 	seen := map[string]bool{}
-	ignored := map[string]bool{}
-	s.ignored[p] = ignored
+	delete(s.ignored, p)
 	for {
-		entries, err := dir.ReadDir(128)
+		entries, err := d.file.ReadDir(128)
 		for _, entry := range entries {
 			name := entry.Name()
 			child := path.Join(p, name)
-			if s.skip(child, entry.IsDir(), ignored) {
+			if s.skip(child, entry.IsDir()) {
 				continue
 			}
 			seen[name] = true
-			info, err := s.root.Lstat(filepath.FromSlash(child))
+			info, err := s.entryInfo(d, entry, child)
 			if errors.Is(err, fs.ErrNotExist) {
 				s.races[p] = true
 				delete(seen, name)
@@ -532,8 +623,8 @@ func (s *fileWatchScan) list(p string) error {
 			if err != nil {
 				return err
 			}
-			if old := s.entries[child]; old != nil {
-				if os.SameFile(old, info) {
+			if old, ok := s.entries[child]; ok {
+				if old.id == fileWatchEntryOf(info).id {
 					s.set(child, info)
 					if err := s.enroll(child, info); err != nil {
 						return err
@@ -542,7 +633,7 @@ func (s *fileWatchScan) list(p string) error {
 				}
 				s.removeTree(child)
 			}
-			if err := s.visit(child, info); err != nil {
+			if err := s.visit(d.root, child, info); err != nil {
 				return err
 			}
 		}
@@ -561,31 +652,89 @@ func (s *fileWatchScan) list(p string) error {
 			s.removeTree(path.Join(p, name))
 		}
 	}
+	for name := range s.children[p] {
+		if child := path.Join(p, name); s.lists[child] {
+			delete(s.lists, child)
+			if s.listable(child) {
+				if err := s.list(d.root, child); err != nil {
+					return err
+				}
+			}
+		}
+	}
 	return nil
 }
 
-// openDir opens directory p, which must still be the directory info.
-func (s *fileWatchScan) openDir(p string, info os.FileInfo) (*os.File, os.FileInfo, error) {
-	dir, err := s.root.Open(filepath.FromSlash(p))
-	if err != nil {
-		return nil, nil, err
-	}
-	opened, err := dir.Stat()
-	if err != nil {
-		dir.Close()
-		return nil, nil, err
-	}
-	if !opened.IsDir() || !os.SameFile(info, opened) {
-		dir.Close()
-		return nil, nil, &os.PathError{Op: "watch", Path: p, Err: errWatchRootChanged}
-	}
-	return dir, opened, nil
+// fileWatchDir is a directory of the tree, open to be read: root holds
+// what is in it, which is looked at by name, relative to it, and file
+// reads it.
+type fileWatchDir struct {
+	root *os.Root
+	file *os.File
+	info os.FileInfo
+	// owned says root is the directory's own, which close closes, rather
+	// than the scan's.
+	owned bool
 }
 
-// visit records p, which wasn't known, and when the watch covers it what
-// is beneath it. An entry removed or replaced while it looks is skipped,
-// and its directory reported as written.
-func (s *fileWatchScan) visit(p string, info os.FileInfo) error {
+func (d *fileWatchDir) close() {
+	d.file.Close()
+	if d.owned {
+		d.root.Close()
+	}
+}
+
+// openDir opens directory p, at name in dir, which must still be the
+// directory want.
+func (s *fileWatchScan) openDir(dir *os.Root, name, p string, want fileWatchEntry) (*fileWatchDir, error) {
+	d := &fileWatchDir{root: s.root}
+	if p != "." {
+		root, err := dir.OpenRoot(name)
+		if err != nil {
+			return nil, s.openError(err, dir, name, p, want)
+		}
+		d.root, d.owned = root, true
+	}
+	var err error
+	if d.file, err = d.root.Open("."); err != nil {
+		if d.owned {
+			d.root.Close()
+		}
+		return nil, s.pathError(err, p)
+	}
+	if d.info, err = d.file.Stat(); err != nil {
+		d.close()
+		return nil, err
+	}
+	if !d.info.IsDir() || want.id != fileWatchEntryOf(d.info).id {
+		d.close()
+		return nil, &os.PathError{Op: "watch", Path: s.osPath(p), Err: errWatchRootChanged}
+	}
+	return d, nil
+}
+
+// openError is what opening directory p, at name in dir, failing with err
+// says: errWatchRootChanged when it is no longer the directory want, as
+// when a symlink replaced it, which the root follows only within dir.
+func (s *fileWatchScan) openError(err error, dir *os.Root, name, p string, want fileWatchEntry) error {
+	if errors.Is(err, fs.ErrNotExist) || s.inaccessible(p, err) {
+		return s.pathError(err, p)
+	}
+	checked, statErr := dir.Lstat(name)
+	if statErr != nil {
+		return s.pathError(statErr, p)
+	}
+	if !checked.IsDir() || want.id != fileWatchEntryOf(checked).id {
+		return &os.PathError{Op: "watch", Path: s.osPath(p), Err: errWatchRootChanged}
+	}
+	return s.pathError(err, p)
+}
+
+// visit records p, which wasn't known, in dir, the directory that has it,
+// and when the watch covers it what is beneath it. An entry removed or
+// replaced while it looks is skipped, and its directory reported as
+// written.
+func (s *fileWatchScan) visit(dir *os.Root, p string, info os.FileInfo) error {
 	if err := s.w.ctx.Err(); err != nil {
 		return err
 	}
@@ -599,41 +748,47 @@ func (s *fileWatchScan) visit(p string, info os.FileInfo) error {
 	}
 	// Enroll first, then check the entry is still what was enrolled, so
 	// that nothing changes unseen in between. Replacements, as editors'
-	// atomic saves do, are retried a few times.
-	var dir *os.File
+	// atomic saves do, are retried a few times. What isn't enrolled is
+	// watched through its directory, enrolled before it was listed, or
+	// not at all, and needs no check.
+	var d *fileWatchDir
 	for attempt := 0; ; attempt++ {
 		if attempt == 3 {
 			return gone()
 		}
-		err := s.enroll(p, info)
-		if errors.Is(err, fs.ErrPermission) || errors.Is(err, platform.ErrUnsupported) || errors.Is(err, context.Canceled) {
-			return err
-		}
-		checked, statErr := s.root.Lstat(s.osPath(p))
-		if (p != "." || s.file) && (errors.Is(statErr, fs.ErrNotExist) || errors.Is(err, fs.ErrNotExist)) {
-			return gone()
-		}
-		if statErr != nil {
-			return statErr
-		}
-		if !os.SameFile(info, checked) {
-			if p == "." && !s.file {
-				return errWatchRootChanged
+		if !s.enrolls(p, info) {
+			s.unenroll(p)
+		} else {
+			err := s.enroll(p, info)
+			if errors.Is(err, fs.ErrPermission) || errors.Is(err, platform.ErrUnsupported) || errors.Is(err, context.Canceled) {
+				return err
 			}
-			s.races[p] = true
+			checked, statErr := s.lstat(dir, p)
+			if (p != "." || s.file) && (errors.Is(statErr, fs.ErrNotExist) || errors.Is(err, fs.ErrNotExist)) {
+				return gone()
+			}
+			if statErr != nil {
+				return statErr
+			}
+			if !os.SameFile(info, checked) {
+				if p == "." && !s.file {
+					return errWatchRootChanged
+				}
+				s.races[p] = true
+				info = checked
+				continue
+			}
+			if err != nil {
+				return err
+			}
 			info = checked
-			continue
 		}
-		if err != nil {
-			return err
-		}
-		info = checked
-		if !s.descends(p, info) {
+		if !s.descends(p, info.IsDir()) {
 			break
 		}
-		opened, openedInfo, err := s.openDir(p, info)
+		opened, err := s.openDir(dir, s.base(p), p, fileWatchEntryOf(info))
 		if err == nil {
-			dir, info = opened, openedInfo
+			d, info = opened, opened.info
 			break
 		}
 		if s.inaccessible(p, err) {
@@ -649,26 +804,25 @@ func (s *fileWatchScan) visit(p string, info os.FileInfo) error {
 			return err
 		}
 		s.races[p] = true
-		if info, err = s.root.Lstat(s.osPath(p)); errors.Is(err, fs.ErrNotExist) {
+		if info, err = s.lstat(dir, p); errors.Is(err, fs.ErrNotExist) {
 			return gone()
 		} else if err != nil {
 			return err
 		}
 	}
 	s.set(p, info)
-	if dir == nil {
+	if d == nil {
 		return nil
 	}
-	defer dir.Close()
-	ignored := s.ignoredIn(p)
+	defer d.close()
 	for {
-		entries, err := dir.ReadDir(128)
+		entries, err := d.file.ReadDir(128)
 		for _, entry := range entries {
 			child := path.Join(p, entry.Name())
-			if s.skip(child, entry.IsDir(), ignored) {
+			if s.skip(child, entry.IsDir()) {
 				continue
 			}
-			info, err := s.root.Lstat(filepath.FromSlash(child))
+			info, err := s.entryInfo(d, entry, child)
 			if errors.Is(err, fs.ErrNotExist) {
 				s.races[p] = true
 				continue
@@ -679,7 +833,7 @@ func (s *fileWatchScan) visit(p string, info os.FileInfo) error {
 			if err != nil {
 				return err
 			}
-			if err := s.visit(child, info); err != nil {
+			if err := s.visit(d.root, child, info); err != nil {
 				return err
 			}
 		}
@@ -692,24 +846,30 @@ func (s *fileWatchScan) visit(p string, info os.FileInfo) error {
 	}
 }
 
-// descends reports whether the watch covers what is in p.
-func (s *fileWatchScan) descends(p string, info os.FileInfo) bool {
+// descends reports whether the watch covers what is in p, a directory
+// if isDir.
+func (s *fileWatchScan) descends(p string, isDir bool) bool {
 	// Symlinks and Windows junctions are not directories to Lstat.
-	return info.IsDir() && !s.file && (p == "." || s.w.opts.Recursive)
+	return isDir && !s.file && (p == "." || s.w.opts.Recursive)
 }
 
-// touch remembers p as it is before an update changes it.
+// touch remembers p as it is before an update changes it; nothing during
+// the first scan.
 func (s *fileWatchScan) touch(p string) {
+	if s.before == nil {
+		return
+	}
 	if _, ok := s.before[p]; !ok {
-		s.before[p] = s.entries[p]
+		e, ok := s.entries[p]
+		s.before[p] = fileWatchBefore{e, ok}
 	}
 }
 
 func (s *fileWatchScan) set(p string, info os.FileInfo) {
 	s.touch(p)
 	// What an update compares with what came before it, so the identity
-	// doesn't follow a later replacement of the entry (StatIdentity).
-	s.entries[p] = StatIdentity(info)
+	// doesn't follow a later replacement of the entry.
+	s.entries[p] = fileWatchEntryOf(info)
 	if p != "." {
 		dir := path.Dir(p)
 		if s.children[dir] == nil {
@@ -734,11 +894,18 @@ func (s *fileWatchScan) removeTree(p string) {
 	s.unenroll(p)
 }
 
-// enroll has the backend watch p, which the scan saw as info, unless the
-// root's target covers it or it is a symlink or a special file. A watched
-// file is enrolled only while it is a file.
+// enrolls reports whether enroll has the backend watch p, which the scan
+// saw as info: not when the root's target covers it, it is a file the
+// backend watches through its directory, or a symlink or a special file.
+// A watched file is enrolled only while it is a file.
+func (s *fileWatchScan) enrolls(p string, info os.FileInfo) bool {
+	return (info.Mode().IsRegular() && !s.noFiles || info.IsDir() && !s.file) && (!s.subtree || p == ".")
+}
+
+// enroll has the backend watch p, which the scan saw as info, if it
+// enrolls it.
 func (s *fileWatchScan) enroll(p string, info os.FileInfo) error {
-	if !info.Mode().IsRegular() && (!info.IsDir() || s.file) || s.subtree && p != "." {
+	if !s.enrolls(p, info) {
 		s.unenroll(p)
 		return nil
 	}
@@ -750,7 +917,7 @@ func (s *fileWatchScan) enroll(p string, info os.FileInfo) error {
 
 func (s *fileWatchScan) add(p string, info os.FileInfo) error {
 	if old, ok := s.targets[p]; ok {
-		if os.SameFile(old.Info, info) {
+		if old.identity == fileWatchEntryOf(info).id {
 			return nil
 		}
 		s.unenroll(p)
@@ -779,6 +946,11 @@ func (s *fileWatchScan) add(p string, info os.FileInfo) error {
 		}
 	}
 	if err := s.w.native.Add(t); err != nil {
+		if !t.Directory && errors.Is(err, platform.ErrUnsupported) {
+			// Its directory, enrolled before it was listed, watches it.
+			s.noFiles = true
+			return nil
+		}
 		if errors.Is(err, context.Canceled) {
 			return err
 		}
@@ -789,35 +961,44 @@ func (s *fileWatchScan) add(p string, info os.FileInfo) error {
 }
 
 func (s *fileWatchScan) record(p string, t platform.FileWatchTarget) {
-	s.targets[p] = t
+	s.targets[p] = fileWatchTargetRef{id: t.ID, identity: fileWatchEntryOf(t.Info).id, directory: t.Directory, subtree: t.Subtree}
 	s.ids[t.ID] = p
 }
 
 func (s *fileWatchScan) unenroll(p string) {
 	if t, ok := s.targets[p]; ok {
 		delete(s.targets, p)
-		delete(s.ids, t.ID)
-		s.w.native.Remove(t.ID)
+		delete(s.ids, t.id)
+		s.w.native.Remove(t.id)
 		if p == "." {
 			s.subtree = false
 		}
 	}
 }
 
-// fileWatchDiff turns what an update changed, as it was before and is
-// after, into events. An entry whose identity moved to another path is a
-// rename, when nothing else has that identity.
-func fileWatchDiff(before, after map[string]os.FileInfo, writes map[string]bool) []FileEvent {
-	removed := make(map[string]os.FileInfo)
-	created := make(map[string]os.FileInfo)
-	for p, a := range before {
-		if b, ok := after[p]; !ok || !os.SameFile(a, b) {
-			removed[p] = a
+// fileWatchDiff turns what an update changed into events: changed holds
+// what it looked at as it was before, entries what is now. An entry whose
+// identity moved to another path is a rename, when nothing else has that
+// identity; a file replaced at its path by another file is a write.
+func fileWatchDiff(changed map[string]fileWatchBefore, entries map[string]fileWatchEntry, writes map[string]bool) []FileEvent {
+	removed := make(map[string]fileWatchEntry)
+	created := make(map[string]fileWatchEntry)
+	// A file replaced at its path by another file, as editors and atomic
+	// saves replace it (a temporary file renamed over it), is written, as a
+	// watched file replaced is: not removed, then created, which would
+	// have an app close a document it still has.
+	replaced := make(map[string]bool)
+	for p, was := range changed {
+		now, ok := entries[p]
+		if was.ok && ok && was.entry.id != now.id && was.entry.mode.IsRegular() && now.mode.IsRegular() {
+			replaced[p] = true
+			continue
 		}
-	}
-	for p, b := range after {
-		if a, ok := before[p]; !ok || !os.SameFile(a, b) {
-			created[p] = b
+		if was.ok && (!ok || was.entry.id != now.id) {
+			removed[p] = was.entry
+		}
+		if ok && (!was.ok || was.entry.id != now.id) {
+			created[p] = now
 		}
 	}
 	type group struct {
@@ -831,37 +1012,35 @@ func fileWatchDiff(before, after map[string]os.FileInfo, writes map[string]bool)
 		keys = append(keys, p)
 	}
 	sort.Strings(keys)
-	unique := func(m map[string]os.FileInfo, info os.FileInfo) bool {
-		count := 0
-		for _, v := range m {
-			if os.SameFile(info, v) {
-				if count++; count > 1 {
-					return false
-				}
-			}
-		}
-		return count == 1
+	// Pairing looks each removed entry up by identity: comparing it with
+	// every entry instead would make a directory of n files renamed n²
+	// comparisons.
+	var ids *fileWatchIDs
+	if len(removed) > 0 && len(created) > 0 {
+		ids = newFileWatchIDs(changed, entries)
 	}
 	for _, old := range keys {
 		a := removed[old]
+		// A hard link makes pairing by identity ambiguous: the identity
+		// must be the only one of its kind before, after and among what
+		// was created.
 		match := ""
-		count := 0
-		for p, b := range created {
-			if os.SameFile(a, b) {
-				match = p
-				count++
+		if ids != nil {
+			if match = ids.pair(a); match != "" {
+				if _, ok := created[match]; !ok {
+					match = ""
+				}
 			}
 		}
-		// A hard link makes pairing by identity ambiguous.
-		if count != 1 || !unique(before, a) || !unique(after, a) {
+		if match == "" {
 			continue
 		}
 		// A replacement is a removal and a creation even if the old name
 		// survives elsewhere.
-		if _, exists := after[old]; exists {
+		if _, exists := entries[old]; exists {
 			continue
 		}
-		if _, exists := before[match]; exists {
+		if changed[match].ok {
 			continue
 		}
 		// Moved with a directory renamed above it, which says it all.
@@ -878,31 +1057,22 @@ func fileWatchDiff(before, after map[string]os.FileInfo, writes map[string]bool)
 		delete(created, match)
 		var events []FileEvent
 		if !descendant {
-			events = append(events, FileEvent{Op: FileRename, OldPath: old, Path: match, IsDir: a.IsDir()})
+			events = append(events, FileEvent{Op: FileRename, OldPath: old, Path: match, IsDir: a.isDir()})
 		}
-		if !b.IsDir() && (writes[old] || writes[match] || fileInfoChanged(a, b)) {
+		if !b.isDir() && (writes[old] || writes[match] || fileWatchChanged(a, b)) {
 			events = append(events, FileEvent{Op: FileWrite, Path: match})
 		}
 		groups = append(groups, group{match, events})
 	}
-	paths := make(map[string]bool)
-	for p := range before {
-		paths[p] = true
-	}
-	for p := range after {
-		paths[p] = true
-	}
-	for p := range paths {
+	for p, was := range changed {
 		var events []FileEvent
 		if a, ok := removed[p]; ok {
-			events = append(events, FileEvent{Op: FileRemove, Path: p, IsDir: a.IsDir()})
+			events = append(events, FileEvent{Op: FileRemove, Path: p, IsDir: a.isDir()})
 		}
 		if b, ok := created[p]; ok {
-			events = append(events, FileEvent{Op: FileCreate, Path: p, IsDir: b.IsDir()})
+			events = append(events, FileEvent{Op: FileCreate, Path: p, IsDir: b.isDir()})
 		}
-		a, aok := before[p]
-		b, bok := after[p]
-		if aok && bok && !b.IsDir() && os.SameFile(a, b) && (writes[p] || fileInfoChanged(a, b)) {
+		if now, ok := entries[p]; replaced[p] || was.ok && ok && !now.isDir() && was.entry.id == now.id && (writes[p] || fileWatchChanged(was.entry, now)) {
 			events = append(events, FileEvent{Op: FileWrite, Path: p})
 		}
 		if len(events) > 0 {
@@ -917,9 +1087,63 @@ func fileWatchDiff(before, after map[string]os.FileInfo, writes map[string]bool)
 	return result
 }
 
-// fileInfoChanged reports whether a file's content may have changed, as
+// fileWatchID is a file's identity as os.SameFile compares it (device and
+// inode; volume and file index on Windows), usable as a map key, with its
+// type: a file never changes type, but a file system such as ext4 gives
+// a freed inode to the next file created, so that a directory removed and
+// a symlink created in its place can have the same inode.
+type fileWatchID struct {
+	volume, index uint64
+	typ           fs.FileMode
+}
+
+// fileWatchIDs counts the entries of an update's before and after by
+// identity, keeping the path of one, for pairing renames.
+type fileWatchIDs struct {
+	before, after map[fileWatchID]fileWatchIDSeen
+}
+
+type fileWatchIDSeen struct {
+	path  string
+	count int
+}
+
+// newFileWatchIDs counts what an update looked at, as it was (changed)
+// and is (entries).
+func newFileWatchIDs(changed map[string]fileWatchBefore, entries map[string]fileWatchEntry) *fileWatchIDs {
+	ids := &fileWatchIDs{before: make(map[fileWatchID]fileWatchIDSeen, len(changed)), after: make(map[fileWatchID]fileWatchIDSeen, len(changed))}
+	count := func(m map[fileWatchID]fileWatchIDSeen, p string, id fileWatchID) {
+		seen := m[id]
+		seen.path = p
+		seen.count++
+		m[id] = seen
+	}
+	for p, was := range changed {
+		if was.ok {
+			count(ids.before, p, was.entry.id)
+		}
+		if now, ok := entries[p]; ok {
+			count(ids.after, p, now.id)
+		}
+	}
+	return ids
+}
+
+// pair returns the path after has for a, an entry before, when a's
+// identity is the only one of its kind before and after; "" otherwise.
+func (ids *fileWatchIDs) pair(a fileWatchEntry) string {
+	if ids.before[a.id].count != 1 {
+		return ""
+	}
+	if seen := ids.after[a.id]; seen.count == 1 {
+		return seen.path
+	}
+	return ""
+}
+
+// fileWatchChanged reports whether a file's content may have changed, as
 // its size or modification time says; its permissions and other metadata,
 // which backup tools, indexers and antivirus touch, don't count.
-func fileInfoChanged(a, b os.FileInfo) bool {
-	return a.Size() != b.Size() || !a.ModTime().Equal(b.ModTime())
+func fileWatchChanged(a, b fileWatchEntry) bool {
+	return a.size != b.size || a.mtime != b.mtime
 }

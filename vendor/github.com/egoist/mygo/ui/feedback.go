@@ -24,20 +24,19 @@ func coreCheckboxGroup(c *context, label string, fn func()) *node {
 	t := c.theme
 	g := coreColumn(c).Gap(t.Space(2)).Shrink(0)
 	g.widget = "CheckboxGroup"
-	var head *node
-	var group *checkGroup
 	g.Children(func() {
-		head = coreRow(c).Focusable().Shrink(0).Gap(t.Space(2)).FocusRing(false).Role(RoleCheckBox)
-		head.flags |= flagClickable | flagHover | flagToggle
+		// What the boxes below show, once they are built: the box over
+		// them takes its click as the group's constructor returns.
+		state := new(CheckState)
+		head := coreCheckboxStateBase(c, state).Gap(t.Space(2)).FocusRing(false)
 		head.widget = "CheckboxGroup"
-		head.flags |= flagClickable
 		var box *node
 		head.Children(func() {
 			box = coreBox(c).Size(t.Space(4), t.Space(4)).Radius(t.Space(1)).Shrink(0)
 			coreText(c, label)
 		})
 		saved := c.checks
-		group = &checkGroup{}
+		group := &checkGroup{}
 		c.checks = group
 		boxes := coreColumn(c).Gap(t.Space(2)).PaddingStart(t.Space(6)).Role(RoleGroup).Label(label)
 		boxes.Children(fn)
@@ -48,25 +47,23 @@ func coreCheckboxGroup(c *context, label string, fn func()) *node {
 				on++
 			}
 		}
-		all := on == len(group.boxes) && on > 0
+		switch {
+		case on == len(group.boxes) && on > 0:
+			*state = CheckOn
+		case on > 0:
+			*state = CheckMixed
+		}
 		head.afterInput(func() {
-			if head.Clicked() {
+			if head.Changed() {
 				for _, b := range group.boxes {
-					*b = !all
+					*b = *state == CheckOn
 				}
 				g.st.markChanged()
 				c.rt.consumed = true
 			}
 		})
-		state := int8(1)
-		switch {
-		case all:
-			state = 2
-		case on > 0:
-			state = 3
-		}
-		head.checked = state
-		paintCheckbox(c, head, box, state)
+		head.checked = checkedOf(*state)
+		paintCheckbox(c, head, box, head.checked)
 	})
 	return g
 }
@@ -76,7 +73,7 @@ func coreCheckboxGroup(c *context, label string, fn func()) *node {
 func paintCheckbox(c *context, row, box *node, state int8) {
 	t := c.theme
 	if state > 1 {
-		box.Background(t.Accent)
+		box.Background(c.accent(t))
 	} else {
 		box.Background(t.Background).Border(1, t.Border.Mix(t.Text, 0.25))
 	}
@@ -88,7 +85,7 @@ func paintCheckbox(c *context, row, box *node, state int8) {
 			p.Fill(Rect{r.X + r.W*0.25, r.Y + r.H/2 - 1, r.W * 0.5, 2}, t.AccentText, 1)
 		}
 		if row.FocusVisible() {
-			p.FocusRing(r, box.radius)
+			p.focusRingOf(row, r, box.radius)
 		}
 	})
 	box.styleFn = func(box *node) {
@@ -102,7 +99,8 @@ func paintCheckbox(c *context, row, box *node, state int8) {
 // path control, separated by chevrons: the items but the last are links,
 // which a click chooses, as Enter does, setting *chosen to its index, which
 // Changed reports. Long items shorten with an ellipsis as room runs short.
-// Assistive technology sees links in a group; name it with Label.
+// Assistive technology sees links in a navigation landmark, which Label
+// names, and the last item as the current page.
 //
 //	path := []string{"Macintosh HD", "Users", "ada", "Documents"}
 //	if ui.Breadcrumbs(c, path, &app.chosen).Label("Path").Changed() {
@@ -110,7 +108,7 @@ func paintCheckbox(c *context, row, box *node, state int8) {
 //	}
 func coreBreadcrumbs(c *context, items []string, chosen *int) *node {
 	t := c.theme
-	e := coreRow(c).AlignItems(Center).Gap(t.Space(0.5)).MinWidth(0).Role(RoleGroup)
+	e := coreRow(c).AlignItems(Center).Gap(t.Space(0.5)).MinWidth(0).Role(RoleNavigation)
 	e.widget = "Breadcrumbs"
 	e.Children(func() {
 		for i, item := range items {
@@ -132,8 +130,8 @@ func coreBreadcrumbs(c *context, items []string, chosen *int) *node {
 			b := coreRow(c).Key(i).Padding(t.Space(0.5), t.Space(1.5)).Radius(t.Radius).MinWidth(t.Space(6)).Shrink(1)
 			b.Children(func() { coreText(c, item).SingleLine() })
 			if last {
-				// Where the path is: no link.
-				b.Shrink(0.5).FontWeight(500)
+				// Where the path is: no link, but the current page.
+				b.Shrink(0.5).FontWeight(500).Role(RoleText).Current(CurrentPage)
 				continue
 			}
 			b.Focusable().Role(RoleLink).TextColor(t.TextMuted)
@@ -183,16 +181,21 @@ func coreAlertDialog(c *context, open *bool, title, message string, buttons ...s
 		back := coreBox(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Center().Background(RGBA(0, 0, 0, 0.4)).Modal()
 		dismissed = back.OverlayShortcut(0, KeyEscape)
 		back.Children(func() {
-			panel := coreColumn(c).Width(t.Space(75)).MaxWidth(c.w - t.Space(10)).Padding(t.Space(5)).Gap(t.Space(3)).Radius(t.Space(2.5)).Background(t.Background).Role(RoleAlertDialog)
+			// As wide as its buttons need on one line where the window has
+			// room, whose text wraps to that width and adds nothing to it;
+			// in a narrower window the buttons wrap, and a label too long for
+			// it ends in an ellipsis.
+			room := c.w - t.Space(10)
+			panel := coreColumn(c).MinWidth(min(t.Space(75), room)).MaxWidth(room).Padding(t.Space(5)).Gap(t.Space(3)).Radius(t.Space(2.5)).Background(t.Background).Role(RoleAlertDialog)
 			panel.Label(title)
 			panel.description = message
 			panel.Shadow(0, 10, 30, 0, RGBA(0, 0, 0, 0.3))
 			panel.Children(func() {
-				coreText(c, title).Bold().FontSize(t.FontSize + 1)
+				coreText(c, title).Bold().FontSize(t.FontSize + 1).Width(0).MinWidthPercent(100)
 				if message != "" {
-					coreText(c, message).TextColor(t.TextMuted)
+					coreText(c, message).TextColor(t.TextMuted).Width(0).MinWidthPercent(100)
 				}
-				coreRow(c).Gap(t.Space(2)).Justify(End).Margin(t.Space(2), 0, 0, 0).Children(func() {
+				coreRow(c).Wrap().Gap(t.Space(2)).Justify(End).Margin(t.Space(2), 0, 0, 0).Children(func() {
 					for i, label := range buttons {
 						var b *node
 						if i == len(buttons)-1 {
@@ -200,6 +203,7 @@ func coreAlertDialog(c *context, open *bool, title, message string, buttons ...s
 						} else {
 							b = coreButton(c, label)
 						}
+						b.MaxWidthPercent(100)
 						if b.Clicked() {
 							chosen = i
 						}

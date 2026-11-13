@@ -101,15 +101,14 @@ func (rt *engine) finalizeInputs(all bool) {
 				n.st.markSubmitted()
 			}
 		}
+		if n.st.pendingChange {
+			n.st.pendingChange = false
+			n.st.markChanged()
+		}
 		n.valueInput(n)
 	}
-	for ; rt.inputAt < len(rt.inputs); rt.inputAt++ {
-		if built(rt.inputs[rt.inputAt].building) {
-			apply(rt.inputAt)
-		} else {
-			rt.waitingInputs = append(rt.waitingInputs, rt.inputAt)
-		}
-	}
+	// Those waiting were queued before the cursor's, so they go first:
+	// a list's rows take their clicks before the list its keys.
 	rt.waitingInputs = slices.DeleteFunc(rt.waitingInputs, func(i int) bool {
 		if !built(rt.inputs[i].building) {
 			return false
@@ -117,16 +116,16 @@ func (rt *engine) finalizeInputs(all bool) {
 		apply(i)
 		return true
 	})
+	for ; rt.inputAt < len(rt.inputs); rt.inputAt++ {
+		if built(rt.inputs[rt.inputAt].building) {
+			apply(rt.inputAt)
+		} else {
+			rt.waitingInputs = append(rt.waitingInputs, rt.inputAt)
+		}
+	}
 	act := func(i int) {
 		if a := rt.afterInputs[i]; a.node != nil && !a.node.disabled() {
 			a.fn()
-		}
-	}
-	for ; rt.afterInputAt < len(rt.afterInputs); rt.afterInputAt++ {
-		if built(rt.afterInputs[rt.afterInputAt].building) {
-			act(rt.afterInputAt)
-		} else {
-			rt.waitingActions = append(rt.waitingActions, rt.afterInputAt)
 		}
 	}
 	rt.waitingActions = slices.DeleteFunc(rt.waitingActions, func(i int) bool {
@@ -136,6 +135,13 @@ func (rt *engine) finalizeInputs(all bool) {
 		act(i)
 		return true
 	})
+	for ; rt.afterInputAt < len(rt.afterInputs); rt.afterInputAt++ {
+		if built(rt.afterInputs[rt.afterInputAt].building) {
+			act(rt.afterInputAt)
+		} else {
+			rt.waitingActions = append(rt.waitingActions, rt.afterInputAt)
+		}
+	}
 	if len(rt.notices) > 0 {
 		rt.consumed = true
 	}
@@ -194,8 +200,8 @@ func sliderInput(n *node) {
 		}
 	}
 	st, rt := n.st, n.c.rt
-	if st.pressed {
-		x, y := st.local(rt.pointerX, rt.pointerY)
+	if st.pressedPrimary() {
+		x, y := st.local(st.pointer(rt))
 		x += st.x
 		y += st.y
 		if settings.vertical && st.ch > 0 {
@@ -318,12 +324,38 @@ func listRowValueInput(n *node) {
 	if n.disabled() || f.owner.disabled() {
 		return
 	}
+	rt, st := n.c.rt, n.st
+	if st.pressPending {
+		// A pointer press began on the row. Where a drag chooses, one on a
+		// row or a cell not chosen chooses it as the pointer goes down, as
+		// spreadsheets do; one chosen waits for the release, which keeps a
+		// drag of the choice.
+		st.rowPressed, st.pressChose = true, false
+		if st.pressed && rt.pressButton == 0 && f.dragSelects() && !f.chosenAt(b.i, st.drag.ox, st.drag.oy) {
+			f.clickAt(b.i, st.drag.ox, st.drag.oy, st.pressMods)
+			st.pressChose = true
+		}
+	}
 	if n.Clicked() {
-		f.click(b.i, n.ClickModifiers())
-		f.owner.Focus()
+		switch {
+		case st.pressChose:
+		case st.rowPressed:
+			f.clickAt(b.i, st.drag.ox, st.drag.oy, n.ClickModifiers()) // where it pressed
+		default:
+			// The keyboard or assistive technology: the row, and no column.
+			f.click(b.i, n.ClickModifiers())
+		}
+		if !f.owner.FocusWithin() {
+			// Leave the focus on a control inside a row, such as an editor
+			// a double click opened.
+			f.owner.focus(false)
+		}
 	}
 	if n.DoubleClicked() {
 		f.owner.st.markSubmitted()
+	}
+	if !st.pressed {
+		st.rowPressed, st.pressChose = false, false
 	}
 }
 func listInput(n *node) {
@@ -331,9 +363,16 @@ func listInput(n *node) {
 		return
 	}
 	f := n.rowsOf
+	if p := f.c.rt.pressEnded; p != nil {
+		// The pass that reads the last moves of a press sees it go on, up
+		// to where the pointer let go, before the keys that came after its
+		// release.
+		f.dragSelect(p)
+	}
 	if f.s.cursor() != nil {
 		f.navigate()
 	}
+	f.dragSelect(f.c.rt.pressed)
 	f.reorder()
 }
 
@@ -344,6 +383,12 @@ func (s *state) notice() {
 	}
 }
 func (s *state) markChanged() {
+	if s.rt != nil && !s.rt.inFrame {
+		// A change made between frames: the next frame's build reports
+		// it.
+		s.pendingChange = true
+		return
+	}
 	s.changed, s.changeDelivered = true, false
 	s.notice()
 }
@@ -367,6 +412,17 @@ type inputAction struct {
 
 func (n *node) afterInput(fn func()) {
 	n.c.rt.afterInputs = append(n.c.rt.afterInputs, inputAction{node: n, fn: fn, building: n.c.rt.building})
+}
+
+// onBuilt runs fn once the view is built, after the input of every
+// control, while typing (state.typing) still shows: for what needs all of
+// a widget's parts, which the app builds, as the items of a tree.
+func (c *context) onBuilt(fn func()) { c.rt.afterBuild = append(c.rt.afterBuild, fn) }
+
+func (rt *engine) runAfterBuild() {
+	for _, fn := range rt.afterBuild {
+		fn()
+	}
 }
 
 // SetChanged reports the element's value as changed in this build pass,

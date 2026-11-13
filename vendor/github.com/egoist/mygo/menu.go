@@ -1,7 +1,10 @@
 package mygo
 
 import (
+	"bytes"
+	"image/png"
 	"runtime"
+	"slices"
 	"sync"
 	"weak"
 
@@ -102,7 +105,14 @@ type MenuItem struct {
 	// before Click is called.
 	Checked bool
 	ToolTip string
-	Submenu []*MenuItem
+	// Icon is an image shown beside the label (see NewMenuIcon), nil for
+	// none.
+	Icon *MenuIcon
+	// Subtitle is a second, smaller line under the label: macOS 14 and
+	// browsers show it so, and earlier macOS, Windows and Linux after the
+	// label, as "Label — Subtitle".
+	Subtitle string
+	Submenu  []*MenuItem
 	// Click is called on the main thread when the item is chosen. On Linux
 	// and Windows, win is the window whose menu bar or context menu was
 	// chosen. Other menus use the focused window, which may be nil.
@@ -115,12 +125,19 @@ type MenuItem struct {
 	// in the language the app shows for as long as the app gives the item
 	// no label of its own (relabelMenus).
 	roleLabel string
+	// native is the backend's number of an item of a web view's own
+	// context menu (ContextMenuEvent), 0 for the app's items.
+	native int
 }
 
 // Menu is a list of menu items used as application menu, window menu,
 // context menu or tray menu.
 type Menu struct {
 	items []*MenuItem
+	// transient is set on the menu of a ContextMenuEvent, which shows
+	// once as it is when the listeners return: changing it re-installs
+	// no menus.
+	transient bool
 }
 
 // Separator returns a separator item.
@@ -169,7 +186,7 @@ func (m *Menu) Append(items ...*MenuItem) {
 		m.items = append(m.items, prepareItem(it, m))
 	}
 	menuMu.Unlock()
-	refreshMenus()
+	m.refresh()
 }
 
 // Insert adds item at position pos.
@@ -178,7 +195,35 @@ func (m *Menu) Insert(pos int, item *MenuItem) {
 	pos = min(max(pos, 0), len(m.items))
 	m.items = append(m.items[:pos], append([]*MenuItem{prepareItem(item, m)}, m.items[pos:]...)...)
 	menuMu.Unlock()
-	refreshMenus()
+	m.refresh()
+}
+
+// Remove removes the items with these IDs from the menu and its
+// submenus, as the web view's items of a page's context menu
+// (ContextMenuEvent):
+//
+//	e.Menu.Remove(mygo.ContextMenuReload, mygo.ContextMenuInspect)
+func (m *Menu) Remove(ids ...string) {
+	menuMu.Lock()
+	m.remove(ids)
+	menuMu.Unlock()
+	m.refresh()
+}
+
+func (m *Menu) remove(ids []string) {
+	m.items = slices.DeleteFunc(m.items, func(it *MenuItem) bool { return it.ID != "" && slices.Contains(ids, it.ID) })
+	for _, it := range m.items {
+		if it.sub != nil {
+			it.sub.remove(ids)
+		}
+	}
+}
+
+// refresh re-installs the menus in use after m's items changed.
+func (m *Menu) refresh() {
+	if !m.transient {
+		refreshMenus()
+	}
 }
 
 // ItemByID finds an item by ID in the menu and its submenus.
@@ -261,6 +306,12 @@ func (it *MenuItem) SetLabel(label string) { it.update(func() { it.Label = label
 
 // SetAccelerator changes the keyboard shortcut of the item.
 func (it *MenuItem) SetAccelerator(acc string) { it.update(func() { it.Accelerator = acc }) }
+
+// SetSubtitle changes the second line of the item; "" removes it.
+func (it *MenuItem) SetSubtitle(subtitle string) { it.update(func() { it.Subtitle = subtitle }) }
+
+// SetIcon replaces the image beside the label; nil removes it.
+func (it *MenuItem) SetIcon(icon *MenuIcon) { it.update(func() { it.Icon = icon }) }
 
 func (it *MenuItem) get(fn func() bool) bool {
 	menuMu.Lock()
@@ -373,6 +424,80 @@ func prepareItem(it *MenuItem, parent *Menu) *MenuItem {
 	return it
 }
 
+// MenuIcon is an image a menu item shows beside its label, made once and
+// given to any number of items (MenuItem.Icon, SetIcon).
+type MenuIcon struct{ p *platform.MenuIcon }
+
+// PlatformMenuIcon returns what the icon shows, for the items of package
+// ui's menus (ui.MenuItem.Icon), nil for a nil icon.
+func (m *MenuIcon) PlatformMenuIcon() *platform.MenuIcon {
+	if m == nil {
+		return nil
+	}
+	return m.p
+}
+
+// NewMenuIcon makes an icon for menu items of a PNG image, which it copies.
+// The image is shown in its own colors, as a flag; with template, it is a
+// black and transparent image shown in the color of the menu's text, white
+// in a dark menu and on the highlight, as macOS tints template images
+// (Linux shows it as it is). It returns an error for data that is not a
+// PNG image. NewMenuIconSVG makes one of an SVG document.
+//
+// The image fits a box of 16 by 16 points, keeping its aspect: give it at
+// least 32 by 32 pixels, for high-resolution displays. A checkbox or radio
+// item shows its check as well. MyGo decodes each image once, however many
+// items show it and however often their menus open or are made again, and
+// frees what it made of it once neither the app nor a menu holds the icon.
+//
+// macOS shows icons on every menu. The menu bars of Windows and Linux show
+// none on their own items, only in their menus. Windows 10 draws an icon in
+// the column of checks: a checked item shows its icon framed as checked.
+// On Linux, a tray icon's menu shows icons where the panel does, as GNOME
+// Shell's AppIndicator extension and KDE Plasma.
+func NewMenuIcon(data []byte, template bool) (*MenuIcon, error) {
+	if _, err := png.DecodeConfig(bytes.NewReader(data)); err != nil {
+		return nil, err
+	}
+	linkMenuIcons()
+	menuMu.Lock()
+	defer menuMu.Unlock()
+	return &MenuIcon{menuIcon(data, template)}, nil
+}
+
+// menuIcons are the images of menu items by their hash, so that icons of
+// the same image share what the backend makes of it, which it makes once,
+// even as an app makes its icons again. menuMu guards it.
+var menuIcons map[uint64]weak.Pointer[platform.MenuIcon]
+
+// menuIcon returns the icon of an image, shared with the items that show
+// the same. menuMu must be held.
+func menuIcon(data []byte, template bool) *platform.MenuIcon {
+	h := uint64(14695981039346656037) // FNV-1a
+	for _, c := range data {
+		h = (h ^ uint64(c)) * 1099511628211
+	}
+	if template {
+		h = ^h
+	}
+	if ic := menuIcons[h].Value(); ic != nil && ic.Template == template && bytes.Equal(ic.PNG, data) {
+		return ic
+	}
+	if menuIcons == nil {
+		menuIcons = map[uint64]weak.Pointer[platform.MenuIcon]{}
+	}
+	ic := &platform.MenuIcon{PNG: bytes.Clone(data), Template: template}
+	menuIcons[h] = weak.Make(ic)
+	if len(menuIcons) > 64 && len(menuIcons)&63 == 0 {
+		for k, wp := range menuIcons {
+			if wp.Value() == nil {
+				delete(menuIcons, k)
+			}
+		}
+	}
+	return ic
+}
+
 func lookupMenuItem(uid int) *MenuItem {
 	menuMu.Lock()
 	defer menuMu.Unlock()
@@ -417,12 +542,21 @@ func (it *MenuItem) snapshotLocked() *platform.MenuItem {
 	p := &platform.MenuItem{
 		ID:          it.uid,
 		Label:       it.Label,
+		Subtitle:    it.Subtitle,
 		Role:        string(it.Role),
 		Accelerator: it.Accelerator,
 		Enabled:     !it.Disabled,
 		Visible:     !it.Hidden,
 		Checked:     it.Checked,
 		ToolTip:     it.ToolTip,
+	}
+	if it.Icon != nil {
+		p.Icon = it.Icon.p
+	}
+	// A web view's item does what the web view does, unless the app gave
+	// it a Click of its own.
+	if it.native != 0 && it.Click == nil {
+		p.Native, p.Name = it.native, it.ID
 	}
 	switch it.Type {
 	case MenuItemSeparator:
@@ -454,6 +588,10 @@ func menuItemClicked(uid int, win *Window) {
 	}
 	performRole(it.Role, win)
 	if it.Click != nil {
+		// The context menu of a web view's page is its window's.
+		if win != nil {
+			win = win.top()
+		}
 		it.Click(it, win)
 	}
 }
@@ -506,7 +644,7 @@ func performRole(role MenuRole, win *Window) {
 			return
 		}
 	case RoleReload, RoleForceReload, RoleResetZoom, RoleZoomIn, RoleZoomOut:
-		if win.content != nil {
+		if win.content {
 			return
 		}
 	}
@@ -523,10 +661,13 @@ func performRole(role MenuRole, win *Window) {
 		}
 	case RoleResetZoom:
 		n.SetZoom(1)
+		win.zoomChanged()
 	case RoleZoomIn:
 		n.SetZoom(nextZoom(n.Zoom(), 1))
+		win.zoomChanged()
 	case RoleZoomOut:
 		n.SetZoom(nextZoom(n.Zoom(), -1))
+		win.zoomChanged()
 	case RoleToggleFullScreen:
 		n.SetFullScreen(!n.IsFullScreen())
 	case RoleMinimize:
@@ -538,13 +679,13 @@ func performRole(role MenuRole, win *Window) {
 			n.Maximize()
 		}
 	case RoleClose:
-		win.close()
+		win.top().close()
 	case RoleUndo, RoleRedo, RoleCut, RoleCopy, RolePaste, RoleDelete, RoleSelectAll, RolePasteAndMatchStyle:
 		cmd := map[MenuRole]string{
 			RoleUndo: "undo", RoleRedo: "redo", RoleCut: "cut", RoleCopy: "copy", RolePaste: "paste",
 			RoleDelete: "delete", RoleSelectAll: "selectAll", RolePasteAndMatchStyle: "pasteAndMatchStyle",
 		}[role]
-		if win.content != nil {
+		if win.content {
 			win.contentCommand(cmd)
 			return
 		}
@@ -553,7 +694,7 @@ func performRole(role MenuRole, win *Window) {
 		}
 		n.Eval("document.execCommand(" + `"` + cmd + `"` + ")")
 	case RoleBold, RoleItalic, RoleUnderline, RoleStrikethrough, RoleAlignLeft, RoleAlignCenter, RoleAlignRight:
-		if win.content != nil {
+		if win.content {
 			win.contentCommand(string(role))
 			return
 		}

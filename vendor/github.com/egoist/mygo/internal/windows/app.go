@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -26,6 +27,9 @@ type Backend struct {
 	running bool
 
 	signaled atomic.Bool
+	// posted are the functions post runs on the main thread.
+	postedMu sync.Mutex
+	posted   []func()
 
 	windows map[uintptr]*window // by HWND
 	// languages are those SetLanguages told: the first is the language
@@ -39,12 +43,24 @@ type Backend struct {
 	envErr     error
 	envStarted bool
 	envWaiters []func()
+	// envUnthrottled tells that the environment's browser runs, or is
+	// starting, with unthrottledArguments, which the page that started it
+	// asked for; envWarned that a page that asked later was told it was
+	// too late.
+	envUnthrottled, envWarned bool
+	// envAutoplay and envAutoplayWarned are the same for autoplayArguments
+	// (PageOptions.Autoplay).
+	envAutoplay, envAutoplayWarned bool
 	// envResult is whether the environment was created (1) or failed (2),
 	// 0 before, for WebViewAvailable, which any goroutine may call.
 	envResult atomic.Int32
 
 	// cookies gives cookie calls a cookie manager (cookies.go).
 	cookies cookieStore
+	// stores are the profiles of sessions (session.go), privateStores
+	// the number of InPrivate ones made.
+	stores        []*dataStore
+	privateStores int
 
 	menus menuTable
 
@@ -68,8 +84,28 @@ type Backend struct {
 
 	// captions are the windows of the controls of windows with a hidden
 	// title bar (titlebar.go), captionFonts their glyphs by DPI.
-	captions     map[uintptr]*captionBar
+	captions map[uintptr]*captionBar
+	// topEdges are the windows over the top resize borders of windows
+	// without a caption (topedge.go), and their windows.
+	topEdges     map[uintptr]*window
 	captionFonts map[int]captionFont
+	// menuFonts are the fonts of the menu items MyGo draws by DPI,
+	// menuExtra how much Windows widens them by DPI, and menuBrushes the
+	// brushes of menus' backgrounds by color (menudraw.go).
+	menuFonts   map[int]menuFonts
+	menuExtra   map[int]int32
+	menuBrushes map[uint32]uintptr
+	// menuHook hooks the main thread while menus show, and menuGlass is
+	// whether they show the material behind them. menuWindows are the
+	// windows of menus it subclassed, and popups counts the popup menus
+	// MyGo is showing: TrackPopupMenuEx runs the menu loop that creates
+	// their windows, and their submenus', unlike the loops of a menu bar's
+	// dropdowns and of Windows' window menu, which are not MyGo's
+	// (menuProc).
+	menuHook    uintptr
+	menuGlass   bool
+	menuWindows map[uintptr]*menuWindow
+	popups      int
 	// comp shows the controls of windows with a material behind them
 	// (compositor.go). compRetry is when to try making it again after
 	// compFails failures in a row, and composeAt when timerCompose draws
@@ -96,6 +132,7 @@ func New() *Backend {
 		menus:         newMenuTable(),
 		themeSource:   "system",
 		captions:      map[uintptr]*captionBar{},
+		topEdges:      map[uintptr]*window{},
 		captionFonts:  map[int]captionFont{},
 		surfaces:      map[uintptr]*surface{},
 	}
@@ -132,9 +169,26 @@ func (b *Backend) Init(h platform.AppHandler, opts platform.AppOptions) error {
 // startEnvironment starts creating the WebView2 environment, the first time
 // a window that shows a web page is created, and returns why it cannot,
 // such as a missing WebView2 Runtime. Windows that show native UI need
-// none: an app whose windows all do runs without the runtime.
-func (b *Backend) startEnvironment() error {
+// none: an app whose windows all do runs without the runtime. o are the
+// options of the page that needs it, nil for none.
+//
+// The environment's browser runs with unthrottledArguments when that first
+// page asked not to be throttled, and with autoplayArguments when it asked
+// to play without a user gesture: the arguments are the browser's, which
+// all the app's pages share, and a page that asks once it runs is too
+// late, which the log tells.
+func (b *Backend) startEnvironment(o *platform.WindowOptions) error {
+	unthrottled := o != nil && o.NoBackgroundThrottling
+	autoplay := o != nil && o.Autoplay
 	if b.envStarted {
+		if unthrottled && !b.envUnthrottled && !b.envWarned {
+			b.envWarned = true
+			log.Print("mygo: ThrottlingOff of a page shown after the first one: WebView2's browser already runs without the arguments that keep hidden pages running; give the option to the first window or web view that shows a page")
+		}
+		if autoplay && !b.envAutoplay && !b.envAutoplayWarned {
+			b.envAutoplayWarned = true
+			log.Print("mygo: AutoplayAllow of a page shown after the first one: WebView2's browser already runs without the argument that lets pages play sound without a user gesture; give the option to the first window or web view that shows a page")
+		}
 		return nil
 	}
 	dir := os.Getenv("LOCALAPPDATA")
@@ -147,8 +201,14 @@ func (b *Backend) startEnvironment() error {
 	if len(b.languages) > 0 {
 		language = b.languages[0]
 	}
-	err := createEnvironment(userData, language, func(env uintptr, err error) {
+	// What the first page asked for counts from now, so that a page shown
+	// while the environment is being made isn't told it is too late.
+	b.envUnthrottled, b.envAutoplay = unthrottled, autoplay
+	err := createEnvironment(userData, language, browserArguments(unthrottled, autoplay), func(env uintptr, withArgs bool, err error) {
 		b.env, b.envErr = env, err
+		if err != nil || !withArgs {
+			b.envUnthrottled, b.envAutoplay = false, false
+		}
 		if err != nil {
 			log.Print(err)
 			b.envResult.Store(2)
@@ -215,6 +275,24 @@ func (b *Backend) Signal() {
 		return
 	}
 	postMessage(b.appHwnd, wmAppDispatch, 0, 0)
+}
+
+// post runs fn on the main thread, for the backend's own goroutines.
+func (b *Backend) post(fn func()) {
+	b.postedMu.Lock()
+	b.posted = append(b.posted, fn)
+	b.postedMu.Unlock()
+	postMessage(b.appHwnd, wmAppRun, 0, 0)
+}
+
+func (b *Backend) runPosted() {
+	b.postedMu.Lock()
+	posted := b.posted
+	b.posted = nil
+	b.postedMu.Unlock()
+	for _, fn := range posted {
+		fn()
+	}
 }
 
 func (b *Backend) Step() {
@@ -314,6 +392,10 @@ func wndProc(hwnd, m, wp, lp uintptr) uintptr {
 			if r, ok := c.message(hwnd, uint32(m), wp, lp); ok {
 				return r
 			}
+		} else if w := b.topEdges[hwnd]; w != nil {
+			if r, ok := w.topEdgeMessage(uint32(m), wp, lp); ok {
+				return r
+			}
 		} else if s := b.surfaces[hwnd]; s != nil {
 			if r, ok := s.message(hwnd, uint32(m), wp, lp); ok {
 				return r
@@ -326,6 +408,9 @@ func wndProc(hwnd, m, wp, lp uintptr) uintptr {
 
 // appMessage handles the messages of the application window.
 func (b *Backend) appMessage(m uint32, wp, lp uintptr) (uintptr, bool) {
+	if r, ok := b.menuItemMessage(b.appHwnd, m, wp, lp); ok {
+		return r, true
+	}
 	switch m {
 	case wmAppReady:
 		b.h.Ready()
@@ -336,11 +421,17 @@ func (b *Backend) appMessage(m uint32, wp, lp uintptr) (uintptr, bool) {
 		return 0, true
 	case wmAppWake:
 		return 0, true
+	case wmAppRun:
+		b.runPosted()
+		return 0, true
 	case wmAppCookieView:
 		b.closeCookieViewNow()
 		return 0, true
 	case wmAppTray:
 		b.trayMessage(uint32(wp), uint32(loword(lp)))
+		return 0, true
+	case wmAppTrayAdd:
+		b.addNewTrays()
 		return 0, true
 	case wmHotkey:
 		b.h.HotkeyPressed(int(wp))
@@ -349,10 +440,14 @@ func (b *Backend) appMessage(m uint32, wp, lp uintptr) (uintptr, bool) {
 		b.powerMessage(m, wp)
 		return 1, false // TRUE for power broadcasts, and default handling
 	case wmSettingChange:
+		if preferencesChanged(wp, lp) {
+			b.dropMenuFonts() // the size of text, or the menu font
+		}
 		switch {
 		case lp != 0 && wstr(lp) == settingImmersiveColorSet:
 			b.applyTheme()
 			b.h.ThemeChanged()
+			b.traysAppearance()
 		case lp != 0 && wstr(lp) == settingIntl:
 			// The display languages or the regional formats.
 			b.h.LocaleChanged()
@@ -366,6 +461,10 @@ func (b *Backend) appMessage(m uint32, wp, lp uintptr) (uintptr, bool) {
 	case wmTimer:
 		if wp == timerCompose {
 			b.recompose()
+			return 0, true
+		}
+		if wp == timerCookieView && checkCookieViews != nil {
+			checkCookieViews(b)
 			return 0, true
 		}
 	case wmAppDeviceRemoved:
@@ -383,9 +482,14 @@ func (b *Backend) appMessage(m uint32, wp, lp uintptr) (uintptr, bool) {
 		return 0, true
 	}
 	if m == b.taskbarCreated && m != 0 {
-		// Explorer restarted: the notification area forgot our icons.
+		// Explorer restarted: the notification area forgot our icons. A
+		// temporary icon, which only carries a notification's balloon, has
+		// lost that balloon with the rest of explorer, so it is not added
+		// again: what is left of it is reclaimed on its own timer.
 		for _, t := range b.trays {
-			t.add()
+			if t.added && !t.temporary {
+				t.add()
+			}
 		}
 		return 0, true
 	}
@@ -435,12 +539,37 @@ type appController struct{ b *Backend }
 
 func (a appController) SetActivationPolicy(string) {}
 
+// AllowForeground passes the app's right to the foreground on to the next
+// process to ask (ASFW_ANY). Only the process in front has it to pass on,
+// so an app passes it before it closes its windows: a process it starts
+// once they closed could no longer take it from the app.
+func (a appController) AllowForeground() {
+	const asfwAny = ^uintptr(0)
+	procAllowSetForegroundWindow.Call(asfwAny)
+}
+
+func (a appController) WithActivationToken(_ string, fn func()) { fn() }
+
+// Activate brings the app forward as macOS does, with its windows in their
+// order: a window of the app already in front stays there, else the one
+// the user had last, the highest of them in the z-order, comes forward.
+// Flyouts that never take the keyboard bring nothing forward.
 func (a appController) Activate() {
-	for _, w := range a.b.windows {
-		if w.IsVisible() {
-			w.Focus()
-			return
+	if fg, _, _ := procGetForegroundWindow.Call(); a.b.windows[fg] != nil {
+		return
+	}
+	const gwHwndNext = 2
+	h, _, _ := procGetTopWindow.Call(0)
+	for ; h != 0; h, _, _ = procGetNextWindow.Call(h, gwHwndNext) {
+		w := a.b.windows[h]
+		if w == nil || !w.IsVisible() {
+			continue
 		}
+		if f := w.opts.Flyout; f != nil && !f.Focusable {
+			continue
+		}
+		w.Focus()
+		return
 	}
 }
 
@@ -466,6 +595,12 @@ func (a appController) Unhide() {
 func (a appController) IsHidden() bool        { return len(a.b.hidden) > 0 }
 func (a appController) SetBadge(label string) { a.b.badge = label }
 func (a appController) Badge() string         { return a.b.badge }
+
+// IsActive reports whether the window in front is one of the app's.
+func (a appController) IsActive() bool {
+	fg, _, _ := procGetForegroundWindow.Call()
+	return a.b.windows[fg] != nil
+}
 
 const (
 	flashwStop      = 0
@@ -572,11 +707,12 @@ func (a appController) Package() (platform.PackageInfo, bool) {
 	return info, true
 }
 
-// ClearBrowsingData clears the profile the app's web views share, through
-// the web view cookie calls use: a window's, or a hidden one before a
-// window shows a page (cookies.go).
-func (a appController) ClearBrowsingData(done func(error)) {
-	a.withCookieManager(func(_ []platform.Cookie, err error) { done(err) }, func(r *cookieRequest) {
+// ClearBrowsingData clears the profile of store, the one the app's web
+// views share for nil, through the web view cookie calls use: a window's,
+// or a hidden one before a window shows a page (cookies.go). SiteDataAll
+// is ClearBrowsingDataAll, other types ClearBrowsingData of their kinds.
+func (a appController) ClearBrowsingData(store platform.DataStore, types platform.SiteData, done func(error)) {
+	a.withCookieManager(store, func(_ []platform.Cookie, err error) { done(err) }, func(r *cookieRequest) {
 		wv13 := queryInterface(r.webview, &iidICoreWebView2_13)
 		if wv13 == 0 {
 			r.finish(nil, errors.New("mygo: clearing browsing data needs a newer WebView2 Runtime"))
@@ -598,7 +734,12 @@ func (a appController) ClearBrowsingData(done func(error)) {
 				return
 			}
 			r.finish(nil, nil)
-		}, func(h uintptr) uintptr { return comCall(p2, profile2ClearBrowsingDataAll, h) })
+		}, func(h uintptr) uintptr {
+			if types.All() {
+				return comCall(p2, profile2ClearBrowsingDataAll, h)
+			}
+			return comCall(p2, profile2ClearBrowsingData, browsingDataKinds(types), h)
+		})
 		if failed(hr) {
 			r.finish(nil, hresultError("clearing browsing data", hr))
 		}
