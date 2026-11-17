@@ -225,7 +225,7 @@ func TestSyncSectionRendersAndValidates(t *testing.T) {
 	a.settingsUI.syncDraftFromPrefs(a.prefs)
 	tt := ui.NewTester(a.settingsView, 900, 900)
 	tt.Frame()
-	for _, want := range []string{locales.SyncSection(), locales.SyncEnable(), locales.SyncRepo(), locales.SyncConnect()} {
+	for _, want := range []string{locales.SyncSection(), locales.SyncEnable(), locales.SyncRepo(), locales.SyncClientID(), locales.SyncConnect()} {
 		if !tt.HasText(want) {
 			t.Fatalf("云同步分区缺少 %q: %v", want, tt.Texts())
 		}
