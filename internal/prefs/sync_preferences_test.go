@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// TestPreferencesMigrateSyncSection 锁定 v13 → v14 的升级路径：旧文件没有
-// sync 节，解码即零值（关闭）；写回即为当前版本并带出 sync 节。
+// TestPreferencesMigrateSyncSection 锁定 v13 → 当前版本的升级路径：旧文件没有
+// sync 节，解码即零值（关闭）；写回即为当前版本并带出 sync 节（含 v15 的 clientId）。
 func TestPreferencesMigrateSyncSection(t *testing.T) {
 	v13 := `{"version":13,"appearance":{"bodySize":18},"git":{"autoCommit":true,"autoPush":true}}`
 	got, err := Decode([]byte(v13), testAccel)
@@ -28,7 +28,7 @@ func TestPreferencesMigrateSyncSection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), `"sync":{"enabled":false,"backend":"","repo":""}`) {
+	if !strings.Contains(string(raw), `"sync":{"enabled":false,"backend":"","repo":"","clientId":""}`) {
 		t.Fatalf("写回应带完整 sync 节: %s", raw)
 	}
 	// v13 文件即使带已开启的 git 自动化，升级后同步仍是关闭状态。
@@ -92,5 +92,76 @@ func TestPreferencesSyncValidation(t *testing.T) {
 	}
 	if !got.Sync.Enabled || got.Sync.Backend != SyncBackendGitHub || got.Sync.Repo != "gomeen/notes" {
 		t.Fatalf("带值应原样读回: %+v", got.Sync)
+	}
+}
+
+// TestPreferencesMigrateSyncClientID 锁定 v14 → v15 的升级路径：旧文件没有
+// clientId 键，解码即空串（回落到环境变量，行为与升级前一致）；写回带出该键。
+func TestPreferencesMigrateSyncClientID(t *testing.T) {
+	v14 := `{"version":14,"sync":{"enabled":true,"backend":"github","repo":"gomeen/notes"}}`
+	got, err := Decode([]byte(v14), testAccel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Version != CurrentVersion {
+		t.Fatalf("版本应升到 %d，当前 %d", CurrentVersion, got.Version)
+	}
+	if got.Sync.ClientID != "" {
+		t.Fatalf("旧文件缺 clientId 应为空串（回落环境变量）: %q", got.Sync.ClientID)
+	}
+	if !got.Sync.Enabled || got.Sync.Repo != "gomeen/notes" {
+		t.Fatalf("迁移不得改动 sync 其余字段: %+v", got.Sync)
+	}
+	raw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"clientId":""`) {
+		t.Fatalf("写回应带出 clientId: %s", raw)
+	}
+	// 带值文件原样读回。
+	withID, err := Decode([]byte(`{"version":15,"sync":{"clientId":"Iv23liAbCdEf"}}`), testAccel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withID.Sync.ClientID != "Iv23liAbCdEf" {
+		t.Fatalf("clientId 应原样读回: %q", withID.Sync.ClientID)
+	}
+}
+
+// TestPreferencesSyncClientIDValidation 锁定 clientId 的校验边界：空串合法
+// （回落环境变量），首尾空白、控制字符与超长拒绝；严格解码拒绝 null 与错误类型。
+func TestPreferencesSyncClientIDValidation(t *testing.T) {
+	cases := []struct {
+		id string
+		ok bool
+	}{
+		{"", true},
+		{"Iv23liAbCdEf123", true},
+		{"  Iv23li", false},
+		{"Iv23li\t", false},
+		{"Iv23\x00li", false},
+		{"Iv23\x7fli", false},
+		{strings.Repeat("a", 201), false},
+	}
+	for _, tc := range cases {
+		p := Default()
+		p.Sync.ClientID = tc.id
+		err := p.Validate(testAccel)
+		if tc.ok && err != nil {
+			t.Fatalf("%q 应通过校验: %v", tc.id, err)
+		}
+		if !tc.ok && err == nil {
+			t.Fatalf("%q 必须被拒绝", tc.id)
+		}
+	}
+	for _, raw := range []string{
+		`{"sync":{"clientId":null}}`,
+		`{"sync":{"clientId":123}}`,
+		`{"sync":{"clientId":true}}`,
+	} {
+		if _, err := Decode([]byte(raw), testAccel); err == nil {
+			t.Fatalf("非法 clientId 被接受: %s", raw)
+		}
 	}
 }

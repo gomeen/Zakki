@@ -140,7 +140,8 @@ Windows 的对应目录为 `%APPDATA%\Zakki\`，与默认程序安装目录 `%LO
 |---|---|
 | 云同步 | 开启时要求后端与仓库合法；开启期间 `Git·自动提交` / `Git·自动推送` 两个旧备份调度器暂停（页内显示暂停说明横幅），用户原开关原样保留在偏好里，关闭云同步后自动恢复；云同步开关不改写 Git 开关的值 |
 | 仓库 | GitHub 仓库 `owner/name`；非法取值就地提示，不落盘 |
-| 连接 GitHub… | Device Flow 授权（GitHub App user token）：弹层展示用户码与授权页地址，“打开 GitHub”按钮直接在默认浏览器打开授权页（浏览器打不开时如实提示，弹层里仍列完整地址）；未设置 Client ID 时按钮禁用并在页内说明原因。授权完成后 token 存系统安全存储（macOS 钥匙串 / Windows DPAPI 用户级加密），绝不写入 `zakki.json`、偏好文件、日志或 Git；断开连接即删除凭据。连接需先注册 GitHub App 并设置环境变量 `ZAKKI_GITHUB_CLIENT_ID`（Client ID 非凭据；从 Finder 启动拿不到 shell 环境变量时需用 `launchctl setenv` 或内置环境变量）；自测/联调可另用 `ZAKKI_GITHUB_BASE_URL` 指向本地假服务（仅环境变量注入，无设置入口，不进偏好） |
+| Client ID | GitHub App 的 Client ID（**不是凭据**，可公开）；留空则回落到环境变量 `ZAKKI_GITHUB_CLIENT_ID`。这一行存在的唯一原因：从 Finder / Dock 启动的 app 拿不到 shell 环境变量，只靠环境变量时连接按钮永远点不动 |
+| 连接 GitHub… | Device Flow 授权（GitHub App user token）：弹层展示用户码与授权页地址，“打开 GitHub”按钮直接在默认浏览器打开授权页（浏览器打不开时如实提示，弹层里仍列完整地址）；未设置 Client ID 时按钮禁用并在页内说明原因。授权完成后 token 存系统安全存储（macOS 钥匙串 / Windows DPAPI 用户级加密），绝不写入 `zakki.json`、偏好文件、日志或 Git；断开连接即删除凭据。连接需先注册 GitHub App，然后把 Client ID 填进设置页的「Client ID」行（或设环境变量 `ZAKKI_GITHUB_CLIENT_ID` 作为回落）；自测/联调可另用 `ZAKKI_GITHUB_BASE_URL` 指向本地假服务（仅环境变量注入，无设置入口，不进偏好） |
 | 立即同步 | 立即拉推一轮；同步中按钮禁用，运行中会排队合并 |
 | 同步状态行 | 当前后端与仓库、最近同步时间、运行中、连接状态与最近错误（授权失败、速率限制含建议等待时长、写保护挂起等如实展示）；安全存储只在打开设置页与连接/断开后读取，不在渲染帧里同步调用系统存储 |
 | 自动合并 | 本机与远端都相对基线变化且内容不同时按标签 ID 三方合并（基线原文为公共祖先）；同一标签两边都改按修改时间较新者胜，较旧一侧的该标签内容被丢弃且不留档；合并完成提示「已合并其他设备的修改」；合并不能安全进行时退化为整个文件较新者胜 |
@@ -260,7 +261,7 @@ Windows 的对应目录为 `%APPDATA%\Zakki\`，与默认程序安装目录 `%LO
 
 ```json
 {
-  "version": 14,
+  "version": 15,
   "appearance": {
     "appearanceMode": "system",
     "language": "",
@@ -280,7 +281,7 @@ Windows 的对应目录为 `%APPDATA%\Zakki\`，与默认程序安装目录 `%LO
   "window": { "alwaysOnTop": false, "hideOnEscape": true, "rememberBounds": true },
   "storage": { "dataFile": "", "saveIntervalMs": 2000 },
   "git": { "autoCommit": false, "autoPush": false, "commitMinutes": 1, "pushMinutes": 10 },
-  "sync": { "enabled": false, "backend": "", "repo": "" },
+  "sync": { "enabled": false, "backend": "", "repo": "", "clientId": "" },
   "keymap": { "overrides": { "format.bold": "CmdOrCtrl+Alt+U" } },
   "advanced": { "windowColumns": 22, "windowRows": 16 }
 }
@@ -329,5 +330,11 @@ Windows 的对应目录为 `%APPDATA%\Zakki\`，与默认程序安装目录 `%LO
   `github` 且 `repo` 合法（owner/name）。开启期间桌面暂停 `git.autoCommit` /
   `git.autoPush` 两个旧调度器（用户原开关原样保留），关闭后自动恢复。
   同步协议与冲突判定见「保存与同步」页的云同步区域说明。
+- 版本 15 新增 `sync.clientId`（GitHub App 的 Client ID）：它不是凭据（GitHub
+  官方文档明确可公开、不含权限），可以进偏好；token / refresh token 仍然只存
+  系统安全存储。这一项存在的唯一原因是从 Finder / Dock 启动的 app 拿不到 shell
+  环境变量，只靠 `ZAKKI_GITHUB_CLIENT_ID` 时「连接 GitHub」按钮永远点不动。
+  空串合法 = 回落到环境变量，所以旧文件缺键解码即空串、行为与升级前一致，
+  无需迁移；校验只拦首尾空白、控制字符与超长（预置的环境变量值也要过同一道校验）。
 - 版本 3 起 `backup` 记录外部备份目录；版本 6 起收敛为单一 `backupDir`——这些备份语义
   已随版本 12 移除，历史细节不再维护。

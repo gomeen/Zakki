@@ -587,5 +587,10 @@
   "@syncDisconnectFailed": {
     "description": "err is the failure reason"
   },
-  "syncConnectWaiting": "等待授权…"
+  "syncConnectWaiting": "等待授权…",
+  "syncClientID": "GitHub App Client ID",
+  "syncClientIDHint": "填 GitHub App 设置里的 Client ID（不是密钥）。留空则回落到环境变量 ZAKKI_GITHUB_CLIENT_ID。",
+  "@syncClientIDHint": {
+    "description": "explains that the client ID is not a secret and empty falls back to the env var"
+  }
 }

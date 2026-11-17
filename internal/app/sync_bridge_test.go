@@ -501,3 +501,49 @@ func TestOpenURLCommandOnlyAcceptsHTTPS(t *testing.T) {
 		t.Fatalf("最后参数应为授权页地址: %v", cmd.Args)
 	}
 }
+
+// Client ID 偏好优先、环境变量兜底：从 Finder / Dock 启动的 app 拿不到
+// shell 环境变量，只靠环境变量时「连接 GitHub」永远点不动。Client ID 不是
+// 凭据，进偏好不违反 R7。
+func TestGitHubClientIDPrefersPreference(t *testing.T) {
+	a := newTestApp(t)
+	t.Cleanup(a.shutdown)
+	t.Setenv("ZAKKI_GITHUB_CLIENT_ID", "env-id")
+	if got := a.githubClientID(); got != "env-id" {
+		t.Fatalf("无偏好时应回落环境变量: %q", got)
+	}
+	if err := a.updatePreferences(func(p *preferences) { p.Sync.ClientID = "pref-id" }); err != nil {
+		t.Fatal(err)
+	}
+	// 带首尾空白的值被偏好校验拒绝（设置页输入框已经去空白，这里验证校验本身）。
+	if err := a.updatePreferences(func(p *preferences) { p.Sync.ClientID = " padded " }); err == nil {
+		t.Fatal("带首尾空白的 Client ID 应被校验拒绝")
+	}
+	if got := a.githubClientID(); got != "pref-id" {
+		t.Fatalf("偏好应优先于环境变量: %q", got)
+	}
+	// 清空偏好后回到环境变量。
+	if err := a.updatePreferences(func(p *preferences) { p.Sync.ClientID = "" }); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.githubClientID(); got != "env-id" {
+		t.Fatalf("清空偏好应回落环境变量: %q", got)
+	}
+}
+
+// Client ID 变化必须重建后端（TokenProvider 捕获了 clientID，刷新令牌时要用）。
+func TestConfigureSyncRebuildsOnClientIDChange(t *testing.T) {
+	a := newTestApp(t)
+	t.Cleanup(a.shutdown)
+	enableSyncPrefs(t, a)
+	first := a.syncState.backend
+	if err := a.updatePreferences(func(p *preferences) { p.Sync.ClientID = "Iv23liNew" }); err != nil {
+		t.Fatal(err)
+	}
+	if a.syncState.backend == first {
+		t.Fatal("Client ID 变化应重建后端")
+	}
+	if got := a.syncState.backendClientID; got != "Iv23liNew" {
+		t.Fatalf("后端记录的 Client ID = %q", got)
+	}
+}

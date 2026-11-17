@@ -41,7 +41,11 @@ import (
 // （token 一律进系统安全存储，绝不写入偏好文件，R7）。旧文件缺键解码即
 // 零值（关闭），无需迁移逻辑；开启同步时桌面暂停 git.autoCommit /
 // git.autoPush 两个旧调度器，用户原开关保留在本节之外的 git 节。
-const CurrentVersion = 14
+// 版本 15 新增 sync.clientId（GitHub App 的 Client ID，非凭据）：从 Finder /
+// Dock 启动的 app 拿不到 shell 环境变量，只靠 ZAKKI_GITHUB_CLIENT_ID 时
+// 「连接 GitHub」永远无法开始。旧文件缺键解码即空串，此时回落到环境变量，
+// 行为与升级前一致，无需迁移。
+const CurrentVersion = 15
 
 // 整体风格：手账风格下颜色与排版由风格决定，colorTheme / markdownTheme 保留不动。
 const (
@@ -124,6 +128,10 @@ type Sync struct {
 	Backend string `json:"backend"`
 	// Repo 是后端仓库标识 owner/name；后端为云盘时复用此键记录文件夹标识。
 	Repo string `json:"repo"`
+	// ClientID 是 GitHub App 的 Client ID。它不是凭据（GitHub 官方文档明确
+	// 可公开、不含权限），可以进偏好；token 仍然只进系统安全存储。
+	// 空串 = 未配置，此时回落到环境变量 ZAKKI_GITHUB_CLIENT_ID。
+	ClientID string `json:"clientId"`
 }
 
 type Keymap struct {
@@ -253,6 +261,9 @@ func (p Preferences) Validate(v AccelValidator) error {
 	if p.Sync.Enabled && p.Sync.Backend == "" {
 		return errors.New("sync.enabled 开启时必须选择 sync.backend")
 	}
+	if err := validateSyncClientID(p.Sync.ClientID); err != nil {
+		return err
+	}
 	if v != nil {
 		for id, acc := range p.Keymap.Overrides {
 			if acc == "" {
@@ -261,6 +272,28 @@ func (p Preferences) Validate(v AccelValidator) error {
 			if err := v(acc); err != nil {
 				return fmt.Errorf("keymap.overrides[%s] 的快捷键 %q 无效: %w", id, acc, err)
 			}
+		}
+	}
+	return nil
+}
+
+// validateSyncClientID 校验 GitHub App Client ID：GitHub 签发的值只含字母
+// 与数字（经典 OAuth App 的 20 位十六进制、GitHub App 的 Iv1./Iv23. 前缀），
+// 但这里只拦首尾空白与控制字符——预置的环境变量值也要过同一道校验，而未来
+// 格式变化不应把用户锁死。空串合法（回落到环境变量）。
+func validateSyncClientID(id string) error {
+	if id == "" {
+		return nil
+	}
+	if strings.TrimSpace(id) != id {
+		return errors.New("sync.clientId 不能带首尾空白")
+	}
+	if len(id) > 200 {
+		return errors.New("sync.clientId 过长")
+	}
+	for _, r := range id {
+		if r < 0x20 || r == 0x7f {
+			return errors.New("sync.clientId 不能含控制字符")
 		}
 	}
 	return nil

@@ -5901,3 +5901,29 @@ func SyncConnectWaiting() string { return In(i18n.Locale()).SyncConnectWaiting()
 func (msgs Messages) SyncConnectWaiting() string {
 	return Catalog.Format(msgs.locale, "syncConnectWaiting", nil)
 }
+
+// SyncClientID says "GitHub App client ID"
+// in the language the app shows.
+func SyncClientID() string { return In(i18n.Locale()).SyncClientID() }
+
+// SyncClientID says "GitHub App client ID"
+// in the language of msgs.
+func (msgs Messages) SyncClientID() string {
+	return Catalog.Format(msgs.locale, "syncClientID", nil)
+}
+
+// SyncClientIDHint says "From your GitHub App settings (not a secret). Leave empty to use the ZAKKI_GITHUB_CLIENT_ID environment variable."
+// in the language the app shows.
+//
+// explains that the client ID is not a secret and empty falls back to the
+// env var
+func SyncClientIDHint() string { return In(i18n.Locale()).SyncClientIDHint() }
+
+// SyncClientIDHint says "From your GitHub App settings (not a secret). Leave empty to use the ZAKKI_GITHUB_CLIENT_ID environment variable."
+// in the language of msgs.
+//
+// explains that the client ID is not a secret and empty falls back to the
+// env var
+func (msgs Messages) SyncClientIDHint() string {
+	return Catalog.Format(msgs.locale, "syncClientIDHint", nil)
+}

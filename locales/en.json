@@ -688,5 +688,10 @@
   "@syncDisconnectFailed": {
     "description": "err is the failure reason"
   },
-  "syncConnectWaiting": "Waiting for authorization…"
+  "syncConnectWaiting": "Waiting for authorization…",
+  "syncClientID": "GitHub App client ID",
+  "syncClientIDHint": "From your GitHub App settings (not a secret). Leave empty to use the ZAKKI_GITHUB_CLIENT_ID environment variable.",
+  "@syncClientIDHint": {
+    "description": "explains that the client ID is not a secret and empty falls back to the env var"
+  }
 }

@@ -77,8 +77,9 @@ type settingsUIState struct {
 	gitProbeDir  string
 	gitProbeRepo bool
 
-	// 云同步（保存页）：仓库输入框的工作副本。
-	syncRepoText string
+	// 云同步（保存页）：仓库与 Client ID 输入框的工作副本。
+	syncRepoText     string
+	syncClientIDText string
 
 	// Keymap 页：搜索词、正在录制的命令 ID、冲突/非法提示。keyErrID 非空时
 	// 提示显示在该命令行下方，否则在页面底部（其他页的写入错误也走 keyErr）。
@@ -164,6 +165,7 @@ func (ui *settingsUIState) mergeDraftFromPrefs(p preferences) {
 func (ui *settingsUIState) syncDraftBindings() {
 	p := ui.draft
 	ui.syncRepoText = p.Sync.Repo
+	ui.syncClientIDText = p.Sync.ClientID
 	ui.appearanceModeSel = appearanceModeDisplay(p.Appearance.AppearanceMode)
 	ui.languageSel = languageDisplay(p.Appearance.Language)
 	ui.markdownThemeSel = markdownThemeDisplay(p.Appearance.MarkdownTheme)

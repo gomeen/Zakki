@@ -59,6 +59,14 @@ func (a *app) syncSection(c *ui.Context) {
 			_ = a.updatePreferences(func(p *preferences) { p.Sync.Repo = normalizeSyncRepo(a.settingsUI.syncRepoText) })
 		}
 	})
+	// Client ID 不是凭据，可以进偏好；这一行存在的唯一原因是从 Finder / Dock
+	// 启动的 app 拿不到 shell 环境变量，只靠 ZAKKI_GITHUB_CLIENT_ID 时连接按钮
+	// 永远点不动。
+	settingsRow(c, locales.SyncClientID(), locales.SyncClientIDHint(), func() {
+		if ui.TextInput(c.Key("sync-client-id"), &a.settingsUI.syncClientIDText).Width(220).Placeholder("Iv23li…").Submitted() {
+			_ = a.updatePreferences(func(p *preferences) { p.Sync.ClientID = normalizeSyncClientID(a.settingsUI.syncClientIDText) })
+		}
+	})
 	ui.Row(c).Gap(8).PaddingY(12).Children(func() {
 		connected := a.syncTokenConnected()
 		if connected {
@@ -94,3 +102,6 @@ func (a *app) syncSection(c *ui.Context) {
 
 // normalizeSyncRepo 清理仓库输入：去空白；空串原样返回（交由偏好校验）。
 func normalizeSyncRepo(raw string) string { return strings.TrimSpace(raw) }
+
+// normalizeSyncClientID 清理 Client ID 输入：去空白；空串原样返回（回落环境变量）。
+func normalizeSyncClientID(raw string) string { return strings.TrimSpace(raw) }

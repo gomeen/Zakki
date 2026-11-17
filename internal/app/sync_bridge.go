@@ -75,9 +75,16 @@ func (a *app) systemKeyring() notes.Keyring {
 	return k
 }
 
-// githubClientID 读取 GitHub App 的 Client ID（非凭据配置项，注册后经
-// 环境变量注入；真实账号连接为待验项）。
-func (a *app) githubClientID() string { return strings.TrimSpace(os.Getenv("ZAKKI_GITHUB_CLIENT_ID")) }
+// githubClientID 读取 GitHub App 的 Client ID：偏好优先，环境变量兜底。
+// 偏好是主路径——从 Finder / Dock 启动的 app 拿不到 shell 环境变量，只靠
+// ZAKKI_GITHUB_CLIENT_ID 时「连接 GitHub」永远无法开始。Client ID 不是
+// 凭据（可公开、不含权限），进偏好不违反 R7；token 仍只存系统安全存储。
+func (a *app) githubClientID() string {
+	if id := strings.TrimSpace(a.prefs.Sync.ClientID); id != "" {
+		return id
+	}
+	return strings.TrimSpace(os.Getenv("ZAKKI_GITHUB_CLIENT_ID"))
+}
 
 // githubOverrideBase 返回自测/联调用的 GitHub 端点覆盖（空 = 官方地址）。
 // 仅经环境变量注入，供隔离探针用本地假服务跑通全流程；不提供设置页
