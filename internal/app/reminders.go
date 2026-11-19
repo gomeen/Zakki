@@ -14,6 +14,7 @@ import (
 
 	"zakki/internal/markdown"
 	"zakki/internal/sysnotify"
+	"zakki/locales"
 )
 
 type reminderEntry struct {
@@ -69,8 +70,15 @@ func reminderKey(e reminderEntry) string {
 }
 
 func (a *app) connectReminders() {
+	a.registerReminderNotificationClicks()
 	a.reminders.mu.Lock()
-	a.reminders.notifier = sysnotify.New()
+	// 未授权时提示一次：提醒不能被静默丢掉。
+	notifier := newSystemNotifier(func() {
+		a.runOnMain(func() { a.showToast(locales.NotificationsDenied()) })
+	})
+	// 通道判定等事件循环就绪（Windows 的托盘通道与 macOS 的打包判定都要求）。
+	a.scheduleChannelResolution(notifier)
+	a.reminders.notifier = notifier
 	a.reminders.connected = true
 	a.reminders.pollStop = make(chan struct{})
 	stop := a.reminders.pollStop
@@ -378,7 +386,7 @@ func (a *app) fireReminder(e reminderEntry, gen int) {
 	body := reminderBody(e)
 	if notifier != nil {
 		go func() {
-			if err := notifier.Notify(sysnotify.Notification{ID: "zakki-reminder-" + key, Title: "Zakki", Body: body}); err != nil {
+			if err := notifier.Notify(sysnotify.Notification{ID: reminderNotificationID(e.tabID, e.due.UnixMilli(), e.line), Title: "Zakki", Body: body}); err != nil {
 				slog.Warn("系统通知投递失败", "err", err)
 			}
 		}()

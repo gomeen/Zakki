@@ -54,6 +54,10 @@ const (
 	notifyBodyMaxRunes  = 300
 )
 
+// Sanitize 返回投递前的净化副本：应用层改用 MyGo 原生通知投递时同样需要
+// 这道处理（控制符与长度上限不随投递通道改变）。
+func Sanitize(n Notification) Notification { return sanitizeNotification(n) }
+
 // sanitizeNotification 截断超长文本并剔除投递环节不接受的字符：toast 的
 // XmlDocument 要求 XML 1.0 字符集，粘贴残留的 C0 控制符会让整条通知报错。
 // 换行与制表符保留（通知中心按行展示）。

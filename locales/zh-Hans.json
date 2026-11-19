@@ -592,5 +592,9 @@
   "syncClientIDHint": "填 GitHub App 设置里的 Client ID（不是密钥）。留空则回落到环境变量 ZAKKI_GITHUB_CLIENT_ID。",
   "@syncClientIDHint": {
     "description": "explains that the client ID is not a secret and empty falls back to the env var"
+  },
+  "notificationsDenied": "系统通知未允许，提醒只在应用内显示。",
+  "@notificationsDenied": {
+    "description": "toast shown once when the user has not allowed system notifications"
   }
 }

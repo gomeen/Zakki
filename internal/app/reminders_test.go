@@ -329,7 +329,8 @@ func TestFireReminderDelivers(t *testing.T) {
 	a.fireReminder(entry, gen)
 	select {
 	case n := <-fake.ch:
-		if n.Body != "待办 · 交报告" || n.Title != "Zakki" || n.ID != "zakki-reminder-"+reminderKey(entry) {
+		wantID := reminderNotificationID(entry.tabID, entry.due.UnixMilli(), entry.line)
+		if n.Body != "待办 · 交报告" || n.Title != "Zakki" || n.ID != wantID {
 			t.Errorf("通知 = %+v, want 完整 ID、Zakki 标题与待办正文", n)
 		}
 	case <-time.After(2 * time.Second):

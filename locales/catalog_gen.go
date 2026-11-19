@@ -5927,3 +5927,17 @@ func SyncClientIDHint() string { return In(i18n.Locale()).SyncClientIDHint() }
 func (msgs Messages) SyncClientIDHint() string {
 	return Catalog.Format(msgs.locale, "syncClientIDHint", nil)
 }
+
+// NotificationsDenied says "System notifications are off. Reminders only show inside the app."
+// in the language the app shows.
+//
+// toast shown once when the user has not allowed system notifications
+func NotificationsDenied() string { return In(i18n.Locale()).NotificationsDenied() }
+
+// NotificationsDenied says "System notifications are off. Reminders only show inside the app."
+// in the language of msgs.
+//
+// toast shown once when the user has not allowed system notifications
+func (msgs Messages) NotificationsDenied() string {
+	return Catalog.Format(msgs.locale, "notificationsDenied", nil)
+}

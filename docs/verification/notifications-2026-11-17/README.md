@@ -3,6 +3,11 @@
 按 [notifications-manual-checklist.md](../notifications-manual-checklist.md) 执行。本次只覆盖 macOS；
 Windows W1–W5 无实机，挂起，#22 保持 open。
 
+> 本记录对应构建 `2ae63b8`（osascript 通道）：来源显示 Script Editor、点击无回调。
+> 之后 [ADR-0005](../../adr/0005-native-notifications.md) 把打包运行的通知换成 MyGo 原生
+> 通道，来源/图标应为 Zakki、点击会唤起窗口并定位到提醒条目；清单已随之改写。
+> 本文件保留为当时通道的历史记录，新行为按新清单重新验收。
+
 | 项 | 值 |
 |----|----|
 | macOS 版本 | 26.7.3 |
