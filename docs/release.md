@@ -109,7 +109,7 @@ MYGO_UPDATER_PRIVATE_KEY="$(< "$HOME/Library/Application Support/mygo/update-key
 | 文件 | 用途 |
 |---|---|
 | `Zakki.app` | 本地运行的应用包，不直接上传 Release |
-| `Zakki <version>.dmg` | 用户首次安装或手动更新 |
+| `zakki-<version>.dmg` | 用户首次安装或手动更新 |
 | `zakki-<version>-darwin-universal.tar.gz` | 应用内更新所下载的签名归档 |
 | `update-darwin-universal.json` | 版本、说明、URL、大小、签名等更新清单 |
 | `*.delta`（有可用旧版本时） | 从上一 Latest 到新版本的增量更新，失败自动回退完整归档 |
@@ -119,7 +119,7 @@ MYGO_UPDATER_PRIVATE_KEY="$(< "$HOME/Library/Application Support/mygo/update-key
 | 文件 | 用途 |
 |---|---|
 | `Zakki.exe` 与资源文件 | 本地运行，Release 以安装器分发，不单独上传裸 EXE |
-| `Zakki Setup <version> amd64.exe` | 按用户安装器；默认安装到 `%LOCALAPPDATA%\Programs\Zakki`，无需管理员权限 |
+| `zakki-setup-<version>-amd64.exe` | 按用户安装器；默认安装到 `%LOCALAPPDATA%\Programs\Zakki`，无需管理员权限 |
 | `zakki-<version>-windows-amd64.tar.gz` | Windows 应用内更新的签名归档，不含 Setup 与卸载器 |
 | `update-windows-amd64.json` | Windows x64 的版本、说明、下载信息与签名 |
 | `*.delta`（有可用旧版本时） | Windows 增量更新，失败自动回退完整归档 |
@@ -145,7 +145,7 @@ https://github.com/gomeen/Zakki/releases/latest/download/update-windows-amd64.js
 
 - **macOS 首次安装**：下载 DMG，把 `Zakki.app` 拖到 `/Applications` 或自己的 `~/Applications`。
   不能直接在只读 DMG 内自更新；安装目录必须可写。开发模式也不能自更新。
-- **Windows 首次安装**：下载 `Zakki Setup <version> amd64.exe`，按用户安装到默认目录。
+- **Windows 首次安装**：下载 `zakki-setup-<version>-amd64.exe`，按用户安装到默认目录。
   自定义目录也必须可写，不建议装入需要管理员权限的 Program Files。
   数据位于 `%APPDATA%\Zakki\`，不随应用更新替换；不要把数据目录选成程序安装目录（卸载器会删除安装目录）。
 - **更早版本用户**：先保存并完整退出旧版，再单独备份旧版数据。Zakki 不会扫描或自动迁移更名前的旧数据目录；安装新版后应确认使用的是预期数据文件，且不要同时启动两版写同一份数据。

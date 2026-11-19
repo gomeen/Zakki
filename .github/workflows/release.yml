@@ -150,12 +150,12 @@ jobs:
           test "$PREVIOUS_VERSION" != "$version"
           case "$TARGET" in
             darwin-universal)
-              installer="Zakki $version.dmg"
+              installer="zakki-$version.dmg"
               lipo Zakki.app/Contents/MacOS/Zakki -verify_arch x86_64 arm64
               codesign --verify --deep --strict Zakki.app
               ;;
             windows-amd64)
-              installer="Zakki Setup $version amd64.exe"
+              installer="zakki-setup-$version-amd64.exe"
               test -s Zakki.exe
               file Zakki.exe | grep -Eq 'PE32\+.*x86-64'
               ;;
@@ -190,7 +190,7 @@ jobs:
           if-no-files-found: error
           path: |
             build/${{ matrix.target }}/*.dmg
-            build/${{ matrix.target }}/*Setup*.exe
+            build/${{ matrix.target }}/zakki-setup-*.exe
             build/${{ matrix.target }}/*.tar.gz
             build/${{ matrix.target }}/*.json
             build/${{ matrix.target }}/*.delta
@@ -220,8 +220,8 @@ jobs:
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           test "$PREVIOUS_VERSION" != "$version"
-          test -s "Zakki $version.dmg"
-          test -s "Zakki Setup $version amd64.exe"
+          test -s "zakki-$version.dmg"
+          test -s "zakki-setup-$version-amd64.exe"
           for target in darwin-universal windows-amd64; do
             archive="zakki-$version-$target.tar.gz"
             manifest="update-$target.json"
@@ -265,7 +265,7 @@ jobs:
               --title "Zakki $tag" --generate-notes
           fi
           shopt -s nullglob
-          files=(*.dmg *Setup*.exe *.tar.gz *.delta)
+          files=(*.dmg zakki-setup-*.exe *.tar.gz *.delta)
           gh release upload "$tag" --repo "$repo" --clobber "${files[@]}"
           # 两个平台的安装包与归档均上传后，才上传更新清单。
           gh release upload "$tag" --repo "$repo" --clobber \

@@ -31,7 +31,7 @@ Typora 式所见即所得编辑，纯 [MyGo](https://github.com/egoist/mygo) 原
 - **macOS**：通用 DMG（Intel 与 Apple Silicon），拖入「应用程序」。当前为
   ad-hoc 签名（无 Developer ID 与公证），首次打开需在「系统设置 → 隐私与
   安全性」里允许。
-- **Windows 10/11 x64**：`Zakki Setup <版本> amd64.exe`，按用户安装、无需管理员；
+- **Windows 10/11 x64**：`zakki-setup-<版本>-amd64.exe`，按用户安装、无需管理员；
   未做 Authenticode 签名，SmartScreen 可能提示，确认来源后运行。
 
 应用内 **Zakki → 检查更新…** 可手动检查并安装签名更新（默认不后台检查）。
