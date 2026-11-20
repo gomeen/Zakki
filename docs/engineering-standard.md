@@ -31,6 +31,7 @@ zakki/
 ├── main.go
 ├── internal/
 │   ├── app/                  # 唯一可依赖 MyGo 的 internal 包
+│   ├── ai/                   # AI 助理客户端：OpenAI 兼容补全与结构化建议（纯逻辑）
 │   ├── markdown/             # 解析、格式、表格纯函数（时间令牌委托 core）
 │   ├── codehl/               # 围栏代码块词法着色
 │   ├── notes/                # 唯一笔记文件 zakki.json、定时保存与 Git 同步
@@ -50,6 +51,7 @@ flowchart TD
     appPkg["internal/app"]
     mdPkg["internal/markdown"]
     hlPkg["internal/codehl"]
+    aiPkg["internal/ai"]
     notesPkg["internal/notes"]
     prefsPkg["internal/prefs"]
     fontsPkg["internal/fonts"]
@@ -58,6 +60,7 @@ flowchart TD
     entry --> appPkg
     appPkg --> mdPkg
     appPkg --> hlPkg
+    appPkg --> aiPkg
     appPkg --> notesPkg
     appPkg --> prefsPkg
     appPkg --> fontsPkg
@@ -74,10 +77,11 @@ flowchart TD
 
    | 包 | 允许依赖的 internal 包 |
    |---|---|
-   | `app` | `markdown`、`codehl`、`notes`、`prefs`、`atomicfile`、`fonts`、`sysnotify` |
+   | `app` | `markdown`、`codehl`、`notes`、`prefs`、`atomicfile`、`ai`、`fonts`、`sysnotify` |
    | `markdown` | 无 |
    | `codehl` | 无 |
    | `atomicfile` | 无 |
+   | `ai` | 无 |
    | `fonts` | 无 |
    | `sysnotify` | 无 |
    | `notes` | `atomicfile` |

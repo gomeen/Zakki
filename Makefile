@@ -58,7 +58,7 @@ arch-check:
 			case ",$$allow," in *",$$dep,"*) ;; *) echo "  internal/$$pkg 不允许依赖 internal/$$dep"; fail=1;; esac; \
 		done; \
 	done; for dep in $$(go list -f '{{join .Imports "\n"}}' ./internal/app | grep '^zakki/internal/' | sed 's|zakki/internal/||'); do \
-		case " markdown codehl atomicfile notes prefs fonts sysnotify " in *" $$dep "*) ;; *) echo "  internal/app 依赖了非约定包 internal/$$dep"; fail=1;; esac; \
+		case " markdown codehl atomicfile ai notes prefs fonts sysnotify " in *" $$dep "*) ;; *) echo "  internal/app 依赖了非约定包 internal/$$dep"; fail=1;; esac; \
 	done; [ $$fail -eq 0 ] && echo "    arch-check 通过"
 
 # go mod vendor 只复制桌面实际导入的内核；绑定包与模块元数据不进入副本。
