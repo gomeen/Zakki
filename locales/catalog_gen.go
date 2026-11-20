@@ -6415,16 +6415,6 @@ func (msgs Messages) AiBarFollowUp() string {
 	return Catalog.Format(msgs.locale, "aiBarFollowUp", nil)
 }
 
-// AiBarSend says "Send"
-// in the language the app shows.
-func AiBarSend() string { return In(i18n.Locale()).AiBarSend() }
-
-// AiBarSend says "Send"
-// in the language of msgs.
-func (msgs Messages) AiBarSend() string {
-	return Catalog.Format(msgs.locale, "aiBarSend", nil)
-}
-
 // AiBarThinking says "Thinking…"
 // in the language the app shows.
 func AiBarThinking() string { return In(i18n.Locale()).AiBarThinking() }

@@ -620,7 +620,6 @@
   "aiBarTitle": "AI アシスタント",
   "aiBarPlaceholder": "アシスタントに頼む…例：明日の15時に会議をリマインド",
   "aiBarFollowUp": "調整する…例：30分前にして",
-  "aiBarSend": "送信",
   "aiBarThinking": "考えています…",
   "aiBarRetry": "再試行",
   "aiBarOpenSettings": "設定を開く…",

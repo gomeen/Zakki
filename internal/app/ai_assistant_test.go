@@ -66,7 +66,9 @@ func TestAIBarOpenCloseAndEsc(t *testing.T) {
 		t.Fatalf("打开后应聚焦输入框: %+v", a.ai.bar)
 	}
 	tt := ui.NewTester(a.view, 400, 560)
-	if !tt.HasText("发送") {
+	// 占位文案不进 Texts()：以输入框的无障碍标签（与底栏 tooltip 同文案，
+	// 会出现在文本集里）作为助理条已渲染的标记。
+	if n := strings.Count(strings.Join(tt.Texts(), "\n"), "AI 助理"); n < 2 {
 		t.Fatalf("助理条应渲染输入行: %v", tt.Texts())
 	}
 	// Esc 直接关闭。
@@ -343,6 +345,31 @@ func TestAIDefaultOpenAndFocusShortcut(t *testing.T) {
 	_ = a.updatePreferences(func(p *preferences) { p.AI.Enabled = false })
 	if a.ai.bar.open {
 		t.Fatal("停用 AI 应收起助理条")
+	}
+}
+
+// TestAIDefaultOpenAtStartup 镜像真实启动路径：偏好已启用 AI 落盘 →
+// loadPreferences 应用 → 助理条默认显示。
+func TestAIDefaultOpenAtStartup(t *testing.T) {
+	a := newTestApp(t)
+	t.Cleanup(a.shutdown)
+	_ = a.updatePreferences(func(p *preferences) {
+		p.AI.Enabled, p.AI.BaseURL, p.AI.Model = true, "https://api.openai.com/v1", "m"
+	})
+	if err := a.savePreferencesNow(); err != nil {
+		t.Fatal(err)
+	}
+	// 模拟重启：状态归零后重新走启动载入。
+	a.ai.bar = aiBarState{editing: -1}
+	a.ai.enabledPrev = false
+	if err := a.loadPreferences(); err != nil {
+		t.Fatal(err)
+	}
+	if !a.ai.bar.open {
+		t.Fatal("启动载入已启用的偏好时应默认显示助理条")
+	}
+	if a.ai.bar.focus != 0 {
+		t.Fatal("默认显示不应抢焦点")
 	}
 }
 

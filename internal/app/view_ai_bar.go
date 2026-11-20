@@ -29,10 +29,9 @@ func (a *app) aiBarOverlay(c *ui.Context, t *ui.Theme, dark bool) {
 	maxCards := min(max(h-240, float32(120)), float32(400))
 	ui.Overlay(c, func() {
 		panel := ui.Column(c.Key("ai-bar")).Width(panelW).Gap(7).Padding(10, 12).
-			Radius(14).Background(a.chromeColor(style.surface, dark, c.Vibrancy())).
-			Border(1, t.Border)
+			Radius(14).Background(style.surface)
 		panel.Absolute().Left((w - panelW) / 2).Bottom(statusBarHeight + 10)
-		panel.Shadow(0, 10, 28, 0, ui.RGBA(0, 0, 0, 0.20))
+		panel.Shadow(0, 10, 28, 0, ui.RGBA(0, 0, 0, 0.22))
 		panel.Children(func() {
 			if a.ai.bar.phase == aiBarReview {
 				ui.Scroll(c.Key("ai-cards-scroll")).FillWidth().MaxHeight(maxCards).Children(func() {
@@ -71,30 +70,24 @@ func (a *app) aiErrorRow(c *ui.Context, t *ui.Theme) {
 	})
 }
 
-// aiInputRow 输入行：加大的圆角输入框（含 ✦ 图标）+ 唯一的发送按钮；
+// aiInputRow 输入行：加大的圆角输入框（含 ✦ 图标），Enter 发送；
 // 聚焦不改变外观（边框恒定）。追问态换占位文案。
 func (a *app) aiInputRow(c *ui.Context, t *ui.Theme, style resolvedStyle) {
 	placeholder := locales.AiBarPlaceholder()
 	if a.ai.bar.phase == aiBarReview {
 		placeholder = locales.AiBarFollowUp()
 	}
-	canSend := a.ai.bar.phase != aiBarThinking && strings.TrimSpace(a.ai.bar.input) != ""
-	ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-		input := ui.Row(c).Grow(1).MinWidth(0).Height(38).PaddingX(10).Gap(7).Radius(10).
-			AlignItems(ui.Center).Background(t.Background).Border(1, t.Border)
-		input.Children(func() {
-			ui.Icon(c, iconSparkles).Size(15, 15).TextColor(style.accent).Shrink(0)
-			in := ui.TextInputBase(c.Key("ai-input"), &a.ai.bar.input).
-				Label(locales.AiBarTitle()).Placeholder(placeholder).
-				FontSize(14).
-				Grow(1).MinWidth(40).FocusBind(&a.ai.bar.focus, 1).
-				HandleInput(func(ev ui.InputEvent) bool { return a.aiInputKey(ev) })
-			a.ai.bar.composing = in.Composing()
-			if in.Submitted() {
-				a.aiSend(a.ai.bar.input)
-			}
-		})
-		if ui.Button(c.Key("ai-send"), locales.AiBarSend()).Disabled(!canSend).Clicked() {
+	input := ui.Row(c).FillWidth().Height(38).PaddingX(10).Gap(7).Radius(10).
+		AlignItems(ui.Center).Background(t.Background).Border(1, t.Border)
+	input.Children(func() {
+		ui.Icon(c, iconSparkles).Size(15, 15).TextColor(style.accent).Shrink(0)
+		in := ui.TextInputBase(c.Key("ai-input"), &a.ai.bar.input).
+			Label(locales.AiBarTitle()).Placeholder(placeholder).
+			FontSize(14).
+			Grow(1).MinWidth(40).FocusBind(&a.ai.bar.focus, 1).
+			HandleInput(func(ev ui.InputEvent) bool { return a.aiInputKey(ev) })
+		a.ai.bar.composing = in.Composing()
+		if in.Submitted() {
 			a.aiSend(a.ai.bar.input)
 		}
 	})

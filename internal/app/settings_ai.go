@@ -40,7 +40,19 @@ func (a *app) aiEnableRow(c *ui.Context) {
 	settingsRow(c, locales.AiEnable(), locales.AiEnableHint(), func() {
 		if ui.Switch(c.Key("ai-enabled"), &a.settingsUI.draft.AI.Enabled).Label(locales.AiEnable()).Changed() {
 			on := a.settingsUI.draft.AI.Enabled
-			if err := a.updatePreferences(func(p *preferences) { p.AI.Enabled = on }); err != nil {
+			// 开启时顺带提交输入框里尚未回车的端点/模型草稿：避免用户填完
+			// 直接开开关被校验拒绝、助理条不弹出的困扰。
+			if err := a.updatePreferences(func(p *preferences) {
+				p.AI.Enabled = on
+				if on {
+					if v := strings.TrimSpace(a.settingsUI.aiBaseURLText); v != "" {
+						p.AI.BaseURL, a.settingsUI.draft.AI.BaseURL = v, v
+					}
+					if v := strings.TrimSpace(a.settingsUI.aiModelText); v != "" {
+						p.AI.Model, a.settingsUI.draft.AI.Model = v, v
+					}
+				}
+			}); err != nil {
 				a.settingsUI.draft.AI.Enabled = a.prefs.AI.Enabled
 				a.settingsUI.keyErr = err.Error()
 				a.refreshSettingsWindow()
