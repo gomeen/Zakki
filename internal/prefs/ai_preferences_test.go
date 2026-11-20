@@ -49,10 +49,11 @@ func TestAIPreferencesValidate(t *testing.T) {
 		}, true},
 		{"远程 http 拒绝", func(a *AI) { a.BaseURL = "http://api.example.com/v1" }, false},
 		{"未知提供方拒绝", func(a *AI) { a.Provider = "grok" }, false},
-		{"开启缺模型拒绝", func(a *AI) {
+		{"开启且全空合法（开关先行）", func(a *AI) { a.Enabled = true }, true},
+		{"开启缺模型合法（未配置态）", func(a *AI) {
 			a.Enabled, a.BaseURL = true, "https://api.openai.com/v1"
-		}, false},
-		{"开启缺地址拒绝", func(a *AI) { a.Enabled, a.Model = true, "m" }, false},
+		}, true},
+		{"开启缺地址合法（未配置态）", func(a *AI) { a.Enabled, a.Model = true, "m" }, true},
 		{"地址带空白拒绝", func(a *AI) { a.BaseURL = " https://api.openai.com/v1" }, false},
 		{"非 URL 拒绝", func(a *AI) { a.BaseURL = "api.openai.com" }, false},
 		{"未开启时半填校验仍生效", func(a *AI) { a.BaseURL = "ftp://x/v1" }, false},

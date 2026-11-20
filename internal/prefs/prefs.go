@@ -149,7 +149,8 @@ type Keymap struct {
 // 一律进系统安全存储，绝不写入本节或任何偏好文件（同 sync 的 R7 语义）。
 // Provider 的枚举与 internal/ai 的 Providers 表以 ID 互为契约。
 type AI struct {
-	// Enabled 开启 AI 助理；开启时要求 BaseURL 与 Model 合法（见 Validate）。
+	// Enabled 开启 AI 助理；开启不要求 BaseURL/Model 先配好（非空时才校验格式），
+	// 未配置时助理条显示未配置态。见 Validate。
 	Enabled bool `json:"enabled"`
 	// Provider 是提供方预设 ID：openai / deepseek / openrouter / ollama /
 	// custom；空串 = 未选择（未开启时的默认态）。
@@ -328,14 +329,8 @@ func validateAI(v AI) error {
 			return errors.New("ai.baseUrl 必须是 https，或指向本机的 http 地址（本地模型服务）")
 		}
 	}
-	if v.Enabled {
-		if v.BaseURL == "" {
-			return errors.New("ai.enabled 开启时必须填写 ai.baseUrl")
-		}
-		if v.Model == "" {
-			return errors.New("ai.enabled 开启时必须填写 ai.model")
-		}
-	}
+	// 开启不要求端点/模型已配置：开关先行、助理条显示未配置态（发送时才拦截），
+	// 避免"先开开关被拒回弹、助理条永不出现"。
 	return nil
 }
 

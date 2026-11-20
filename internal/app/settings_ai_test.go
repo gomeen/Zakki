@@ -52,9 +52,13 @@ func TestAIPageRenders(t *testing.T) {
 func TestAIPageDraftAppliesWithValidation(t *testing.T) {
 	a := newTestApp(t)
 	t.Cleanup(a.shutdown)
-	// 未配置就开启：偏好校验拒绝（页面开关走同一条管线）。
-	if err := a.updatePreferences(func(p *preferences) { p.AI.Enabled = true }); err == nil {
-		t.Fatal("无端点无模型的开启应被校验拒绝")
+	// 开关先行：未配置就开启也应成功（非空字段才校验格式），
+	// aiConfigured 仍为 false，发送时才拦截并引导去设置。
+	if err := a.updatePreferences(func(p *preferences) { p.AI.Enabled = true }); err != nil {
+		t.Fatalf("无端点无模型的开启应成功（开关先行）: %v", err)
+	}
+	if err := a.updatePreferences(func(p *preferences) { p.AI.Enabled = true; p.AI.Provider = "grok" }); err == nil {
+		t.Fatal("未知提供方仍应被拒绝（非空字段校验格式）")
 	}
 	if a.aiConfigured() {
 		t.Fatal("未配置时 aiConfigured 应为 false")

@@ -78,7 +78,7 @@ func (a *app) aiInputRow(c *ui.Context, t *ui.Theme, style resolvedStyle) {
 		placeholder = locales.AiBarFollowUp()
 	}
 	input := ui.Row(c).FillWidth().Height(38).PaddingX(10).Gap(7).Radius(10).
-		AlignItems(ui.Center).Background(t.Background).Border(1, t.Border)
+		AlignItems(ui.Center).Background(t.Background)
 	input.Children(func() {
 		ui.Icon(c, iconSparkles).Size(15, 15).TextColor(style.accent).Shrink(0)
 		in := ui.TextInputBase(c.Key("ai-input"), &a.ai.bar.input).
