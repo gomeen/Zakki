@@ -73,8 +73,8 @@ func TestInitialTimeGuideDoesNotReappearForExistingNotes(t *testing.T) {
 	}
 }
 
-func TestTimeGuideExampleIsFencedInBothLanguages(t *testing.T) {
-	for _, lang := range []string{"en", "zh-Hans"} {
+func TestTimeGuideExampleIsFencedInAllLanguages(t *testing.T) {
+	for _, lang := range []string{"en", "ja", "zh-Hans", "zh-Hant"} {
 		t.Run(lang, func(t *testing.T) {
 			guide := locales.In(lang).TimeGuideBody()
 			if !strings.Contains(guide, "@2026-06-01 10:00 ~1h") {

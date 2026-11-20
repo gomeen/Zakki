@@ -383,7 +383,7 @@ func (a *app) createMenu() *mygo.Menu {
 
 	menu := mygo.NewMenu([]*mygo.MenuItem{
 		// 自定义应用菜单时显式保留 MyGo 默认的关于、服务、隐藏与退出项；
-		// 角色项默认英文标签，这里统一覆盖为中文。「服务」必须带空子菜单：
+		// 角色项默认英文标签，这里统一覆盖为当前界面语言。「服务」必须带空子菜单：
 		// 否则 macOS 拿不到 servicesMenu，菜单里只剩一个点不动的死项。
 		{Role: mygo.RoleAppMenu, Submenu: []*mygo.MenuItem{
 			{Role: mygo.RoleAbout, Label: locales.MenuAbout(appName)},
@@ -428,7 +428,7 @@ func (a *app) createMenu() *mygo.Menu {
 		{Label: locales.MenuParagraph(), Submenu: a.commandMenuItems("heading", "blocks", "insert")},
 		{Label: locales.MenuFormat(), Submenu: a.commandMenuItems("inline")},
 		{Label: locales.MenuView(), Submenu: viewItems},
-		// 窗口菜单角色默认同样是英文标签，覆盖为中文并保留最小化/缩放/前置。
+		// 窗口菜单角色默认同样是英文标签，覆盖为当前界面语言并保留最小化/缩放/前置。
 		{Role: mygo.RoleWindowMenu, Label: locales.MenuWindow(), Submenu: []*mygo.MenuItem{
 			// 关闭窗口后驻留托盘，菜单栏也应能唤回主窗口（Typora 无托盘驻留场景）。
 			{Label: locales.MenuShowMainWindow(), Click: func(*mygo.MenuItem, *mygo.Window) { a.showWindow() }},
