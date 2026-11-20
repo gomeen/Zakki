@@ -453,6 +453,7 @@ func (a *app) switchTab(i int) {
 	a.endRename()
 	a.active = i
 	a.findOpen, a.query, a.matchIdx = false, "", 0
+	a.resetAIBar() // 待审建议只对发起时的标签有效
 	// 切标签回到预览态：不能默认把首行变成源码；选区由下面的末尾聚焦统一给出。
 	a.resyncLive(-1)
 	a.mdActive, a.mdDraft, a.keyHint = -1, "", 0

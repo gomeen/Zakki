@@ -41,6 +41,7 @@ const (
 	cmdRule         = "insert.rule"
 	cmdTable        = "insert.table"
 	cmdToggleWindow = "global.toggleWindow"
+	cmdAssistant    = "global.assistant"
 )
 
 // ---- 绑定（规范化组合键） ----
@@ -380,6 +381,7 @@ var commandRegistry = []commandDef{
 	{id: cmdRule, name: "cmdRule", group: "insert", def: ""},
 	{id: cmdTable, name: "cmdTable", group: "insert", def: ""},
 	{id: cmdToggleWindow, name: "cmdToggleWindow", group: "global", def: "CmdOrCtrl+Shift+Space", global: true},
+	{id: cmdAssistant, name: "cmdAssistant", group: "global", def: "CmdOrCtrl+Shift+A"},
 }
 
 // commandDisplayName 命令名注册表存 catalog 键，显示时按当前语言取文案。
@@ -413,6 +415,8 @@ func commandDisplayName(def commandDef) string {
 		return locales.CmdTable()
 	case "cmdToggleWindow":
 		return locales.CmdToggleWindow()
+	case "cmdAssistant":
+		return locales.CmdAssistant()
 	}
 	if n := def.name; strings.HasPrefix(n, "cmdH") {
 		if v := n[len("cmdH"):]; v >= "1" && v <= "9" {

@@ -6354,3 +6354,313 @@ func AiErrNetwork(err string) string { return In(i18n.Locale()).AiErrNetwork(err
 func (msgs Messages) AiErrNetwork(err string) string {
 	return Catalog.Format(msgs.locale, "aiErrNetwork", map[string]any{"err": err})
 }
+
+// CmdAssistant says "AI Assistant"
+// in the language the app shows.
+func CmdAssistant() string { return In(i18n.Locale()).CmdAssistant() }
+
+// CmdAssistant says "AI Assistant"
+// in the language of msgs.
+func (msgs Messages) CmdAssistant() string {
+	return Catalog.Format(msgs.locale, "cmdAssistant", nil)
+}
+
+// MenuAssistant says "AI Assistant…"
+// in the language the app shows.
+func MenuAssistant() string { return In(i18n.Locale()).MenuAssistant() }
+
+// MenuAssistant says "AI Assistant…"
+// in the language of msgs.
+func (msgs Messages) MenuAssistant() string {
+	return Catalog.Format(msgs.locale, "menuAssistant", nil)
+}
+
+// AiBarTitle says "AI assistant"
+// in the language the app shows.
+func AiBarTitle() string { return In(i18n.Locale()).AiBarTitle() }
+
+// AiBarTitle says "AI assistant"
+// in the language of msgs.
+func (msgs Messages) AiBarTitle() string {
+	return Catalog.Format(msgs.locale, "aiBarTitle", nil)
+}
+
+// AiBarClose says "Close assistant"
+// in the language the app shows.
+func AiBarClose() string { return In(i18n.Locale()).AiBarClose() }
+
+// AiBarClose says "Close assistant"
+// in the language of msgs.
+func (msgs Messages) AiBarClose() string {
+	return Catalog.Format(msgs.locale, "aiBarClose", nil)
+}
+
+// AiBarPlaceholder says "Ask the assistant… e.g. add a reminder for tomorrow 3pm"
+// in the language the app shows.
+func AiBarPlaceholder() string { return In(i18n.Locale()).AiBarPlaceholder() }
+
+// AiBarPlaceholder says "Ask the assistant… e.g. add a reminder for tomorrow 3pm"
+// in the language of msgs.
+func (msgs Messages) AiBarPlaceholder() string {
+	return Catalog.Format(msgs.locale, "aiBarPlaceholder", nil)
+}
+
+// AiBarFollowUp says "Adjust, e.g. remind me 30 minutes early"
+// in the language the app shows.
+func AiBarFollowUp() string { return In(i18n.Locale()).AiBarFollowUp() }
+
+// AiBarFollowUp says "Adjust, e.g. remind me 30 minutes early"
+// in the language of msgs.
+func (msgs Messages) AiBarFollowUp() string {
+	return Catalog.Format(msgs.locale, "aiBarFollowUp", nil)
+}
+
+// AiBarSend says "Send"
+// in the language the app shows.
+func AiBarSend() string { return In(i18n.Locale()).AiBarSend() }
+
+// AiBarSend says "Send"
+// in the language of msgs.
+func (msgs Messages) AiBarSend() string {
+	return Catalog.Format(msgs.locale, "aiBarSend", nil)
+}
+
+// AiBarThinking says "Thinking…"
+// in the language the app shows.
+func AiBarThinking() string { return In(i18n.Locale()).AiBarThinking() }
+
+// AiBarThinking says "Thinking…"
+// in the language of msgs.
+func (msgs Messages) AiBarThinking() string {
+	return Catalog.Format(msgs.locale, "aiBarThinking", nil)
+}
+
+// AiBarRetry says "Retry"
+// in the language the app shows.
+func AiBarRetry() string { return In(i18n.Locale()).AiBarRetry() }
+
+// AiBarRetry says "Retry"
+// in the language of msgs.
+func (msgs Messages) AiBarRetry() string {
+	return Catalog.Format(msgs.locale, "aiBarRetry", nil)
+}
+
+// AiBarOpenSettings says "Open Settings…"
+// in the language the app shows.
+func AiBarOpenSettings() string { return In(i18n.Locale()).AiBarOpenSettings() }
+
+// AiBarOpenSettings says "Open Settings…"
+// in the language of msgs.
+func (msgs Messages) AiBarOpenSettings() string {
+	return Catalog.Format(msgs.locale, "aiBarOpenSettings", nil)
+}
+
+// AiBarApply says "Apply"
+// in the language the app shows.
+func AiBarApply() string { return In(i18n.Locale()).AiBarApply() }
+
+// AiBarApply says "Apply"
+// in the language of msgs.
+func (msgs Messages) AiBarApply() string {
+	return Catalog.Format(msgs.locale, "aiBarApply", nil)
+}
+
+// AiBarApplyAll says "Apply All"
+// in the language the app shows.
+func AiBarApplyAll() string { return In(i18n.Locale()).AiBarApplyAll() }
+
+// AiBarApplyAll says "Apply All"
+// in the language of msgs.
+func (msgs Messages) AiBarApplyAll() string {
+	return Catalog.Format(msgs.locale, "aiBarApplyAll", nil)
+}
+
+// AiBarDismiss says "Dismiss"
+// in the language the app shows.
+func AiBarDismiss() string { return In(i18n.Locale()).AiBarDismiss() }
+
+// AiBarDismiss says "Dismiss"
+// in the language of msgs.
+func (msgs Messages) AiBarDismiss() string {
+	return Catalog.Format(msgs.locale, "aiBarDismiss", nil)
+}
+
+// AiBarEdit says "Edit Markdown"
+// in the language the app shows.
+func AiBarEdit() string { return In(i18n.Locale()).AiBarEdit() }
+
+// AiBarEdit says "Edit Markdown"
+// in the language of msgs.
+func (msgs Messages) AiBarEdit() string {
+	return Catalog.Format(msgs.locale, "aiBarEdit", nil)
+}
+
+// AiBarEditDone says "Done"
+// in the language the app shows.
+func AiBarEditDone() string { return In(i18n.Locale()).AiBarEditDone() }
+
+// AiBarEditDone says "Done"
+// in the language of msgs.
+func (msgs Messages) AiBarEditDone() string {
+	return Catalog.Format(msgs.locale, "aiBarEditDone", nil)
+}
+
+// AiBarEditCancel says "Cancel"
+// in the language the app shows.
+func AiBarEditCancel() string { return In(i18n.Locale()).AiBarEditCancel() }
+
+// AiBarEditCancel says "Cancel"
+// in the language of msgs.
+func (msgs Messages) AiBarEditCancel() string {
+	return Catalog.Format(msgs.locale, "aiBarEditCancel", nil)
+}
+
+// AiBarProposals says "{n, number} proposals — review before applying"
+// in the language the app shows.
+func AiBarProposals(n int) string { return In(i18n.Locale()).AiBarProposals(n) }
+
+// AiBarProposals says "{n, number} proposals — review before applying"
+// in the language of msgs.
+func (msgs Messages) AiBarProposals(n int) string {
+	return Catalog.Format(msgs.locale, "aiBarProposals", map[string]any{"n": n})
+}
+
+// AiBarMoreProposals says "{n, number} more not shown"
+// in the language the app shows.
+func AiBarMoreProposals(n int) string { return In(i18n.Locale()).AiBarMoreProposals(n) }
+
+// AiBarMoreProposals says "{n, number} more not shown"
+// in the language of msgs.
+func (msgs Messages) AiBarMoreProposals(n int) string {
+	return Catalog.Format(msgs.locale, "aiBarMoreProposals", map[string]any{"n": n})
+}
+
+// AiStaleNote says "The note changed while waiting; proposals were discarded. Ask again."
+// in the language the app shows.
+func AiStaleNote() string { return In(i18n.Locale()).AiStaleNote() }
+
+// AiStaleNote says "The note changed while waiting; proposals were discarded. Ask again."
+// in the language of msgs.
+func (msgs Messages) AiStaleNote() string {
+	return Catalog.Format(msgs.locale, "aiStaleNote", nil)
+}
+
+// AiAppliedUndo says "Applied — undo with ⌘Z / Ctrl+Z"
+// in the language the app shows.
+func AiAppliedUndo() string { return In(i18n.Locale()).AiAppliedUndo() }
+
+// AiAppliedUndo says "Applied — undo with ⌘Z / Ctrl+Z"
+// in the language of msgs.
+func (msgs Messages) AiAppliedUndo() string {
+	return Catalog.Format(msgs.locale, "aiAppliedUndo", nil)
+}
+
+// AiNewTabToast says "Created tab “{name}”"
+// in the language the app shows.
+func AiNewTabToast(name string) string { return In(i18n.Locale()).AiNewTabToast(name) }
+
+// AiNewTabToast says "Created tab “{name}”"
+// in the language of msgs.
+func (msgs Messages) AiNewTabToast(name string) string {
+	return Catalog.Format(msgs.locale, "aiNewTabToast", map[string]any{"name": name})
+}
+
+// AiApplyAnchorLost says "The original text changed; the proposal was not applied"
+// in the language the app shows.
+func AiApplyAnchorLost() string { return In(i18n.Locale()).AiApplyAnchorLost() }
+
+// AiApplyAnchorLost says "The original text changed; the proposal was not applied"
+// in the language of msgs.
+func (msgs Messages) AiApplyAnchorLost() string {
+	return Catalog.Format(msgs.locale, "aiApplyAnchorLost", nil)
+}
+
+// AiBadgeInsert says "Insert · {summary}"
+// in the language the app shows.
+func AiBadgeInsert(summary string) string { return In(i18n.Locale()).AiBadgeInsert(summary) }
+
+// AiBadgeInsert says "Insert · {summary}"
+// in the language of msgs.
+func (msgs Messages) AiBadgeInsert(summary string) string {
+	return Catalog.Format(msgs.locale, "aiBadgeInsert", map[string]any{"summary": summary})
+}
+
+// AiBadgeReplace says "Replace · {summary}"
+// in the language the app shows.
+func AiBadgeReplace(summary string) string { return In(i18n.Locale()).AiBadgeReplace(summary) }
+
+// AiBadgeReplace says "Replace · {summary}"
+// in the language of msgs.
+func (msgs Messages) AiBadgeReplace(summary string) string {
+	return Catalog.Format(msgs.locale, "aiBadgeReplace", map[string]any{"summary": summary})
+}
+
+// AiBadgeNewTab says "New tab · {summary}"
+// in the language the app shows.
+func AiBadgeNewTab(summary string) string { return In(i18n.Locale()).AiBadgeNewTab(summary) }
+
+// AiBadgeNewTab says "New tab · {summary}"
+// in the language of msgs.
+func (msgs Messages) AiBadgeNewTab(summary string) string {
+	return Catalog.Format(msgs.locale, "aiBadgeNewTab", map[string]any{"summary": summary})
+}
+
+// AiWhereDocEnd says "Inserts at the end of the note"
+// in the language the app shows.
+func AiWhereDocEnd() string { return In(i18n.Locale()).AiWhereDocEnd() }
+
+// AiWhereDocEnd says "Inserts at the end of the note"
+// in the language of msgs.
+func (msgs Messages) AiWhereDocEnd() string {
+	return Catalog.Format(msgs.locale, "aiWhereDocEnd", nil)
+}
+
+// AiWhereListEnd says "Inserts after the last list item"
+// in the language the app shows.
+func AiWhereListEnd() string { return In(i18n.Locale()).AiWhereListEnd() }
+
+// AiWhereListEnd says "Inserts after the last list item"
+// in the language of msgs.
+func (msgs Messages) AiWhereListEnd() string {
+	return Catalog.Format(msgs.locale, "aiWhereListEnd", nil)
+}
+
+// AiWhereAfterAnchor says "Inserts after the original text"
+// in the language the app shows.
+func AiWhereAfterAnchor() string { return In(i18n.Locale()).AiWhereAfterAnchor() }
+
+// AiWhereAfterAnchor says "Inserts after the original text"
+// in the language of msgs.
+func (msgs Messages) AiWhereAfterAnchor() string {
+	return Catalog.Format(msgs.locale, "aiWhereAfterAnchor", nil)
+}
+
+// AiWhereReplace says "Replaces the original text"
+// in the language the app shows.
+func AiWhereReplace() string { return In(i18n.Locale()).AiWhereReplace() }
+
+// AiWhereReplace says "Replaces the original text"
+// in the language of msgs.
+func (msgs Messages) AiWhereReplace() string {
+	return Catalog.Format(msgs.locale, "aiWhereReplace", nil)
+}
+
+// AiWhereNewTab says "New tab “{name}”"
+// in the language the app shows.
+func AiWhereNewTab(name string) string { return In(i18n.Locale()).AiWhereNewTab(name) }
+
+// AiWhereNewTab says "New tab “{name}”"
+// in the language of msgs.
+func (msgs Messages) AiWhereNewTab(name string) string {
+	return Catalog.Format(msgs.locale, "aiWhereNewTab", map[string]any{"name": name})
+}
+
+// AiAlertNote says "Reminds at {time} (earlier by the lead time)"
+// in the language the app shows.
+func AiAlertNote(time_ string) string { return In(i18n.Locale()).AiAlertNote(time_) }
+
+// AiAlertNote says "Reminds at {time} (earlier by the lead time)"
+// in the language of msgs.
+func (msgs Messages) AiAlertNote(time_ string) string {
+	return Catalog.Format(msgs.locale, "aiAlertNote", map[string]any{"time": time_})
+}

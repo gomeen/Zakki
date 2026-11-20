@@ -349,6 +349,15 @@ func (a *app) createMenu() *mygo.Menu {
 		},
 	}
 
+	a.miAssistant = &mygo.MenuItem{
+		ID:          "assistant",
+		Label:       locales.MenuAssistant(),
+		Accelerator: "Shift+CmdOrCtrl+A",
+		Click: func(*mygo.MenuItem, *mygo.Window) {
+			a.withWindow(func() { a.openAIBar() })
+		},
+	}
+
 	// 显示菜单：Typora 同样把「视图模式 + 置顶 + 打开文档切换」收在这里。
 	viewItems := []*mygo.MenuItem{
 		a.miPreview,

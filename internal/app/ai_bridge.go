@@ -19,7 +19,8 @@ import (
 // systemAIKeyringFactory 供测试注入内存实现；生产经 notes.SystemAIKeyring。
 var systemAIKeyringFactory = notes.SystemAIKeyring
 
-// aiAssistState AI 助理运行态（主线程）。助理条会话状态见 view_ai_bar.go。
+// aiAssistState AI 助理运行态（主线程）：安全存储、连接测试与助理条会话
+// （ai_assistant.go / view_ai_bar.go）。
 type aiAssistState struct {
 	keyring       notes.Keyring // 懒创建的安全存储；nil = 不可用
 	keyConfigured bool          // 密钥是否已在安全存储（打开 AI 页时刷新）
@@ -27,6 +28,8 @@ type aiAssistState struct {
 	testing       bool          // 连接测试进行中
 	testResult    string        // 行内结果；空 = 无结果
 	testErr       bool          // 结果是否为失败
+	bar           aiBarState    // 助理条会话
+	asker         aiAsker       // 非空时替代 aiClient（测试注入）
 }
 
 // aiKeyring 懒创建 AI 密钥的安全存储（失败只记日志，调用处如实展示）。

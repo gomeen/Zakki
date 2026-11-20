@@ -198,6 +198,7 @@ type desktopRefs struct {
 	miFindNext     *mygo.MenuItem
 	miFindPrev     *mygo.MenuItem
 	miFindAllTabs  *mygo.MenuItem
+	miAssistant    *mygo.MenuItem
 	miTop          *mygo.MenuItem
 	hotkeyAcc      string
 	noticeHotkey   string

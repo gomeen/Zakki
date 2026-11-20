@@ -43,6 +43,8 @@ func (a *app) view(c *ui.Context) {
 		c.Invalidate()
 	case a.selDoc && c.Shortcut(0, ui.KeyEscape):
 		a.collapseDocSelection(false)
+	case a.ai.bar.open && c.Shortcut(0, ui.KeyEscape):
+		a.aiEsc()
 	case !a.tableTools.open && c.Shortcut(0, ui.KeyEscape):
 		switch {
 		case a.linkTool.open:
@@ -72,6 +74,9 @@ func (a *app) view(c *ui.Context) {
 			a.livePane(c, &contentTheme, dark)
 		}
 		c.SetTheme(&t)
+		if a.ai.bar.open {
+			a.aiBar(c, &t, dark)
+		}
 		a.statusBar(c, &t, dark)
 	})
 	a.toastViewport(c)
@@ -509,6 +514,14 @@ func (a *app) statusBar(c *ui.Context, t *ui.Theme, dark bool) {
 		ui.Box(c).Grow(1)
 
 		ui.Row(c).Shrink(0).AlignItems(ui.Center).Children(func() {
+			// AI 助理入口（✦）：打开底部助理条；打开时用强调色。
+			sparkInk := fg
+			if a.ai.bar.open {
+				sparkInk = style.accent
+			}
+			if chromeIcon(c, "sb-ai", iconSparkles, locales.AiBarTitle(), sparkInk).Clicked() {
+				a.openAIBar()
+			}
 			// 源码模式开关（Lucide eye）：默认实时预览，打开后全文源码 + 语法高亮。
 			sourceLabel := locales.StatusSource()
 			if a.cfg.Source {
