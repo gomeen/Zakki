@@ -237,6 +237,7 @@ type app struct {
 	desktopRefs
 	toasts toastState
 	syncState
+	ai aiAssistState
 	settingsWindowState
 	prefsRuntimeState
 	onboarding onboardingState

@@ -45,7 +45,7 @@
 | `internal/app/menu_edit.go` | 编辑命令路由：正文聚焦时，菜单栏与右键菜单的撤销、重做及剪贴板操作共用文档事务；搜索、标签重命名和设置中的输入保留系统编辑角色。焦点切换时 `refreshEditMenuRouting` 只刷新编辑子菜单项（系统 Role ↔ 应用 Click），不全量 `buildMenu`。右键命令在主视图帧末执行，避免控件构建期间重复记录历史。`copyTabTextToClipboard` 供菜单与快捷键兜底共用。 |
 | `internal/app/live_format.go` | 格式命令执行（`execFormatCommand`）：标题/列表/引用/行内/代码块/插入在实时预览与源码模式共用；无选区切换「待输入格式」意图（`mdPending`，输入/粘贴/IME 确认时经 `pendingWrapFor` 生成有效 Markdown）；命令以独立撤销事务执行（`editCommand`）。 |
 | `internal/app/live_link.go` | 链接浮层 `linkTool`：打开、校验并写回链接。 |
-| `internal/app/settings_window.go` / `internal/app/settings_ui.go` / `internal/app/settings_storage.go` / `internal/app/settings_keymap.go` | 原生设置窗口：单实例非模态（`StateKey: "settings"`），四页导航（通用、标签、保存与同步、快捷键）与草稿绑定；变更经 `updatePreferences`；「保存与同步」页在 settings_storage.go（文件路径、保存状态与 Git 开关，见 storage_file.go 行）；快捷键页点击徽标录键、冲突就地「改用到这里」（录键期间经 `setKeymapRecording` 临时摘除菜单与全局热键，退出时重建；校验与写入在 keymap_bindings.go），全局热键先注册新键再注销旧键。字段契约见 [configuration.md](configuration.md)。 |
+| `internal/app/settings_window.go` / `internal/app/settings_ui.go` / `internal/app/settings_storage.go` / `internal/app/settings_keymap.go` | 原生设置窗口：单实例非模态（`StateKey: "settings"`），五页导航（通用、标签、AI 助理、保存与同步、快捷键）与草稿绑定；变更经 `updatePreferences`；`settings_ai.go` 是「AI 助理」页（启用开关、提供方预设、端点与模型名写偏好 ai 节；API 密钥只经 `ai_bridge.go` 进系统安全存储，连接测试走最小补全请求）；「保存与同步」页在 settings_storage.go（文件路径、保存状态与 Git 开关，见 storage_file.go 行）；快捷键页点击徽标录键、冲突就地「改用到这里」（录键期间经 `setKeymapRecording` 临时摘除菜单与全局热键，退出时重建；校验与写入在 keymap_bindings.go），全局热键先注册新键再注销旧键。字段契约见 [configuration.md](configuration.md)。 |
 | `internal/app/sync_bridge.go` / `internal/app/settings_sync.go` | 桌面云同步桥接：`configureSync` 把偏好 sync 节装配为 `notes.Store` 的同步配置（后端 A + token provider + 基线状态文件路径，随每次偏好应用重放，但仅在仓库/Client ID/端点/安全存储变化时重建后端实例——Store 按指针身份判配置变更，新指针会作废在途轮次并丢掉防抖排程）；同步触发（启动、窗口激活、保存后防抖、手动）与状态泵 `syncPump`（远端已应用或合并完成则重载笔记并重排提醒并提示；窗口聚焦拉取（限频 30s）、失焦/隐藏时未推送修改立即推送（限频 5s）、退出时经 `FinalSync` 限时 3s 补推，失败不阻止退出）；连接流程 `connectGitHubSync`（Device Flow：设备码 → 用户码弹层在独立 goroutine 展示不阻塞轮询 → 令牌存系统安全存储；Client ID 取偏好 `sync.clientId`，空时回落环境变量 `ZAKKI_GITHUB_CLIENT_ID`，`ZAKKI_GITHUB_BASE_URL` 仅供自测注入本地假服务）、断开连接清凭据；`open_url.go` 只接受 https 的授权页地址并在默认浏览器打开（`open` / `rundll32`）；凭据存在与否只在打开设置页、连接/断开后读取并缓存，不在构建帧里做系统调用；「保存与同步」页云同步分区（settings_sync.go：开关、仓库、Client ID、连接/断开、立即同步、打开授权页、状态行与 Git 暂停说明横幅，缺 Client ID 时显示原因；双方都改时自动合并，无冲突入口）。 |
 | `internal/app/settings_general.go` | 「通用」页骨架：常规（语言、窗口）在前，随后由 `settings_ui.go` 的 `appearanceSections` 构建主题、排版、代码、顶栏分区，整页共用受窗口高度约束的滚动区与单一重置入口；重置同时恢复窗口与外观，保留存储、Git、快捷键和笔记。默认窗口大小按每行字数 × 行数输入，附当前字号换算的像素。偏好异常的恢复入口保留在页顶。 |
 | `internal/app/settings_select.go` | 设置页下拉：`boundedSelect` 与 `ui.Select` 同外观与键盘行为，弹层限高 300 并在内部滚动（`ui.Select` 不限高，选项多时被窗口裁掉）；`selectTrigger` / `selectPanel` 供字体选择器共用。 |
@@ -236,6 +236,6 @@ MyGo 更新器另外管理 `updater.json`，不改变应用偏好的 JSON 契约
 - **偏好测试**：`internal/prefs` 的测试覆盖默认值、严格解码（已移除的旧 backup 字段在兼容版本中摘除）、损坏与超前版本恢复、写失败报告、修订号防回写；笔记版本迁移表在 `internal/notes`；
   `menu_commands_test.go` / `internal/markdown` 的格式与行内边界测试 / `view_theme_test.go`
   分别覆盖加速器与冲突校验、纯格式变换（含 CJK/emoji/光标映射）与全主题对比度；
-  `menu_contract_test.go` 验证新菜单结构、设置窗口四页（`ui.NewTester`）与改键流程。
+  `menu_contract_test.go` 验证新菜单结构、设置窗口五页（`ui.NewTester`）与改键流程。
 - 测试命令见 `Makefile`：`make test`（`CGO_ENABLED=0 go test ./... -count=1`）、
   `make race`、`make vet`（含 `go tool mygo vet .` 的 UI 生命周期检查）。

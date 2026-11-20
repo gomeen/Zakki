@@ -2675,6 +2675,16 @@ func (msgs Messages) PageTabs() string {
 	return Catalog.Format(msgs.locale, "pageTabs", nil)
 }
 
+// PageAI says "AI Assistant"
+// in the language the app shows.
+func PageAI() string { return In(i18n.Locale()).PageAI() }
+
+// PageAI says "AI Assistant"
+// in the language of msgs.
+func (msgs Messages) PageAI() string {
+	return Catalog.Format(msgs.locale, "pageAI", nil)
+}
+
 // PageBackup says "Backup & Data"
 // in the language the app shows.
 func PageBackup() string { return In(i18n.Locale()).PageBackup() }
@@ -5943,4 +5953,404 @@ func NotificationsDenied() string { return In(i18n.Locale()).NotificationsDenied
 // toast shown once when the user has not allowed system notifications
 func (msgs Messages) NotificationsDenied() string {
 	return Catalog.Format(msgs.locale, "notificationsDenied", nil)
+}
+
+// AiSection says "AI Assistant"
+// in the language the app shows.
+func AiSection() string { return In(i18n.Locale()).AiSection() }
+
+// AiSection says "AI Assistant"
+// in the language of msgs.
+func (msgs Messages) AiSection() string {
+	return Catalog.Format(msgs.locale, "aiSection", nil)
+}
+
+// AiSectionHint says "One instruction, then confirm the proposed edits before anything changes."
+// in the language the app shows.
+func AiSectionHint() string { return In(i18n.Locale()).AiSectionHint() }
+
+// AiSectionHint says "One instruction, then confirm the proposed edits before anything changes."
+// in the language of msgs.
+func (msgs Messages) AiSectionHint() string {
+	return Catalog.Format(msgs.locale, "aiSectionHint", nil)
+}
+
+// AiEnable says "Enable AI assistant"
+// in the language the app shows.
+func AiEnable() string { return In(i18n.Locale()).AiEnable() }
+
+// AiEnable says "Enable AI assistant"
+// in the language of msgs.
+func (msgs Messages) AiEnable() string {
+	return Catalog.Format(msgs.locale, "aiEnable", nil)
+}
+
+// AiEnableHint says "Requires an OpenAI-compatible endpoint and a model name."
+// in the language the app shows.
+func AiEnableHint() string { return In(i18n.Locale()).AiEnableHint() }
+
+// AiEnableHint says "Requires an OpenAI-compatible endpoint and a model name."
+// in the language of msgs.
+func (msgs Messages) AiEnableHint() string {
+	return Catalog.Format(msgs.locale, "aiEnableHint", nil)
+}
+
+// AiProvider says "Provider"
+// in the language the app shows.
+func AiProvider() string { return In(i18n.Locale()).AiProvider() }
+
+// AiProvider says "Provider"
+// in the language of msgs.
+func (msgs Messages) AiProvider() string {
+	return Catalog.Format(msgs.locale, "aiProvider", nil)
+}
+
+// AiProviderHint says "Presets fill in the endpoint; Custom keeps what you typed."
+// in the language the app shows.
+func AiProviderHint() string { return In(i18n.Locale()).AiProviderHint() }
+
+// AiProviderHint says "Presets fill in the endpoint; Custom keeps what you typed."
+// in the language of msgs.
+func (msgs Messages) AiProviderHint() string {
+	return Catalog.Format(msgs.locale, "aiProviderHint", nil)
+}
+
+// AiProviderOpenAI says "OpenAI"
+// in the language the app shows.
+func AiProviderOpenAI() string { return In(i18n.Locale()).AiProviderOpenAI() }
+
+// AiProviderOpenAI says "OpenAI"
+// in the language of msgs.
+func (msgs Messages) AiProviderOpenAI() string {
+	return Catalog.Format(msgs.locale, "aiProviderOpenAI", nil)
+}
+
+// AiProviderDeepSeek says "DeepSeek"
+// in the language the app shows.
+func AiProviderDeepSeek() string { return In(i18n.Locale()).AiProviderDeepSeek() }
+
+// AiProviderDeepSeek says "DeepSeek"
+// in the language of msgs.
+func (msgs Messages) AiProviderDeepSeek() string {
+	return Catalog.Format(msgs.locale, "aiProviderDeepSeek", nil)
+}
+
+// AiProviderOpenRouter says "OpenRouter"
+// in the language the app shows.
+func AiProviderOpenRouter() string { return In(i18n.Locale()).AiProviderOpenRouter() }
+
+// AiProviderOpenRouter says "OpenRouter"
+// in the language of msgs.
+func (msgs Messages) AiProviderOpenRouter() string {
+	return Catalog.Format(msgs.locale, "aiProviderOpenRouter", nil)
+}
+
+// AiProviderOllama says "Ollama (local)"
+// in the language the app shows.
+func AiProviderOllama() string { return In(i18n.Locale()).AiProviderOllama() }
+
+// AiProviderOllama says "Ollama (local)"
+// in the language of msgs.
+func (msgs Messages) AiProviderOllama() string {
+	return Catalog.Format(msgs.locale, "aiProviderOllama", nil)
+}
+
+// AiProviderCustom says "Custom…"
+// in the language the app shows.
+func AiProviderCustom() string { return In(i18n.Locale()).AiProviderCustom() }
+
+// AiProviderCustom says "Custom…"
+// in the language of msgs.
+func (msgs Messages) AiProviderCustom() string {
+	return Catalog.Format(msgs.locale, "aiProviderCustom", nil)
+}
+
+// AiBaseURL says "API endpoint"
+// in the language the app shows.
+func AiBaseURL() string { return In(i18n.Locale()).AiBaseURL() }
+
+// AiBaseURL says "API endpoint"
+// in the language of msgs.
+func (msgs Messages) AiBaseURL() string {
+	return Catalog.Format(msgs.locale, "aiBaseURL", nil)
+}
+
+// AiBaseURLHint says "OpenAI-compatible base URL, version path included, e.g. https://api.openai.com/v1."
+// in the language the app shows.
+func AiBaseURLHint() string { return In(i18n.Locale()).AiBaseURLHint() }
+
+// AiBaseURLHint says "OpenAI-compatible base URL, version path included, e.g. https://api.openai.com/v1."
+// in the language of msgs.
+func (msgs Messages) AiBaseURLHint() string {
+	return Catalog.Format(msgs.locale, "aiBaseURLHint", nil)
+}
+
+// AiModel says "Model"
+// in the language the app shows.
+func AiModel() string { return In(i18n.Locale()).AiModel() }
+
+// AiModel says "Model"
+// in the language of msgs.
+func (msgs Messages) AiModel() string {
+	return Catalog.Format(msgs.locale, "aiModel", nil)
+}
+
+// AiModelHint says "Type the model name exactly as the provider spells it."
+// in the language the app shows.
+func AiModelHint() string { return In(i18n.Locale()).AiModelHint() }
+
+// AiModelHint says "Type the model name exactly as the provider spells it."
+// in the language of msgs.
+func (msgs Messages) AiModelHint() string {
+	return Catalog.Format(msgs.locale, "aiModelHint", nil)
+}
+
+// AiKeyTitle says "API Key"
+// in the language the app shows.
+func AiKeyTitle() string { return In(i18n.Locale()).AiKeyTitle() }
+
+// AiKeyTitle says "API Key"
+// in the language of msgs.
+func (msgs Messages) AiKeyTitle() string {
+	return Catalog.Format(msgs.locale, "aiKeyTitle", nil)
+}
+
+// AiKeyHint says "Stored only in the system secure storage (macOS Keychain / Windows DPAPI), never in preferences or notes."
+// in the language the app shows.
+func AiKeyHint() string { return In(i18n.Locale()).AiKeyHint() }
+
+// AiKeyHint says "Stored only in the system secure storage (macOS Keychain / Windows DPAPI), never in preferences or notes."
+// in the language of msgs.
+func (msgs Messages) AiKeyHint() string {
+	return Catalog.Format(msgs.locale, "aiKeyHint", nil)
+}
+
+// AiKeyLabel says "Key"
+// in the language the app shows.
+func AiKeyLabel() string { return In(i18n.Locale()).AiKeyLabel() }
+
+// AiKeyLabel says "Key"
+// in the language of msgs.
+func (msgs Messages) AiKeyLabel() string {
+	return Catalog.Format(msgs.locale, "aiKeyLabel", nil)
+}
+
+// AiKeySave says "Save to Secure Storage"
+// in the language the app shows.
+func AiKeySave() string { return In(i18n.Locale()).AiKeySave() }
+
+// AiKeySave says "Save to Secure Storage"
+// in the language of msgs.
+func (msgs Messages) AiKeySave() string {
+	return Catalog.Format(msgs.locale, "aiKeySave", nil)
+}
+
+// AiKeyClear says "Remove"
+// in the language the app shows.
+func AiKeyClear() string { return In(i18n.Locale()).AiKeyClear() }
+
+// AiKeyClear says "Remove"
+// in the language of msgs.
+func (msgs Messages) AiKeyClear() string {
+	return Catalog.Format(msgs.locale, "aiKeyClear", nil)
+}
+
+// AiKeyBusy says "Updating secure storage…"
+// in the language the app shows.
+func AiKeyBusy() string { return In(i18n.Locale()).AiKeyBusy() }
+
+// AiKeyBusy says "Updating secure storage…"
+// in the language of msgs.
+func (msgs Messages) AiKeyBusy() string {
+	return Catalog.Format(msgs.locale, "aiKeyBusy", nil)
+}
+
+// AiKeyConfigured says "A key is saved in secure storage."
+// in the language the app shows.
+func AiKeyConfigured() string { return In(i18n.Locale()).AiKeyConfigured() }
+
+// AiKeyConfigured says "A key is saved in secure storage."
+// in the language of msgs.
+func (msgs Messages) AiKeyConfigured() string {
+	return Catalog.Format(msgs.locale, "aiKeyConfigured", nil)
+}
+
+// AiKeySaved says "API key saved to secure storage"
+// in the language the app shows.
+func AiKeySaved() string { return In(i18n.Locale()).AiKeySaved() }
+
+// AiKeySaved says "API key saved to secure storage"
+// in the language of msgs.
+func (msgs Messages) AiKeySaved() string {
+	return Catalog.Format(msgs.locale, "aiKeySaved", nil)
+}
+
+// AiKeyCleared says "API key removed from secure storage"
+// in the language the app shows.
+func AiKeyCleared() string { return In(i18n.Locale()).AiKeyCleared() }
+
+// AiKeyCleared says "API key removed from secure storage"
+// in the language of msgs.
+func (msgs Messages) AiKeyCleared() string {
+	return Catalog.Format(msgs.locale, "aiKeyCleared", nil)
+}
+
+// AiKeyringUnavailable says "System secure storage is unavailable on this platform."
+// in the language the app shows.
+func AiKeyringUnavailable() string { return In(i18n.Locale()).AiKeyringUnavailable() }
+
+// AiKeyringUnavailable says "System secure storage is unavailable on this platform."
+// in the language of msgs.
+func (msgs Messages) AiKeyringUnavailable() string {
+	return Catalog.Format(msgs.locale, "aiKeyringUnavailable", nil)
+}
+
+// AiPrivacy says "Whatever you ask about goes only to the endpoint above; with a local Ollama it never leaves this computer."
+// in the language the app shows.
+func AiPrivacy() string { return In(i18n.Locale()).AiPrivacy() }
+
+// AiPrivacy says "Whatever you ask about goes only to the endpoint above; with a local Ollama it never leaves this computer."
+// in the language of msgs.
+func (msgs Messages) AiPrivacy() string {
+	return Catalog.Format(msgs.locale, "aiPrivacy", nil)
+}
+
+// AiTest says "Connection test"
+// in the language the app shows.
+func AiTest() string { return In(i18n.Locale()).AiTest() }
+
+// AiTest says "Connection test"
+// in the language of msgs.
+func (msgs Messages) AiTest() string {
+	return Catalog.Format(msgs.locale, "aiTest", nil)
+}
+
+// AiTestHint says "Sends a minimal request to check the endpoint, model, and key."
+// in the language the app shows.
+func AiTestHint() string { return In(i18n.Locale()).AiTestHint() }
+
+// AiTestHint says "Sends a minimal request to check the endpoint, model, and key."
+// in the language of msgs.
+func (msgs Messages) AiTestHint() string {
+	return Catalog.Format(msgs.locale, "aiTestHint", nil)
+}
+
+// AiTestButton says "Test Connection"
+// in the language the app shows.
+func AiTestButton() string { return In(i18n.Locale()).AiTestButton() }
+
+// AiTestButton says "Test Connection"
+// in the language of msgs.
+func (msgs Messages) AiTestButton() string {
+	return Catalog.Format(msgs.locale, "aiTestButton", nil)
+}
+
+// AiTestRunning says "Testing…"
+// in the language the app shows.
+func AiTestRunning() string { return In(i18n.Locale()).AiTestRunning() }
+
+// AiTestRunning says "Testing…"
+// in the language of msgs.
+func (msgs Messages) AiTestRunning() string {
+	return Catalog.Format(msgs.locale, "aiTestRunning", nil)
+}
+
+// AiTestOK says "Connection OK."
+// in the language the app shows.
+func AiTestOK() string { return In(i18n.Locale()).AiTestOK() }
+
+// AiTestOK says "Connection OK."
+// in the language of msgs.
+func (msgs Messages) AiTestOK() string {
+	return Catalog.Format(msgs.locale, "aiTestOK", nil)
+}
+
+// AiTestFailed says "Failed: {err}"
+// in the language the app shows.
+func AiTestFailed(err string) string { return In(i18n.Locale()).AiTestFailed(err) }
+
+// AiTestFailed says "Failed: {err}"
+// in the language of msgs.
+func (msgs Messages) AiTestFailed(err string) string {
+	return Catalog.Format(msgs.locale, "aiTestFailed", map[string]any{"err": err})
+}
+
+// AiTestIncomplete says "Fill in the endpoint and model first."
+// in the language the app shows.
+func AiTestIncomplete() string { return In(i18n.Locale()).AiTestIncomplete() }
+
+// AiTestIncomplete says "Fill in the endpoint and model first."
+// in the language of msgs.
+func (msgs Messages) AiTestIncomplete() string {
+	return Catalog.Format(msgs.locale, "aiTestIncomplete", nil)
+}
+
+// AiErrNotConfigured says "AI assistant is not configured yet."
+// in the language the app shows.
+func AiErrNotConfigured() string { return In(i18n.Locale()).AiErrNotConfigured() }
+
+// AiErrNotConfigured says "AI assistant is not configured yet."
+// in the language of msgs.
+func (msgs Messages) AiErrNotConfigured() string {
+	return Catalog.Format(msgs.locale, "aiErrNotConfigured", nil)
+}
+
+// AiErrAuth says "The API key was rejected. Check it in Settings."
+// in the language the app shows.
+func AiErrAuth() string { return In(i18n.Locale()).AiErrAuth() }
+
+// AiErrAuth says "The API key was rejected. Check it in Settings."
+// in the language of msgs.
+func (msgs Messages) AiErrAuth() string {
+	return Catalog.Format(msgs.locale, "aiErrAuth", nil)
+}
+
+// AiErrCancelled says "Request cancelled."
+// in the language the app shows.
+func AiErrCancelled() string { return In(i18n.Locale()).AiErrCancelled() }
+
+// AiErrCancelled says "Request cancelled."
+// in the language of msgs.
+func (msgs Messages) AiErrCancelled() string {
+	return Catalog.Format(msgs.locale, "aiErrCancelled", nil)
+}
+
+// AiErrParse says "The model's reply could not be understood. Try again or switch models."
+// in the language the app shows.
+func AiErrParse() string { return In(i18n.Locale()).AiErrParse() }
+
+// AiErrParse says "The model's reply could not be understood. Try again or switch models."
+// in the language of msgs.
+func (msgs Messages) AiErrParse() string {
+	return Catalog.Format(msgs.locale, "aiErrParse", nil)
+}
+
+// AiErrAnchor says "The proposal points at text that no longer matches the note. Try again."
+// in the language the app shows.
+func AiErrAnchor() string { return In(i18n.Locale()).AiErrAnchor() }
+
+// AiErrAnchor says "The proposal points at text that no longer matches the note. Try again."
+// in the language of msgs.
+func (msgs Messages) AiErrAnchor() string {
+	return Catalog.Format(msgs.locale, "aiErrAnchor", nil)
+}
+
+// AiErrRateLimit says "Too many requests — wait a moment and try again."
+// in the language the app shows.
+func AiErrRateLimit() string { return In(i18n.Locale()).AiErrRateLimit() }
+
+// AiErrRateLimit says "Too many requests — wait a moment and try again."
+// in the language of msgs.
+func (msgs Messages) AiErrRateLimit() string {
+	return Catalog.Format(msgs.locale, "aiErrRateLimit", nil)
+}
+
+// AiErrNetwork says "Network problem: {err}"
+// in the language the app shows.
+func AiErrNetwork(err string) string { return In(i18n.Locale()).AiErrNetwork(err) }
+
+// AiErrNetwork says "Network problem: {err}"
+// in the language of msgs.
+func (msgs Messages) AiErrNetwork(err string) string {
+	return Catalog.Format(msgs.locale, "aiErrNetwork", map[string]any{"err": err})
 }

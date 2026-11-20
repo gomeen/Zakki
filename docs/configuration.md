@@ -31,7 +31,7 @@ Windows 的对应目录为 `%APPDATA%\Zakki\`，与默认程序安装目录 `%LO
 
 单实例、非模态窗口，独立记忆位置和尺寸（初始 900×620，最小 760×520）；
 重复打开只聚焦已有窗口，应用菜单只保留「设置… ⌘,」一个入口。
-侧栏为「通用、标签、保存与同步、快捷键」四页。通用页合并原常规与外观，
+侧栏为「通用、标签、AI 助理、保存与同步、快捷键」五页。通用页合并原常规与外观，
 按常规、主题、排版、代码、顶栏顺序在同一滚动区展示，底部只保留一个重置入口。
 通用页重置会同时恢复语言、窗口与外观，不改保存位置、Git、快捷键或笔记内容。
 所有字段**即时生效并自动保存**；非法数字不提交，保留正在编辑的输入并显示行内错误；
@@ -185,6 +185,25 @@ Windows 的对应目录为 `%APPDATA%\Zakki\`，与默认程序安装目录 `%LO
 换算并四舍五入，有字号 / 行高覆盖时按覆盖值算，误差在一个字、一行以内（旧默认 400 × 540
 → 22 × 16）；缺一边按旧默认补齐，非法旧值照旧拒绝。
 
+### AI 助理
+
+一句指令 → 结构化建议卡（插入 / 替换 / 新建标签）→ 确认后才改动笔记。
+全部提供方走 OpenAI 兼容 `chat/completions`（非流式）；提醒不需要专门通道，
+带时间令牌（`@YYYY-MM-DD HH:mm ~提前量 ^规则`）的任务行就是提醒。
+
+| 设置/操作 | 说明 |
+|---|---|
+| 启用 AI 助理 | 开启要求接口地址与模型名已配置（偏好校验兜底）；关闭只是停用，配置保留 |
+| 提供方 | OpenAI / DeepSeek / OpenRouter / Ollama（本地）/ 自定义；预设自动填入接口地址，「自定义」保留手填值 |
+| 接口地址 | OpenAI 兼容 Base URL，含版本路径（如 `https://api.openai.com/v1`）；只允许 https，或指向本机的 http（本地模型服务） |
+| 模型 | 手填模型名，不做模型列表拉取 |
+| API 密钥 | 只存入系统安全存储（macOS 钥匙串 / Windows DPAPI，条目 `Zakki AI`/`apikey`），绝不写入 preferences.json、zakki.json 或日志；输入框不回显已存值，提供「保存到安全存储 / 清除」与状态行 |
+| 连接测试 | 发一条最小补全请求验证地址、模型与密钥，行内显示结果 |
+| 恢复本页默认值 | 只恢复 ai 节（关闭并清空非凭据配置）；安全存储里的密钥不动，可在本页显式清除 |
+
+隐私：指令与当前标签文本只发送到上述端点（超长笔记截中间后发送）；
+使用本地 Ollama 时数据不出本机。
+
 ### 快捷键
 
 - 可改键命令：加粗、斜体、行内代码、插入或编辑链接、标题 1–6、正文、引用、
@@ -261,7 +280,7 @@ Windows 的对应目录为 `%APPDATA%\Zakki\`，与默认程序安装目录 `%LO
 
 ```json
 {
-  "version": 15,
+  "version": 16,
   "appearance": {
     "appearanceMode": "system",
     "language": "",
@@ -282,6 +301,7 @@ Windows 的对应目录为 `%APPDATA%\Zakki\`，与默认程序安装目录 `%LO
   "storage": { "dataFile": "", "saveIntervalMs": 2000 },
   "git": { "autoCommit": false, "autoPush": false, "commitMinutes": 1, "pushMinutes": 10 },
   "sync": { "enabled": false, "backend": "", "repo": "", "clientId": "" },
+  "ai": { "enabled": false, "provider": "", "baseUrl": "", "model": "" },
   "keymap": { "overrides": { "format.bold": "CmdOrCtrl+Alt+U" } },
   "advanced": { "windowColumns": 22, "windowRows": 16 }
 }

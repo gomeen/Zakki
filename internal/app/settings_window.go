@@ -17,6 +17,7 @@ import (
 const (
 	pageGeneral = "general"
 	pageTabs    = "tabs"
+	pageAI      = "ai"
 	pageStorage = "storage"
 	pageKeymap  = "keymap"
 )
@@ -81,6 +82,14 @@ type settingsUIState struct {
 	syncRepoText     string
 	syncClientIDText string
 
+	// AI 助理页：提供方/端点/模型/密钥输入框的工作副本与行内错误。
+	// 密钥只进系统安全存储，草稿与偏好均不保存。
+	aiProviderSel string
+	aiBaseURLText string
+	aiModelText   string
+	aiKeyText     string
+	aiKeyErr      string
+
 	// Keymap 页：搜索词、正在录制的命令 ID、冲突/非法提示。keyErrID 非空时
 	// 提示显示在该命令行下方，否则在页面底部（其他页的写入错误也走 keyErr）。
 	keySearch   string
@@ -105,6 +114,7 @@ func (ui *settingsUIState) syncDraftFromPrefs(p preferences) {
 	ui.padXErr, ui.padYErr = "", ""
 	ui.keyErr, ui.keyErrID, ui.keyConflict = "", "", keymapConflict{}
 	ui.gitProbeDir = ""
+	ui.aiKeyErr = ""
 }
 
 // mergeDraftFromPrefs 把外部更新合并进未编辑字段；已编辑字段继续保留在非模态窗口中。
@@ -154,6 +164,7 @@ func (ui *settingsUIState) mergeDraftFromPrefs(p preferences) {
 	ui.draft.Storage = next.Storage
 	ui.draft.Git = next.Git
 	ui.draft.Sync = next.Sync
+	ui.draft.AI = next.AI
 
 	ui.draft.Version = next.Version
 	ui.draft.Keymap = next.Keymap
@@ -166,6 +177,9 @@ func (ui *settingsUIState) syncDraftBindings() {
 	p := ui.draft
 	ui.syncRepoText = p.Sync.Repo
 	ui.syncClientIDText = p.Sync.ClientID
+	ui.aiProviderSel = aiProviderDisplay(p.AI.Provider)
+	ui.aiBaseURLText = p.AI.BaseURL
+	ui.aiModelText = p.AI.Model
 	ui.appearanceModeSel = appearanceModeDisplay(p.Appearance.AppearanceMode)
 	ui.languageSel = languageDisplay(p.Appearance.Language)
 	ui.markdownThemeSel = markdownThemeDisplay(p.Appearance.MarkdownTheme)
@@ -218,6 +232,9 @@ func (a *app) openSettings(page string) {
 		// 云同步分区要在首帧就显示正确的连接状态：安全存储读取只在
 		// 这里与页面切换时做，不进构建帧。
 		a.refreshSyncTokenState()
+	}
+	if page == pageAI {
+		a.refreshAIKeyState()
 	}
 	if !a.ready {
 		if a.settingsWin == nil {
@@ -291,6 +308,7 @@ func (a *app) settingsView(c *ui.Context) {
 		if ui.Sidebar(c, &a.settingsPage, func() {
 			ui.SidebarItem(c, pageGeneral, iconGear, locales.PageGeneral())
 			ui.SidebarItem(c, pageTabs, iconLayers, locales.PageTabs())
+			ui.SidebarItem(c, pageAI, iconSparkles, locales.PageAI())
 			ui.SidebarItem(c, pageStorage, iconDatabase, locales.PageStorage())
 			ui.SidebarItem(c, pageKeymap, iconKeyboard, locales.PageKeymap())
 		}).Width(200).FillHeight().Changed() {
@@ -299,11 +317,16 @@ func (a *app) settingsView(c *ui.Context) {
 			if a.settingsPage == pageStorage {
 				a.refreshSyncTokenState()
 			}
+			if a.settingsPage == pageAI {
+				a.refreshAIKeyState()
+			}
 		}
 		ui.Column(c).Fill().Grow(1).Padding(28, 12, 28, 24).Gap(18).Children(func() {
 			switch a.settingsPage {
 			case pageTabs:
 				a.tabsPage(c, &t)
+			case pageAI:
+				a.aiPage(c)
 			case pageStorage:
 				a.storagePage(c)
 			case pageKeymap:
@@ -398,6 +421,10 @@ func (a *app) resetPageDefaults(page string) {
 			p.Advanced.WindowColumns = defaults.Advanced.WindowColumns
 			p.Advanced.WindowRows = defaults.Advanced.WindowRows
 			p.Appearance = defaults.Appearance
+		case pageAI:
+			// 只恢复偏好（关闭并清空非凭据配置）；安全存储里的密钥
+			// 不是偏好，不动（可在本页显式清除）。
+			p.AI = defaults.AI
 		case pageKeymap:
 			p.Keymap = defaults.Keymap
 		}
