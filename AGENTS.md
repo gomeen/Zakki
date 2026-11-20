@@ -54,14 +54,6 @@ go list -f '{{.Dir}}' github.com/egoist/mygo/ui   # 查看实际参与构建的 
 
 ## Agent skills
 
-### Issue tracker
-
-Issue 追踪在 gomeen/Zakki 的 GitHub Issues（用 gh CLI 读写，PR 不作为 triage 请求面）。见 `docs/agents/issue-tracker.md`。
-
-### Triage labels
-
-使用 5 个默认 triage 标签：needs-triage、needs-info、ready-for-agent、ready-for-human、wontfix。见 `docs/agents/triage-labels.md`。
-
 ### Domain docs
 
 单上下文布局：根目录 `GLOSSARY.md` + `docs/adr/`。见 `docs/agents/domain.md`。

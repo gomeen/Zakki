@@ -1,7 +1,7 @@
 # 暂停移动客户端开发，保留代码、规格与验证记录
 
 Zakki 是单人维护的桌面便签应用，移动端的目的是「在 iPhone 上随时能看能改，到点提醒」。
-按 [mobile-spec.md](../mobile-spec.md) §7 的里程碑，M1–M4 的代码已全部落地（iOS 双模式编辑器、
+按原目标规格（`docs/mobile-spec.md`，已删除，历史版本见 git 历史）§7 的里程碑，M1–M4 的代码已全部落地（iOS 双模式编辑器、
 提醒调度、GitHub 后端 A、iCloud 云盘后端 B，桌面同步配套随 0.6.3 发布），但 §8 出口清单里
 仍有 11 项是**手机真机与人工验收**，且其中多项的前置条件是开发者账号能力。
 
@@ -9,13 +9,15 @@ Zakki 是单人维护的桌面便签应用，移动端的目的是「在 iPhone 
 entitlement 不可用。实际结果是手机上的 app 已因签名过期不可用，而便签是高频刚需，
 7 天一次的重新签名流程不可接受。继续投入 M5（Android）与真机验收，只能得到一份
 **无法长期交付给自己使用**的代码。我们决定：**暂停移动客户端开发**，不推进 M5；
-`mobile/` 代码、`docs/mobile-spec.md` 规格与全部验证报告原样保留并标记冻结。
+`mobile/` 代码与全部验证报告原样保留并标记冻结；目标规格文档已删除（历史版本见 git 历史），
+其进度与恢复路径由 [mobile-archive.md](../mobile-archive.md) 承接。
 
 ## 决策
 
 1. 移动端进入**冻结**状态：不修 iOS bug、不加功能、不做真机验收；`mobile/` 与
    `.github/workflows/mobile.yml` 原样保留，不删除、不迁分支。
-2. 目标规格不删：[mobile-spec.md](../mobile-spec.md) 仍是未实现目标的唯一事实来源，
+2. 目标规格不再以单独文档维护：原 `docs/mobile-spec.md` 已删除（历史版本见 git 历史），
+   未实现目标与出口标准的现行表述统一以 [mobile-archive.md](../mobile-archive.md) 为准，
    §8 未勾项由「未完成」改述为「暂停待验」，出口标准不变。
 3. 归档进度与恢复路径写入 [mobile-archive.md](../mobile-archive.md)，ADR 只记决策与后果。
 4. `core/`（嵌套 module `zakki/core`）**不冻结**：桌面 `internal/notes`、`internal/markdown`
@@ -45,7 +47,7 @@ entitlement 不可用。实际结果是手机上的 app 已因签名过期不可
   binding 重新编译通过。
 - `mobile.yml` 继续跑 macOS runner 的 `make mobile-framework`。若长期无人看管导致
   CI 噪音过大，可以单独禁用该 workflow——这属于运维取舍，不在本 ADR 内决定。
-- `docs/mobile-spec.md` §2.2 的双后端同步契约中，**后端 A（GitHub Contents API）已由桌面
+- 原目标规格 §2.2 的双后端同步契约中（文档已删除，历史版本见 git 历史），**后端 A（GitHub Contents API）已由桌面
   单独实装并使用**，冻结只影响 iOS 侧的同一实现，不影响桌面同步。
 - 恢复的前置条件有二选一：开通付费 Apple Developer（Time Sensitive + 长期签名），
   或明确接受 7 天重签流程且只做自用。恢复顺序见

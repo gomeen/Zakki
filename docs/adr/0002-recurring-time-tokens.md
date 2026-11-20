@@ -64,7 +64,7 @@ iOS 在 64 条 pending 配额内填实例，可整除自然单位的规则可选
 上文保留原始决策及 Considered Options 历史。本节为现行契约，替代上文「补勾只将旧锚点前进一步」、
 当前实例缺少首实例兜底、原生重复触发器优化、ADR-0001 派生规则的旧引述及桌面不在范围内的旧口径；
 不改变不存在月日跳过的决定。
-桌面落地与移动端实施边界见 [mobile-spec.md](../mobile-spec.md) §6。
+桌面落地见 `core.FindTimeTokenEx`（`core/timetoken.go`）与 `internal/markdown/timeinline.go` 的调用面；移动端已暂停，边界见 [ADR-0003](0003-pause-mobile-client.md) 与 [mobile-archive.md](../mobile-archive.md)。
 
 ### 规则语法与兼容
 

@@ -91,7 +91,7 @@
 | `internal/app/font_runtime.go` / `internal/app/font_picker.go` | 字体运行时与选择控件：后台 `ui.FontFamilies()` 枚举本机字体并与远程目录去重（本机字体以 `local:<家族名>` 键入选项，经 `fonts.ClassifyFamily` 按家族名归入中文 / 英文字体，代码字体只列等宽家族）；`fontPicker` 是设置页与向导共用的字体下拉（搜索、推荐 / 本机字体分组、每项样字、限高滚动），键直接绑定，默认字体别名只在显示时对齐（`canonicalFontKey`，空串不触发下载，不能写回）；`prepareFonts` 是唯一准备入口——缺失的可下载字体按固定目录逐个 `fonts.Store.Ensure`（SHA256/字节校验、可取消、进度经存活窗口 `Window.Update` 回主线程）后 `ui.RegisterFont` 私有注册，完成后只回调 `settle(ok)`。字体应用私有注册，不写入操作系统字体库；本机字体卸载后保留偏好，渲染时回退并提示（`usableFontKey`）。老用户升级后首次开窗由 `preparePreferredFontInBackground` 静默补齐已有偏好引用的缺失字体，失败只记日志。向导与设置页共用选项与准备流程；失败重试、返回修改或换选会作废旧批次（generation 门禁）。 |
 | `internal/fonts` | 纯逻辑字体资源模块（无 MyGo 依赖）：固定远程目录（LXGW WenKai Lite / JetBrains Mono / Fira Code 5.2，均为官方 GitHub 固定 commit 的原始 TTF，OFL-1.1，见 `catalog.go`）；`Store.Ensure` 先验证缓存（`<应用数据>/fonts/<资源ID>.ttf`，长度+SHA256），命中不触网，缺失才下载：HTTP 200、严格等长、临时文件同目录随机名 0600、Sync+Rename 原子发布，失败/取消不留半截文件；`LocalKey`/`LocalFamily` 校验 `local:` 键防字体栈注入；`ClassifyFamily`（script.go）按家族名推断中文 / 西文 / 其他文字 / 符号，供字体下拉归类。Dank Mono 等商业字体不在目录，仅本机已装时可选。 |
 | `internal/app/testdata/LXGWWenKaiLite-Regular.ttf` | 手写字体栈的无头测试夹具（原 `resources/` 内置字体迁入），仅 `go test` 读取，不随包分发；`font_hand_test.go` 用它验证注册路径与字体栈安全回退。 |
-| `resources/icon.png` / `resources/icon.svg` | 「墨 Z」应用图标：米色纸上一笔手写 Z 加朱红句点（1024×1024 PNG 与 SVG 源文件），MyGo 构建时生成 macOS ICNS 与 Windows ICO。设计原型保留在 `docs/demo/app-icon/`，不参与构建。 |
+| `resources/icon.png` / `resources/icon.svg` | 「墨 Z」应用图标：米色纸上一笔手写 Z 加朱红句点（1024×1024 PNG 与 SVG 源文件），MyGo 构建时生成 macOS ICNS 与 Windows ICO。 |
 
 ## 线程模型（MyGo 硬约束，违反会在运行期出错或被 `go tool mygo vet` 拦下）
 

@@ -1,7 +1,7 @@
 # 移动客户端归档：进度、未完成项与恢复路径
 
 > **状态：暂停，不再继续开发（2026-11-11 决策，见 [ADR-0003](adr/0003-pause-mobile-client.md)）。**
-> 目标规格仍在 [mobile-spec.md](mobile-spec.md)，代码仍在 `mobile/`，两者都只冻结、不删除。
+> 目标规格文档已删除（历史版本见 git 历史），代码仍在 `mobile/`，只冻结、不删除。
 > 本文回答四个问题：做到哪了、还差什么、当初要做成什么样、将来想捡起来怎么捡。
 
 ## 1. 为什么停
@@ -50,7 +50,7 @@
 
 ### 3.1 代码已完成、只差真机/人工验证（11 项）
 
-全部留在 [mobile-spec.md](mobile-spec.md) §8 未勾选行。按「恢复时先做什么」排序：
+全部是原目标规格 §8 未勾选行（规格文档已删除，历史版本见 git 历史）。按「恢复时先做什么」排序：
 
 **第一优先（决定整个路线是否成立）**
 
@@ -103,7 +103,7 @@
 
 ## 4. 目标功能（原本要做成什么样）
 
-规格未删，完整定义看 [mobile-spec.md](mobile-spec.md)。这里只留索引：
+规格文档已删除，完整定义见 git 历史中的 `docs/mobile-spec.md`。这里只留索引：
 
 | 想要的东西 | 规格位置 |
 |---|---|
@@ -112,7 +112,7 @@
 | 双后端同步协议（GitHub A / 云盘 B）、冲突判定与留档（iOS 侧；桌面侧已改为自动合并，见 ADR-0004）| §2.2、§10 D13 |
 | 时间与提醒的共享契约：绑定 API、调度主循环、通知呈现 | §3 |
 | 已定决策：D11 无 FCM、D13 冲突不 LWW、D17 组件交互、D19 免费签名边界、D21 里程碑编排 | §10 |
-| 视觉基线 | [design-tokens-mobile-draft.md](design-tokens-mobile-draft.md) |
+| 视觉基线 | 原 `docs/design-tokens-mobile-draft.md`（已删除，历史版本见 git 历史） |
 
 **明确从未纳入范围的**（不是欠账）：跨标签搜索、通知深链、应用内今日聚合页（三项 fast-follow）、
 iPad 专属布局、手表、Siri/快捷指令、厂商推送通道、上架/TestFlight、坚果云 WebDAV、
@@ -139,7 +139,7 @@ iCloud for Windows、CloudKit、Syncthing、自建同步服务、Dropbox（§0�
 
 | 想找什么 | 去哪 |
 |---|---|
-| 目标与出口标准 | `docs/mobile-spec.md` §7、§8 |
+| 目标与出口标准 | 原 `docs/mobile-spec.md` §7、§8（已删除，历史版本见 git 历史） |
 | 各里程碑实现细节与证据 | `docs/reports/2026-10-2x-m1/m2…`、`2026-11-08-m3/m4-1/m4-2/m4-3…`、`2026-11-08-icloud-sync-probe.md` |
 | 真机 runbook | `2026-11-08-icloud-sync-probe.md` 附录 A |
 | 绑定构建 | `Makefile` 的 `mobile-framework`、`mobile/binding/go.mod` |
