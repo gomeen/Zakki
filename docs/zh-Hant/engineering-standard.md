@@ -17,8 +17,8 @@
 | [Go Code Review Comments](https://go.dev/wiki/CodeReviewComments) | 套件名短小、小寫、名詞；禁止 `util`/`common`/`helpers`；介面由使用方定義。 |
 | [Google Go Style Guide](https://google.github.io/styleguide/go/) | 錯誤用 `%w` 包裝；godoc 以識別字開頭；測試寫清 got/want。 |
 | [Uber Go Style Guide](https://github.com/uber-go/guide/blob/master/style.md) | mutex 與保護欄位同結構體；不嵌入 mutex；不用可變全域狀態。 |
-| MyGo（`go list -f '{{.Dir}}' github.com/egoist/mygo/ui`，見 `vendor/`) | 範例按領域分檔案；`go tool mygo vet` 檢查 UI 生命週期。 |
-| [.agents/skills/mygo-maintenance/SKILL.md](../../.agents/skills/mygo-maintenance/SKILL.md)（中文） | MyGo 生命週期、身分、執行緒與測試（第 4 節）。 |
+| MyGo（`go list -f '{{.Dir}}' github.com/egoist/mygo/ui`，見 `vendor/`) | 範例按領域分文件；`go tool mygo vet` 檢查 UI 生命週期。 |
+| [.agents/skills/mygo-maintenance/SKILL.md](../../.agents/skills/mygo-maintenance/SKILL.md)（英文） | MyGo 生命週期、身分、執行緒與測試（第 4 節）。 |
 
 ## 2. 目標版面
 
@@ -140,5 +140,5 @@ CI（`.github/workflows/ci.yml`）不得跳過測試或放寬檢查。
 - [ ] 一次提交一件事；結構移轉不夾帶行為變更
 - [ ] 純邏輯套件無 MyGo；依賴符合第 3 節
 - [ ] 無 `ui.Element`/`*ui.Context` 入狀態；背景只碰快照
-- [ ] 檔案職責變化已同步 [architecture.md](architecture.md)
+- [ ] 文件職責變化已同步 [architecture.md](architecture.md)
 - [ ] 未提交 `build/`、`.mygo/`、二進位檔與簽章私鑰
