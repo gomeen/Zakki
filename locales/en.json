@@ -740,6 +740,7 @@
   "aiErrRateLimit": "Too many requests — wait a moment and try again.",
   "aiErrNetwork": "Network problem: {err}",
   "cmdAssistant": "AI Assistant",
+  "cmdAssistantFocus": "Focus AI Assistant",
   "menuAssistant": "AI Assistant…",
   "aiBarTitle": "AI assistant",
   "aiBarPlaceholder": "Ask the assistant… e.g. add a reminder for tomorrow 3pm",

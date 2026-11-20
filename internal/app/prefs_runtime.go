@@ -180,6 +180,14 @@ func (a *app) applyPreferencesToRuntime() {
 	}
 	a.applyAlwaysOnTop()
 	a.applyMinimumWindowSize()
+	// AI 助理从关到开时默认显示助理条（不抢焦点，启动载入与设置页开启
+	// 都走这里）；从开到关则收起。后续无关的偏好应用不重复打开。
+	if p.AI.Enabled && !a.ai.enabledPrev && !a.ai.bar.open {
+		a.ai.bar = aiBarState{open: true, editing: -1}
+	} else if !p.AI.Enabled && a.ai.enabledPrev && a.ai.bar.open {
+		a.closeAIBar()
+	}
+	a.ai.enabledPrev = p.AI.Enabled
 }
 
 func (a *app) saveInterval() time.Duration {

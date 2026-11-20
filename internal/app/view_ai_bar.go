@@ -71,7 +71,8 @@ func (a *app) aiErrorRow(c *ui.Context, t *ui.Theme) {
 	})
 }
 
-// aiInputRow 输入行：圆角输入框（含 ✦ 图标）+ 唯一的发送按钮；追问态换占位文案。
+// aiInputRow 输入行：加大的圆角输入框（含 ✦ 图标）+ 唯一的发送按钮；
+// 聚焦不改变外观（边框恒定）。追问态换占位文案。
 func (a *app) aiInputRow(c *ui.Context, t *ui.Theme, style resolvedStyle) {
 	placeholder := locales.AiBarPlaceholder()
 	if a.ai.bar.phase == aiBarReview {
@@ -79,16 +80,13 @@ func (a *app) aiInputRow(c *ui.Context, t *ui.Theme, style resolvedStyle) {
 	}
 	canSend := a.ai.bar.phase != aiBarThinking && strings.TrimSpace(a.ai.bar.input) != ""
 	ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-		border := t.Border
-		if ui.FocusedValue(c, &a.ai.bar.focus) == 1 {
-			border = style.accent
-		}
-		input := ui.Row(c).Grow(1).MinWidth(0).Height(30).PaddingX(8).Gap(6).Radius(8).
-			AlignItems(ui.Center).Background(t.Background).Border(1, border)
+		input := ui.Row(c).Grow(1).MinWidth(0).Height(38).PaddingX(10).Gap(7).Radius(10).
+			AlignItems(ui.Center).Background(t.Background).Border(1, t.Border)
 		input.Children(func() {
-			ui.Icon(c, iconSparkles).Size(14, 14).TextColor(style.accent).Shrink(0)
+			ui.Icon(c, iconSparkles).Size(15, 15).TextColor(style.accent).Shrink(0)
 			in := ui.TextInputBase(c.Key("ai-input"), &a.ai.bar.input).
 				Label(locales.AiBarTitle()).Placeholder(placeholder).
+				FontSize(14).
 				Grow(1).MinWidth(40).FocusBind(&a.ai.bar.focus, 1).
 				HandleInput(func(ev ui.InputEvent) bool { return a.aiInputKey(ev) })
 			a.ai.bar.composing = in.Composing()

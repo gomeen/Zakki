@@ -639,6 +639,7 @@
   "aiErrRateLimit": "请求过于频繁，请稍后再试。",
   "aiErrNetwork": "网络问题：{err}",
   "cmdAssistant": "AI 助理",
+  "cmdAssistantFocus": "聚焦 AI 助理输入框",
   "menuAssistant": "AI 助理…",
   "aiBarTitle": "AI 助理",
   "aiBarPlaceholder": "让助理做点什么…例如：明天下午3点提醒我开会",

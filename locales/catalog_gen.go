@@ -6365,6 +6365,16 @@ func (msgs Messages) CmdAssistant() string {
 	return Catalog.Format(msgs.locale, "cmdAssistant", nil)
 }
 
+// CmdAssistantFocus says "Focus AI Assistant"
+// in the language the app shows.
+func CmdAssistantFocus() string { return In(i18n.Locale()).CmdAssistantFocus() }
+
+// CmdAssistantFocus says "Focus AI Assistant"
+// in the language of msgs.
+func (msgs Messages) CmdAssistantFocus() string {
+	return Catalog.Format(msgs.locale, "cmdAssistantFocus", nil)
+}
+
 // MenuAssistant says "AI Assistant…"
 // in the language the app shows.
 func MenuAssistant() string { return In(i18n.Locale()).MenuAssistant() }

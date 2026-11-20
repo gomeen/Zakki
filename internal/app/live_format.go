@@ -60,6 +60,8 @@ func (a *app) execFormatCommand(id string) {
 		a.execInsert(defaultTableBlock())
 	case cmdAssistant:
 		a.toggleAIBar()
+	case cmdAssistantFocus:
+		a.focusAIBarInput()
 	default:
 		slog.Warn("未知格式命令", "id", id)
 	}

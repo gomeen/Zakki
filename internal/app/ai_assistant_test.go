@@ -302,6 +302,50 @@ func TestAISendUsesInjectedAsker(t *testing.T) {
 	}
 }
 
+func TestAIDefaultOpenAndFocusShortcut(t *testing.T) {
+	a := newTestApp(t)
+	t.Cleanup(a.shutdown)
+	if a.ai.bar.open {
+		t.Fatal("默认关闭时不应显示助理条")
+	}
+	// 开启 → 默认显示，但不抢焦点。
+	_ = a.updatePreferences(func(p *preferences) {
+		p.AI.Enabled, p.AI.BaseURL, p.AI.Model = true, "https://api.openai.com/v1", "m"
+	})
+	if !a.ai.bar.open || a.ai.bar.focus != 0 {
+		t.Fatalf("开启后应默认显示且不抢焦点: %+v", a.ai.bar)
+	}
+	// 关闭后改无关偏好不重复打开。
+	a.closeAIBar()
+	_ = a.updatePreferences(func(p *preferences) { p.Window.AlwaysOnTop = true })
+	if a.ai.bar.open {
+		t.Fatal("无关偏好应用不应重开助理条")
+	}
+	// 再关再开 → 重新默认显示。
+	_ = a.updatePreferences(func(p *preferences) { p.AI.Enabled = false })
+	_ = a.updatePreferences(func(p *preferences) { p.AI.Enabled = true })
+	if !a.ai.bar.open {
+		t.Fatal("从关到开应重新默认显示")
+	}
+	// ⌘J 聚焦：面板已开时只聚焦输入框。
+	a.ai.bar.focus = 0
+	a.focusAIBarInput()
+	if !a.ai.bar.open || a.ai.bar.focus != 1 {
+		t.Fatalf("聚焦应落在输入框: %+v", a.ai.bar)
+	}
+	// 面板隐藏时 ⌘J 先打开并聚焦。
+	a.closeAIBar()
+	a.focusAIBarInput()
+	if !a.ai.bar.open || a.ai.bar.focus != 1 {
+		t.Fatalf("隐藏时应先打开再聚焦: %+v", a.ai.bar)
+	}
+	// 从开到关：停用 AI 时收起助理条。
+	_ = a.updatePreferences(func(p *preferences) { p.AI.Enabled = false })
+	if a.ai.bar.open {
+		t.Fatal("停用 AI 应收起助理条")
+	}
+}
+
 func TestAIErrTextRateLimit(t *testing.T) {
 	if got := aiErrText(&ai.RateLimitError{Wait: 5e9}); got == "" {
 		t.Fatalf("限流应有文案: %q", got)

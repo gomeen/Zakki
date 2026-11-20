@@ -615,6 +615,7 @@
   "aiErrRateLimit": "リクエストが多すぎます。しばらく待って再試行してください。",
   "aiErrNetwork": "ネットワークの問題：{err}",
   "cmdAssistant": "AI アシスタント",
+  "cmdAssistantFocus": "AI アシスタントに入力フォーカス",
   "menuAssistant": "AI アシスタント…",
   "aiBarTitle": "AI アシスタント",
   "aiBarPlaceholder": "アシスタントに頼む…例：明日の15時に会議をリマインド",

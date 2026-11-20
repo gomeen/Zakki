@@ -615,6 +615,7 @@
   "aiErrRateLimit": "請求過於頻繁，請稍後再試。",
   "aiErrNetwork": "網路問題：{err}",
   "cmdAssistant": "AI 助理",
+  "cmdAssistantFocus": "聚焦 AI 助理輸入框",
   "menuAssistant": "AI 助理…",
   "aiBarTitle": "AI 助理",
   "aiBarPlaceholder": "讓助理做點什麼…例如：明天下午3點提醒我開會",

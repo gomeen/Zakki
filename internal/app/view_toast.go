@@ -1,7 +1,7 @@
 package app
 
-// 居中 toast 提示：一次性操作反馈（标签上限、替换计数、导出成功等）
-// 以京东式深色气泡显示在窗口正中，停留数秒后自动消失。持久异常
+// 顶部居中 toast 提示：一次性操作反馈（标签上限、替换计数、导出成功等）
+// 以深色气泡统一显示在窗口顶部中央，停留数秒后自动消失。持久异常
 // （保存/载入被暂停）不走 toast，仍由状态栏常驻展示，见 view_status.go。
 
 import (
@@ -24,9 +24,10 @@ func (a *app) showToast(msg string) {
 	}
 }
 
-// toastViewport 消费排队的提示并构建居中 toast 视口；主窗口每帧恰好调用一次。
-// 视口铺满整窗且指针穿透，条目水平垂直都居中；计时、淡出、Esc 关闭与
-// 屏幕阅读器播报都由 MyGo toast 引擎（ui.ToastViewportBase / ui.ToastBase）负责。
+// toastViewport 消费排队的提示并构建 toast 视口；主窗口每帧恰好调用一次。
+// 视口铺满整窗且指针穿透，条目水平居中、垂直靠顶（避开自绘顶栏）；
+// 计时、淡出、Esc 关闭与屏幕阅读器播报都由 MyGo toast 引擎
+// （ui.ToastViewportBase / ui.ToastBase）负责。
 func (a *app) toastViewport(c *ui.Context) {
 	for _, msg := range a.toasts.pending {
 		// 文案即 ID：连续触发同一条提示时替换既有条目并重新计时，不层层堆叠。
@@ -36,7 +37,9 @@ func (a *app) toastViewport(c *ui.Context) {
 	ui.ToastViewportBase(c, func(viewport ui.Element, toasts []ui.Toast) {
 		t := c.Theme()
 		w, _ := c.Size()
-		viewport.Justify(ui.Center).AlignItems(ui.Center).Gap(t.Space(2))
+		// 顶部居中：避开 38pt 自绘顶栏（Windows 隐藏标题栏模式同高带 32），
+		// 与顶栏拉开一点呼吸。
+		viewport.Justify(ui.Start).AlignItems(ui.Center).Gap(t.Space(2)).Padding(46, 0, 0, 0)
 		fill, text := toastInk(t)
 		for _, ts := range toasts {
 			p := ui.ToastBase(c, ts)

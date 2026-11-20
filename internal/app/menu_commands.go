@@ -21,27 +21,28 @@ import (
 // ---- 命令 ID ----
 
 const (
-	cmdBold         = "format.bold"
-	cmdItalic       = "format.italic"
-	cmdInlineCode   = "format.code"
-	cmdLink         = "format.link"
-	cmdH1           = "heading.1"
-	cmdH2           = "heading.2"
-	cmdH3           = "heading.3"
-	cmdH4           = "heading.4"
-	cmdH5           = "heading.5"
-	cmdH6           = "heading.6"
-	cmdBody         = "heading.body"
-	cmdQuote        = "block.quote"
-	cmdBullet       = "list.bullet"
-	cmdOrdered      = "list.ordered"
-	cmdTask         = "list.task"
-	cmdTaskTime     = "list.taskTime"
-	cmdCodeBlock    = "block.code"
-	cmdRule         = "insert.rule"
-	cmdTable        = "insert.table"
-	cmdToggleWindow = "global.toggleWindow"
-	cmdAssistant    = "global.assistant"
+	cmdBold           = "format.bold"
+	cmdItalic         = "format.italic"
+	cmdInlineCode     = "format.code"
+	cmdLink           = "format.link"
+	cmdH1             = "heading.1"
+	cmdH2             = "heading.2"
+	cmdH3             = "heading.3"
+	cmdH4             = "heading.4"
+	cmdH5             = "heading.5"
+	cmdH6             = "heading.6"
+	cmdBody           = "heading.body"
+	cmdQuote          = "block.quote"
+	cmdBullet         = "list.bullet"
+	cmdOrdered        = "list.ordered"
+	cmdTask           = "list.task"
+	cmdTaskTime       = "list.taskTime"
+	cmdCodeBlock      = "block.code"
+	cmdRule           = "insert.rule"
+	cmdTable          = "insert.table"
+	cmdToggleWindow   = "global.toggleWindow"
+	cmdAssistant      = "global.assistant"
+	cmdAssistantFocus = "global.assistantFocus"
 )
 
 // ---- 绑定（规范化组合键） ----
@@ -382,6 +383,7 @@ var commandRegistry = []commandDef{
 	{id: cmdTable, name: "cmdTable", group: "insert", def: ""},
 	{id: cmdToggleWindow, name: "cmdToggleWindow", group: "global", def: "CmdOrCtrl+Shift+Space", global: true},
 	{id: cmdAssistant, name: "cmdAssistant", group: "global", def: "CmdOrCtrl+Shift+A"},
+	{id: cmdAssistantFocus, name: "cmdAssistantFocus", group: "global", def: "CmdOrCtrl+J"},
 }
 
 // commandDisplayName 命令名注册表存 catalog 键，显示时按当前语言取文案。
@@ -417,6 +419,8 @@ func commandDisplayName(def commandDef) string {
 		return locales.CmdToggleWindow()
 	case "cmdAssistant":
 		return locales.CmdAssistant()
+	case "cmdAssistantFocus":
+		return locales.CmdAssistantFocus()
 	}
 	if n := def.name; strings.HasPrefix(n, "cmdH") {
 		if v := n[len("cmdH"):]; v >= "1" && v <= "9" {

@@ -30,6 +30,7 @@ type aiAssistState struct {
 	testErr       bool          // 结果是否为失败
 	bar           aiBarState    // 助理条会话
 	asker         aiAsker       // 非空时替代 aiClient（测试注入）
+	enabledPrev   bool          // 上一次偏好应用时的开关：从关到开时默认显示助理条
 }
 
 // aiKeyring 懒创建 AI 密钥的安全存储（失败只记日志，调用处如实展示）。

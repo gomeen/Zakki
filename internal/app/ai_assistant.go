@@ -87,6 +87,16 @@ func (a *app) toggleAIBar() {
 	a.openAIBar()
 }
 
+// focusAIBarInput 聚焦助理输入框（⌘J）：面板未开则先打开并聚焦。
+func (a *app) focusAIBarInput() {
+	if !a.ai.bar.open {
+		a.openAIBar()
+		return
+	}
+	a.ai.bar.focus = 1
+	a.invalidateMain()
+}
+
 // resetAIBar 切标签时丢弃待审建议与在途请求：建议只对发起时的标签有效。
 func (a *app) resetAIBar() {
 	if a.ai.bar.open || a.ai.bar.cancel != nil {
