@@ -492,6 +492,67 @@ func monoFontStack(key string) string {
 
 // ---- 解析后的最终样式 ----
 
+// aiColors 是建议卡与 diff 块的语义色（随颜色主题与明暗解析，派生 +
+// 逐主题覆盖两层；见 aiColorsFor）。消费方是助理条建议卡（view_ai_bar.go）。
+type aiColors struct {
+	cardBg, cardBorder ui.Color // 建议卡面与描边
+	delBg, delInk      ui.Color // 删除块底/字（红系）
+	addBg, addInk      ui.Color // 新增块底/字（绿系）
+}
+
+// aiSeeds 是一套红/绿墨色锚点（浅/深各一份）。
+type aiSeeds struct{ delL, addL, delD, addD ui.Color }
+
+// aiSeedDefault 默认锚点：浅色用深墨红绿，深色用亮彩红绿。
+var aiSeedDefault = aiSeeds{
+	delL: ui.Hex("#9c3424"), addL: ui.Hex("#175c37"),
+	delD: ui.Hex("#eb9a8a"), addD: ui.Hex("#8fd0a8"),
+}
+
+// aiSeedOverrides 随主题调色的锚点：手账用朱红批注与马克笔绿，claude/qoder
+// 各随主题基调；未列出的主题用默认锚点。
+var aiSeedOverrides = map[string]aiSeeds{
+	"sketch": {delL: ui.Hex("#a33a1e"), addL: ui.Hex("#3f6b2e"), delD: ui.Hex("#f2a66e"), addD: ui.Hex("#a8d8b0")},
+	"claude": {delL: ui.Hex("#9c3a1e"), addL: ui.Hex("#3d6b4f"), delD: ui.Hex("#e8a188"), addD: ui.Hex("#9ecdb0")},
+	"qoder":  {delL: ui.Hex("#8a3a2a"), addL: ui.Hex("#2c5a3f"), delD: ui.Hex("#e3a08e"), addD: ui.Hex("#8ee5a1")},
+}
+
+// aiInkOn 让 seed 在 bg 上达到至少 4.6:1：不足时向该主题正文色逐步收敛
+// （正文色已保证可读；红绿墨色与黑/白同向加深或提亮，收敛方向单调）。
+func aiInkOn(seed, bg, text ui.Color) ui.Color {
+	ink := seed
+	for i := 0; i < 12 && contrastRatio(ink, bg) < 4.6; i++ {
+		ink = ink.Mix(text, 0.18)
+	}
+	return ink
+}
+
+// aiColorsFor 解析一套调色板下的建议卡配色：红绿墨色自适应对比度，
+// diff 底色 = 背景 + 少量墨色；卡片面复用控件表面，描边取强调与边界的混合。
+// 经典主题（随点配色/中性灰变体）传 "classic"，走默认锚点但同样自适应。
+func aiColorsFor(themeID string, pal colorPalette, dark bool) aiColors {
+	seed := aiSeedDefault
+	if s, ok := aiSeedOverrides[themeID]; ok {
+		seed = s
+	}
+	delSeed, addSeed := seed.delL, seed.addL
+	if dark {
+		delSeed, addSeed = seed.delD, seed.addD
+	}
+	delInk := aiInkOn(delSeed, pal.background, pal.text)
+	addInk := aiInkOn(addSeed, pal.background, pal.text)
+	delBg := pal.background.Mix(delInk, 0.10)
+	addBg := pal.background.Mix(addInk, 0.12)
+	// 底色掺了墨色后对比略降，再校一轮。
+	delInk = aiInkOn(delInk, delBg, pal.text)
+	addInk = aiInkOn(addInk, addBg, pal.text)
+	return aiColors{
+		cardBg: pal.surface, cardBorder: pal.accent.Mix(pal.border, 0.45),
+		delBg: delBg, delInk: delInk,
+		addBg: addBg, addInk: addInk,
+	}
+}
+
 // resolvedStyle 是主窗口/设置窗口实际使用的样式：颜色 + 排版已合并。
 type resolvedStyle struct {
 	// 颜色
@@ -501,6 +562,8 @@ type resolvedStyle struct {
 	accent, selection           ui.Color
 	codeBackground, quoteBorder ui.Color
 	rule                        ui.Color
+	// AI 建议卡配色（派生 + 主题覆盖，见 aiColorsFor）。
+	ai aiColors
 	// 排版
 	bodyFont, monoFont      string
 	headingFont             string // 标题字体：默认同正文，手写搭配为手札体
@@ -591,6 +654,7 @@ func (a *app) computeStyle(dot int, dark bool, override bool) resolvedStyle {
 		surface: pal.surface, border: pal.border, text: pal.text, textMuted: pal.textMuted,
 		accent: pal.accent, selection: pal.selection,
 		codeBackground: pal.codeBackground, quoteBorder: pal.quoteBorder, rule: pal.rule,
+		ai: aiColorsFor(a.prefs.Appearance.EffectiveColorTheme(), pal, dark),
 
 		// 字体与排版主题解耦：始终用用户选择的字体键（空 = 默认栈）。
 		bodyFont:    bodyFontStack(a.usableFontKey(a.prefs.Appearance.BodyFont), a.usableFontKey(a.prefs.Appearance.LatinFont)),
