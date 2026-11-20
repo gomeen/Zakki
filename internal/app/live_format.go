@@ -59,7 +59,7 @@ func (a *app) execFormatCommand(id string) {
 	case cmdTable:
 		a.execInsert(defaultTableBlock())
 	case cmdAssistant:
-		a.openAIBar()
+		a.toggleAIBar()
 	default:
 		slog.Warn("未知格式命令", "id", id)
 	}

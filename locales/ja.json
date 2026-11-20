@@ -617,7 +617,6 @@
   "cmdAssistant": "AI アシスタント",
   "menuAssistant": "AI アシスタント…",
   "aiBarTitle": "AI アシスタント",
-  "aiBarClose": "AI アシスタントを閉じる",
   "aiBarPlaceholder": "アシスタントに頼む…例：明日の15時に会議をリマインド",
   "aiBarFollowUp": "調整する…例：30分前にして",
   "aiBarSend": "送信",

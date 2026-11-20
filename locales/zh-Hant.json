@@ -617,7 +617,6 @@
   "cmdAssistant": "AI 助理",
   "menuAssistant": "AI 助理…",
   "aiBarTitle": "AI 助理",
-  "aiBarClose": "關閉 AI 助理",
   "aiBarPlaceholder": "讓助理做點什麼…例如：明天下午3點提醒我開會",
   "aiBarFollowUp": "再調整，例如：提前到 30 分鐘",
   "aiBarSend": "傳送",

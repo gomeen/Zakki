@@ -641,7 +641,6 @@
   "cmdAssistant": "AI 助理",
   "menuAssistant": "AI 助理…",
   "aiBarTitle": "AI 助理",
-  "aiBarClose": "关闭 AI 助理",
   "aiBarPlaceholder": "让助理做点什么…例如：明天下午3点提醒我开会",
   "aiBarFollowUp": "再改一下，例如：提前到 30 分钟",
   "aiBarSend": "发送",

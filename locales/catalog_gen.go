@@ -6385,16 +6385,6 @@ func (msgs Messages) AiBarTitle() string {
 	return Catalog.Format(msgs.locale, "aiBarTitle", nil)
 }
 
-// AiBarClose says "Close assistant"
-// in the language the app shows.
-func AiBarClose() string { return In(i18n.Locale()).AiBarClose() }
-
-// AiBarClose says "Close assistant"
-// in the language of msgs.
-func (msgs Messages) AiBarClose() string {
-	return Catalog.Format(msgs.locale, "aiBarClose", nil)
-}
-
 // AiBarPlaceholder says "Ask the assistant… e.g. add a reminder for tomorrow 3pm"
 // in the language the app shows.
 func AiBarPlaceholder() string { return In(i18n.Locale()).AiBarPlaceholder() }

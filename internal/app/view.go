@@ -74,11 +74,9 @@ func (a *app) view(c *ui.Context) {
 			a.livePane(c, &contentTheme, dark)
 		}
 		c.SetTheme(&t)
-		if a.ai.bar.open {
-			a.aiBar(c, &t, dark)
-		}
 		a.statusBar(c, &t, dark)
 	})
+	a.aiBarOverlay(c, &t, dark)
 	a.toastViewport(c)
 	a.syncEditorMenu(c)
 	if command := a.editMenuPending; command != "" {
@@ -514,13 +512,13 @@ func (a *app) statusBar(c *ui.Context, t *ui.Theme, dark bool) {
 		ui.Box(c).Grow(1)
 
 		ui.Row(c).Shrink(0).AlignItems(ui.Center).Children(func() {
-			// AI 助理入口（✦）：打开底部助理条；打开时用强调色。
+			// AI 助理入口（✦）：切换底部浮动助理面板；打开时用强调色。
 			sparkInk := fg
 			if a.ai.bar.open {
 				sparkInk = style.accent
 			}
 			if chromeIcon(c, "sb-ai", iconSparkles, locales.AiBarTitle(), sparkInk).Clicked() {
-				a.openAIBar()
+				a.toggleAIBar()
 			}
 			// 源码模式开关（Lucide eye）：默认实时预览，打开后全文源码 + 语法高亮。
 			sourceLabel := locales.StatusSource()

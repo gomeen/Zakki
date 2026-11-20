@@ -742,7 +742,6 @@
   "cmdAssistant": "AI Assistant",
   "menuAssistant": "AI Assistant…",
   "aiBarTitle": "AI assistant",
-  "aiBarClose": "Close assistant",
   "aiBarPlaceholder": "Ask the assistant… e.g. add a reminder for tomorrow 3pm",
   "aiBarFollowUp": "Adjust, e.g. remind me 30 minutes early",
   "aiBarSend": "Send",

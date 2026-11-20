@@ -15,25 +15,43 @@ import (
 	"zakki/locales"
 )
 
-// aiBar 渲染助理条（打开时位于正文与状态栏之间）。
-func (a *app) aiBar(c *ui.Context, t *ui.Theme, dark bool) {
+// aiBarOverlay 底部居中的浮动助理面板：悬浮在正文上方、状态栏之上，
+// 不占正文布局。宽度上限 520，卡堆栈超高时内部滚动。显隐由底栏 ✦ /
+// ⌘⇧A / 菜单切换，Esc 也可关闭。
+func (a *app) aiBarOverlay(c *ui.Context, t *ui.Theme, dark bool) {
+	if !a.ai.bar.open {
+		return
+	}
 	style := a.resolveStyle(a.active, dark, true)
-	ui.Column(c).FillWidth().Background(a.chromeColor(style.status, dark, c.Vibrancy())).
-		Padding(8, headerPadX, 8, headerPadX).Gap(8).
-		BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
-		if a.ai.bar.phase == aiBarReview {
-			a.aiCards(c, t, style)
-		}
-		if a.ai.bar.phase == aiBarThinking {
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Icon(c, iconSparkles).Size(14, 14).TextColor(style.accent)
-				ui.Text(c, locales.AiBarThinking()).FontSize(12).TextColor(t.TextMuted)
-			})
-		}
-		if a.ai.bar.phase == aiBarInput && a.ai.bar.errText != "" {
-			a.aiErrorRow(c, t)
-		}
-		a.aiInputRow(c, t, style)
+	w, h := c.Size()
+	panelW := min(float32(520), w-32)
+	// 卡堆栈高度上限：留出顶栏、状态栏、输入行与呼吸空间。
+	maxCards := min(max(h-240, float32(120)), float32(400))
+	ui.Overlay(c, func() {
+		panel := ui.Column(c.Key("ai-bar")).Width(panelW).Gap(7).Padding(10, 12).
+			Radius(14).Background(a.chromeColor(style.surface, dark, c.Vibrancy())).
+			Border(1, t.Border)
+		panel.Absolute().Left((w - panelW) / 2).Bottom(statusBarHeight + 10)
+		panel.Shadow(0, 10, 28, 0, ui.RGBA(0, 0, 0, 0.20))
+		panel.Children(func() {
+			if a.ai.bar.phase == aiBarReview {
+				ui.Scroll(c.Key("ai-cards-scroll")).FillWidth().MaxHeight(maxCards).Children(func() {
+					ui.Column(c).FillWidth().Gap(8).Children(func() {
+						a.aiCards(c, t, style)
+					})
+				})
+			}
+			if a.ai.bar.phase == aiBarThinking {
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+					ui.Icon(c, iconSparkles).Size(14, 14).TextColor(style.accent)
+					ui.Text(c, locales.AiBarThinking()).FontSize(12).TextColor(t.TextMuted)
+				})
+			}
+			if a.ai.bar.phase == aiBarInput && a.ai.bar.errText != "" {
+				a.aiErrorRow(c, t)
+			}
+			a.aiInputRow(c, t, style)
+		})
 	})
 }
 
@@ -53,7 +71,7 @@ func (a *app) aiErrorRow(c *ui.Context, t *ui.Theme) {
 	})
 }
 
-// aiInputRow 输入行：圆角输入框（含 ✦ 图标）+ 发送 + 关闭；追问态换占位文案。
+// aiInputRow 输入行：圆角输入框（含 ✦ 图标）+ 唯一的发送按钮；追问态换占位文案。
 func (a *app) aiInputRow(c *ui.Context, t *ui.Theme, style resolvedStyle) {
 	placeholder := locales.AiBarPlaceholder()
 	if a.ai.bar.phase == aiBarReview {
@@ -80,9 +98,6 @@ func (a *app) aiInputRow(c *ui.Context, t *ui.Theme, style resolvedStyle) {
 		})
 		if ui.Button(c.Key("ai-send"), locales.AiBarSend()).Disabled(!canSend).Clicked() {
 			a.aiSend(a.ai.bar.input)
-		}
-		if chromeIcon(c, "ai-close", iconX, locales.AiBarClose(), t.TextMuted).Clicked() {
-			a.closeAIBar()
 		}
 	})
 }
@@ -137,8 +152,8 @@ func (a *app) aiCards(c *ui.Context, t *ui.Theme, style resolvedStyle) {
 // aiCard 单张建议卡。
 func (a *app) aiCard(c *ui.Context, t *ui.Theme, style resolvedStyle, i int) {
 	p := a.ai.bar.proposals[i]
-	card := ui.Column(c.Key("ai-card-"+strconv.Itoa(i))).FillWidth().Gap(7).Padding(11, 12).
-		Radius(12).Background(style.ai.cardBg).Border(1, style.ai.cardBorder)
+	card := ui.Column(c.Key("ai-card-"+strconv.Itoa(i))).FillWidth().Gap(6).Padding(10, 11).
+		Radius(10).Background(style.ai.cardBg).Border(1, style.ai.cardBorder)
 	if style.sketch {
 		card.BorderWidth(0)
 		card.Draw(func(painter *ui.Painter, r ui.Rect) {
@@ -224,7 +239,7 @@ func isTaskLine(line string) bool {
 // aiDiffBlock 单行 diff 块：新增态绿底、删除态红底加删除线；待办行加方框，
 // 行尾时间令牌以墨色小胶囊呈现。
 func aiDiffBlock(c *ui.Context, style resolvedStyle, add bool, line string, task bool) {
-	ui.Box(c).FillWidth().Radius(6).Padding(4, 9).Background(func() ui.Color {
+	ui.Box(c).FillWidth().Radius(6).Padding(3, 8).Background(func() ui.Color {
 		if add {
 			return style.ai.addBg
 		}

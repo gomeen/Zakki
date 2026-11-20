@@ -78,6 +78,15 @@ func (a *app) closeAIBar() {
 	a.invalidateMain()
 }
 
+// toggleAIBar 切换助理条显隐（底栏 ✦、⌘⇧A 与菜单共用）。
+func (a *app) toggleAIBar() {
+	if a.ai.bar.open {
+		a.closeAIBar()
+		return
+	}
+	a.openAIBar()
+}
+
 // resetAIBar 切标签时丢弃待审建议与在途请求：建议只对发起时的标签有效。
 func (a *app) resetAIBar() {
 	if a.ai.bar.open || a.ai.bar.cancel != nil {

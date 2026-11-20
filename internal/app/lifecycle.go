@@ -354,7 +354,7 @@ func (a *app) createMenu() *mygo.Menu {
 		Label:       locales.MenuAssistant(),
 		Accelerator: "Shift+CmdOrCtrl+A",
 		Click: func(*mygo.MenuItem, *mygo.Window) {
-			a.withWindow(func() { a.openAIBar() })
+			a.withWindow(func() { a.toggleAIBar() })
 		},
 	}
 
