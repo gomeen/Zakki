@@ -11,3 +11,8 @@ import "errors"
 func SystemKeyring(dataDir string) (Keyring, error) {
 	return nil, errors.New("当前平台暂无同步凭据安全存储实现，云同步不可用")
 }
+
+// NewServiceKeyring 在无实现的平台同样返回明确错误（含 AI 密钥）。
+func NewServiceKeyring(service, account, dataDir string) (Keyring, error) {
+	return nil, errors.New("当前平台暂无凭据安全存储实现")
+}

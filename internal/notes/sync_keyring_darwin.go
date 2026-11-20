@@ -20,10 +20,15 @@ type keychainKeyring struct {
 
 // SystemKeyring 返回 macOS 钥匙串实现；dataDir 未使用（接口统一）。
 func SystemKeyring(dataDir string) (Keyring, error) {
+	return NewServiceKeyring(KeyringService, KeyringAccount, dataDir)
+}
+
+// NewServiceKeyring 返回指定 service/account 的钥匙串实现。
+func NewServiceKeyring(service, account, dataDir string) (Keyring, error) {
 	if _, err := exec.LookPath("security"); err != nil {
 		return nil, errors.New("未找到 security 命令，无法访问钥匙串")
 	}
-	return keychainKeyring{service: KeyringService, account: KeyringAccount}, nil
+	return keychainKeyring{service: service, account: account}, nil
 }
 
 func (k keychainKeyring) run(args ...string) (string, error) {

@@ -10,7 +10,7 @@ import (
 )
 
 func TestFontPreferencesVersion7RoundTrip(t *testing.T) {
-	if CurrentVersion != 15 {
+	if CurrentVersion != 16 {
 		t.Fatalf("CurrentVersion = %d, want 15", CurrentVersion)
 	}
 	want := Default()

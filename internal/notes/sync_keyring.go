@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -28,6 +29,66 @@ const (
 	KeyringService = "Zakki Sync"
 	KeyringAccount = "github"
 )
+
+// AIKeyringService / AIKeyringAccount 是 AI 助理 API 密钥在系统存储中的
+// 标识；与同步凭据互不影响。
+const (
+	AIKeyringService = "Zakki AI"
+	AIKeyringAccount = "apikey"
+)
+
+// SystemAIKeyring 返回 AI 密钥的系统安全存储实现。
+func SystemAIKeyring(dataDir string) (Keyring, error) {
+	return NewServiceKeyring(AIKeyringService, AIKeyringAccount, dataDir)
+}
+
+// aiKeyEnvelope 是 AI 密钥在安全存储中的载荷；Version 便于将来轮换格式。
+type aiKeyEnvelope struct {
+	Version int    `json:"version"`
+	APIKey  string `json:"apiKey"`
+}
+
+// SaveAIKey 把 API 密钥写入系统安全存储；空密钥拒绝保存。
+func SaveAIKey(k Keyring, key string) error {
+	if k == nil {
+		return errors.New("安全存储不可用")
+	}
+	if strings.TrimSpace(key) == "" {
+		return errors.New("API 密钥为空，拒绝保存")
+	}
+	raw, err := json.Marshal(aiKeyEnvelope{Version: 1, APIKey: key})
+	if err != nil {
+		return err
+	}
+	return k.Store(raw)
+}
+
+// LoadAIKey 从系统安全存储读取 API 密钥。
+func LoadAIKey(k Keyring) (string, error) {
+	if k == nil {
+		return "", errors.New("安全存储不可用")
+	}
+	raw, err := k.Load()
+	if err != nil {
+		return "", err
+	}
+	var env aiKeyEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return "", fmt.Errorf("安全存储中的 AI 密钥无法解析：%w", err)
+	}
+	if env.APIKey == "" {
+		return "", ErrKeyringEmpty
+	}
+	return env.APIKey, nil
+}
+
+// ClearAIKey 从系统安全存储删除 AI 密钥。
+func ClearAIKey(k Keyring) error {
+	if k == nil {
+		return errors.New("安全存储不可用")
+	}
+	return k.Delete()
+}
 
 // tokenEnvelope 是安全存储中的载荷；Version 便于将来轮换格式。
 type tokenEnvelope struct {

@@ -23,10 +23,24 @@ type dpapiKeyring struct {
 
 // SystemKeyring 返回 Windows DPAPI 实现；密文存 dataDir/sync-token.bin。
 func SystemKeyring(dataDir string) (Keyring, error) {
+	return NewServiceKeyring(KeyringService, KeyringAccount, dataDir)
+}
+
+// keyringFileName 每个安全存储服务一个独立文件；同步凭据沿用历史文件名。
+func keyringFileName(service string) string {
+	if service == AIKeyringService {
+		return "ai-key.bin"
+	}
+	return "sync-token.bin"
+}
+
+// NewServiceKeyring 返回指定 service/account 的 DPAPI 实现；密文按服务
+// 分文件存于 dataDir。
+func NewServiceKeyring(service, account, dataDir string) (Keyring, error) {
 	if dataDir == "" {
 		return nil, errors.New("缺少数据目录，无法初始化安全存储")
 	}
-	return dpapiKeyring{file: filepath.Join(dataDir, "sync-token.bin")}, nil
+	return dpapiKeyring{file: filepath.Join(dataDir, keyringFileName(service))}, nil
 }
 
 func (k dpapiKeyring) script(op string) (string, error) {

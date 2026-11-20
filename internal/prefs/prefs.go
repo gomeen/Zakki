@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"path/filepath"
 	"strings"
 
@@ -45,7 +46,11 @@ import (
 // Dock 启动的 app 拿不到 shell 环境变量，只靠 ZAKKI_GITHUB_CLIENT_ID 时
 // 「连接 GitHub」永远无法开始。旧文件缺键解码即空串，此时回落到环境变量，
 // 行为与升级前一致，无需迁移。
-const CurrentVersion = 15
+// 版本 16 新增 ai 节（AI 助理）：开关、提供方、Base URL 与模型名，全部为
+// 非凭据配置；API 密钥一律进系统安全存储（service "Zakki AI"），绝不写入
+// 偏好文件。旧文件缺键解码即零值（关闭），无需迁移逻辑；提供方枚举与
+// internal/ai 的 Providers 以 ID 互为契约。
+const CurrentVersion = 16
 
 // 整体风格：手账风格下颜色与排版由风格决定，colorTheme / markdownTheme 保留不动。
 const (
@@ -64,6 +69,7 @@ type Preferences struct {
 	Storage    Storage    `json:"storage"`
 	Git        Git        `json:"git"`
 	Sync       Sync       `json:"sync"`
+	AI         AI         `json:"ai"`
 	Keymap     Keymap     `json:"keymap"`
 	Advanced   Advanced   `json:"advanced"`
 }
@@ -137,6 +143,22 @@ type Sync struct {
 
 type Keymap struct {
 	Overrides map[string]string `json:"overrides"`
+}
+
+// AI 是 AI 助理偏好，只记录开关与提供方指向等非凭据配置；API 密钥
+// 一律进系统安全存储，绝不写入本节或任何偏好文件（同 sync 的 R7 语义）。
+// Provider 的枚举与 internal/ai 的 Providers 表以 ID 互为契约。
+type AI struct {
+	// Enabled 开启 AI 助理；开启时要求 BaseURL 与 Model 合法（见 Validate）。
+	Enabled bool `json:"enabled"`
+	// Provider 是提供方预设 ID：openai / deepseek / openrouter / ollama /
+	// custom；空串 = 未选择（未开启时的默认态）。
+	Provider string `json:"provider"`
+	// BaseURL 是 OpenAI 兼容接口地址（含版本路径，如 https://api.openai.com/v1）。
+	// 预设提供方也显式落盘，便于端点变化时用户可见。
+	BaseURL string `json:"baseUrl"`
+	// Model 是模型名，手填；不做 /v1/models 拉取。
+	Model string `json:"model"`
 }
 
 type Advanced struct {
@@ -265,6 +287,9 @@ func (p Preferences) Validate(v AccelValidator) error {
 	if err := validateSyncClientID(p.Sync.ClientID); err != nil {
 		return err
 	}
+	if err := validateAI(p.AI); err != nil {
+		return err
+	}
 	if v != nil {
 		for id, acc := range p.Keymap.Overrides {
 			if acc == "" {
@@ -273,6 +298,42 @@ func (p Preferences) Validate(v AccelValidator) error {
 			if err := v(acc); err != nil {
 				return fmt.Errorf("keymap.overrides[%s] 的快捷键 %q 无效: %w", id, acc, err)
 			}
+		}
+	}
+	return nil
+}
+
+// validateAI 校验 AI 助理节：提供方枚举、URL 形状与开启时的完备性。
+// http 只允许指向本机回环（本地 Ollama 等服务）；https 任意主机。
+func validateAI(v AI) error {
+	switch v.Provider {
+	case "", "openai", "deepseek", "openrouter", "ollama", "custom":
+	default:
+		return fmt.Errorf("ai.provider 的值 %q 无效，可选值：%q", v.Provider,
+			[]string{"", "openai", "deepseek", "openrouter", "ollama", "custom"})
+	}
+	if v.BaseURL == "" && v.Model == "" && !v.Enabled {
+		return nil
+	}
+	if strings.TrimSpace(v.BaseURL) != v.BaseURL || strings.TrimSpace(v.Model) != v.Model {
+		return errors.New("ai.baseUrl 与 ai.model 不能带首尾空白")
+	}
+	if v.BaseURL != "" {
+		u, err := url.Parse(v.BaseURL)
+		if err != nil || u.Host == "" {
+			return errors.New("ai.baseUrl 必须是合法的接口地址（含版本路径，如 https://api.openai.com/v1）")
+		}
+		loopback := u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"
+		if u.Scheme != "https" && !(u.Scheme == "http" && loopback) {
+			return errors.New("ai.baseUrl 必须是 https，或指向本机的 http 地址（本地模型服务）")
+		}
+	}
+	if v.Enabled {
+		if v.BaseURL == "" {
+			return errors.New("ai.enabled 开启时必须填写 ai.baseUrl")
+		}
+		if v.Model == "" {
+			return errors.New("ai.enabled 开启时必须填写 ai.model")
 		}
 	}
 	return nil
