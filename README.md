@@ -5,6 +5,8 @@ Typora 式所见即所得编辑，纯 [MyGo](https://github.com/egoist/mygo) 原
 实现——无 HTML/JS/webview，单二进制，GPU 绘制，界面语言内置英文、日语、
 简体中文与繁体中文（默认跟随系统）。
 
+中文 | [日本語](README.ja.md) | [繁體中文](README.zh-Hant.md)
+
 ## 功能
 
 - **彩色标签速记**：默认 7 个标签（可 1–9 个，与 `⌘1`–`⌘9` 一一对应）。未命名时每枚一样大，当前只是颜色更深；
