@@ -8,8 +8,11 @@ import (
 	"zakki/locales"
 )
 
-// TestLocalesCatalogParity 英文与简体中文目录的键位必须一一对应：
-// 漏译会在英文界面下静默回退中文，该测试在提交前拦住。
+// 除源语言外还需与英文目录逐键对齐的目录语言。
+var translatedLocales = []string{"zh-Hans", "ja", "zh-Hant"}
+
+// TestLocalesCatalogParity 英文源目录与各译文目录的键位必须一一对应：
+// 漏译会在英文界面下静默回退译文，该测试在提交前拦住。
 func TestLocalesCatalogParity(t *testing.T) {
 	read := func(path string) map[string]any {
 		raw, err := os.ReadFile(path)
@@ -23,7 +26,6 @@ func TestLocalesCatalogParity(t *testing.T) {
 		return m
 	}
 	en := read("../../locales/en.json")
-	zh := read("../../locales/zh-Hans.json")
 	keys := func(m map[string]any) map[string]bool {
 		out := map[string]bool{}
 		for k := range m {
@@ -34,26 +36,33 @@ func TestLocalesCatalogParity(t *testing.T) {
 		}
 		return out
 	}
-	enKeys, zhKeys := keys(en), keys(zh)
+	enKeys := keys(en)
 	if len(enKeys) == 0 {
 		t.Fatal("英文目录为空")
 	}
-	for k := range enKeys {
-		if !zhKeys[k] {
-			t.Errorf("zh-Hans 缺少消息 %q", k)
-		}
+	if en["@@locale"] != "en" {
+		t.Errorf("@@locale 标注错误: %q", en["@@locale"])
 	}
-	for k := range zhKeys {
-		if !enKeys[k] {
-			t.Errorf("zh-Hans 多出消息 %q（英文目录没有）", k)
+	for _, locale := range translatedLocales {
+		m := read("../../locales/" + locale + ".json")
+		gotKeys := keys(m)
+		for k := range enKeys {
+			if !gotKeys[k] {
+				t.Errorf("%s 缺少消息 %q", locale, k)
+			}
 		}
-	}
-	if en["@@locale"] != "en" || zh["@@locale"] != "zh-Hans" {
-		t.Errorf("@@locale 标注错误: %q / %q", en["@@locale"], zh["@@locale"])
+		for k := range gotKeys {
+			if !enKeys[k] {
+				t.Errorf("%s 多出消息 %q（英文目录没有）", locale, k)
+			}
+		}
+		if m["@@locale"] != locale {
+			t.Errorf("@@locale 标注错误: 期望 %q，实际 %q", locale, m["@@locale"])
+		}
 	}
 }
 
-// TestLocalesEnglishDirect 直接取英文目录文案，验证 catalog 与生成器可用
+// TestLocalesEnglishDirect 直接取各目录文案，验证 catalog 与生成器可用
 // （不依赖进程语言）。
 func TestLocalesEnglishDirect(t *testing.T) {
 	en := locales.In("en")
@@ -66,5 +75,19 @@ func TestLocalesEnglishDirect(t *testing.T) {
 	zh := locales.In("zh-Hans")
 	if got := zh.TabMaxCannotAdd(12); got != "最多 12 个标签，无法新增" {
 		t.Fatalf("TabMaxCannotAdd(zh,12) = %q", got)
+	}
+	ja := locales.In("ja")
+	if got := ja.TabMaxCannotAdd(12); got != "タブは最大 12 個までです。これ以上追加できません" {
+		t.Fatalf("TabMaxCannotAdd(ja,12) = %q", got)
+	}
+	if got := ja.StatusBackedUpMinutes(5); got != "5 分前にバックアップ" {
+		t.Fatalf("StatusBackedUpMinutes(ja,5) = %q", got)
+	}
+	zht := locales.In("zh-Hant")
+	if got := zht.TabMaxCannotAdd(12); got != "最多 12 個分頁，無法新增" {
+		t.Fatalf("TabMaxCannotAdd(zh-Hant,12) = %q", got)
+	}
+	if got := zht.StatusBackedUpMinutes(5); got != "5 分鐘前備份" {
+		t.Fatalf("StatusBackedUpMinutes(zh-Hant,5) = %q", got)
 	}
 }

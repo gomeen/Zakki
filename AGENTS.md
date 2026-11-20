@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Zakki：基于 [MyGo](https://github.com/egoist/mygo) 原生 UI 的 macOS/Windows Markdown 便签应用，纯 Go 单二进制，界面语言英文 + 简体中文（MyGo i18n）。
+Zakki：基于 [MyGo](https://github.com/egoist/mygo) 原生 UI 的 macOS/Windows Markdown 便签应用，纯 Go 单二进制，界面语言英文 + 日语 + 简体中文 + 繁体中文（MyGo i18n）。
 
 ## 必读
 
@@ -15,7 +15,7 @@ Zakki：基于 [MyGo](https://github.com/egoist/mygo) 原生 UI 的 macOS/Window
 - 根目录：只有入口 `main.go`（调 `internal/app.Run()`）与工程化文件。
 - `internal/app`：MyGo UI 与应用装配（窗口、菜单、托盘、视图、实时预览、标签、设置），唯一允许依赖 MyGo 的 internal 包。
 - `internal/` 其余：纯逻辑与持久化（`markdown`、`codehl`、`notes`、`prefs`、`atomicfile`），禁止依赖 MyGo 与 `internal/app`。
-- `locales/`：i18n 目录（`en.json` 源 + `zh-Hans.json`），`go tool mygo generate` 生成 `catalog_gen.go`；中英键位一致性有测试。改用户可见文案一律经 `locales.*`，不得写死字面量。
+- `locales/`：i18n 目录（`en.json` 源 + `ja.json` / `zh-Hans.json` / `zh-Hant.json`），`go tool mygo generate` 生成 `catalog_gen.go`；各语言键位一致性有测试。改用户可见文案一律经 `locales.*`，不得写死字面量。
 - `vendor/` + `patches/`：MyGo 原生区间样式补丁；改依赖前读 [patches/README.md](patches/README.md)，用 `make vendor` 刷新，不能用 `-mod=mod` 绕过补丁。
 - `mobile/`：**已冻结**（2026-11-11，见 [docs/mobile-archive.md](docs/mobile-archive.md) 与 [ADR-0003](docs/adr/0003-pause-mobile-client.md)）：不修 iOS bug、不加功能、不跑真机验收；`core/` 不冻结，它仍被桌面消费，改动须过 core 契约测试。结构：`mobile/binding` 独立 Go module（绑定构建，`require zakki/core` 并 `replace => ../../core`，唯一允许依赖 golang.org/x/mobile 的模块）+ `mobile/ios` iOS 工程；不参与桌面 `make check` 的 Go 构建与测试。
 

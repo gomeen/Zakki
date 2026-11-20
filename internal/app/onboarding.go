@@ -67,9 +67,9 @@ func (a *app) initOnboarding() {
 	ap := a.prefs.Appearance
 	ap.BodyFont, ap.LatinFont = "pingfang", "jetbrains"
 	a.onboarding = onboardingState{step: 1, tabCount: DefaultTabCount, tabCountText: strconv.Itoa(DefaultTabCount), dirDraft: filepath.Dir(a.notes.DataPath()), appearance: ap}
-	if mygo.App.Locale() == "zh-Hans" {
-		a.onboarding.languageIndex = 1
-	}
+	// 向导语言分段不含「跟随系统」，按当前生效语言精确匹配初始段。
+	_, tags := languageSegments()
+	a.onboarding.languageIndex = languageSegmentIndex(tags, mygo.App.Locale())
 	switch ap.AppearanceMode {
 	case "light":
 		a.onboarding.modeIndex = 1

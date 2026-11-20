@@ -128,16 +128,26 @@ func obRow(c *ui.Context, label string, control func()) {
 	})
 }
 
+// obWideRow 与 obRow 相同，但控件占满剩余宽度：语言分段有四种语言，
+// 固定在 244pt 会把段内文字裁掉。
+func obWideRow(c *ui.Context, label string, control func()) {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(16).Children(func() {
+		ui.Text(c, label)
+		ui.Column(c).Grow(1).Children(control)
+	})
+}
+
 func (a *app) obAppearance(c *ui.Context) {
 	ob := &a.onboarding
 	ui.Text(c, locales.OnboardAppearanceTitle()).FontSize(23).Bold()
 	ui.Column(c).FillWidth().Gap(14).Padding(12, 0, 0, 0).Children(func() {
-		obRow(c, locales.LanguageRow(), func() {
-			filledSegmented(c.Key("ob-language"), &ob.languageIndex, "English", "简体中文").Label(locales.LanguageRow()).OnChange(func() {
-				tag := "en"
-				if ob.languageIndex == 1 {
-					tag = "zh-Hans"
+		obWideRow(c, locales.LanguageRow(), func() {
+			displays, tags := languageSegments()
+			filledSegmented(c.Key("ob-language"), &ob.languageIndex, displays...).Label(locales.LanguageRow()).OnChange(func() {
+				if ob.languageIndex < 0 || ob.languageIndex >= len(tags) {
+					return
 				}
+				tag := tags[ob.languageIndex]
 				ob.appearance.Language = tag
 				if err := a.updatePreferences(func(p *preferences) { p.Appearance.Language = tag }); err != nil {
 					ob.dirErr = locales.OnboardSaveErr(err.Error())

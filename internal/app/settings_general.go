@@ -33,12 +33,38 @@ func (a *app) generalPage(c *ui.Context) {
 }
 
 // languageOptions 语言选择项：跟随系统 + 各目录语言（以语言自称显示）。
+// 顺序固定为拉丁 → 日文 → 中文，设置下拉与向导分段共用。
 func languageOptions() []struct{ tag, display string } {
 	return []struct{ tag, display string }{
 		{"", locales.MenuFollowSystem()},
 		{"en", i18n.Autonym("en")},
+		{"ja", i18n.Autonym("ja")},
 		{"zh-Hans", i18n.Autonym("zh-Hans")},
+		{"zh-Hant", i18n.Autonym("zh-Hant")},
 	}
+}
+
+// languageSegments 首启向导的语言分段：只有具体语言，不含「跟随系统」。
+// 返回各段显示名与下标对应的语言 tag，两段切片等长且下标对齐。
+func languageSegments() (displays, tags []string) {
+	for _, o := range languageOptions() {
+		if o.tag == "" {
+			continue
+		}
+		displays = append(displays, o.display)
+		tags = append(tags, o.tag)
+	}
+	return displays, tags
+}
+
+// languageSegmentIndex 返回 tag 在分段里的下标；未知 tag 回落到第一段（en）。
+func languageSegmentIndex(tags []string, tag string) int {
+	for i, t := range tags {
+		if t == tag {
+			return i
+		}
+	}
+	return 0
 }
 
 func languageDisplay(tag string) string {

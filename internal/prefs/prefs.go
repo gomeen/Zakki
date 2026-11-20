@@ -75,7 +75,8 @@ type Appearance struct {
 	Style         string `json:"style"`
 	ColorTheme    string `json:"colorTheme"`
 	MarkdownTheme string `json:"markdownTheme"`
-	// Language 是界面语言；空串 = 跟随系统（MyGo 按用户系统语言挑目录语言）。
+	// Language 是界面语言；空串 = 跟随系统（MyGo 按用户系统语言挑目录语言），
+	// 否则为目录语言之一（en / ja / zh-Hans / zh-Hant）。
 	Language string `json:"language,omitempty"`
 	// CodeTheme 是代码块着色方案；空串 = 跟随文本（不上色）。不能加 omitempty：
 	// 空串必须落盘，否则「显式跟随文本」与「从未设置」在下次解码时无法区分。
@@ -185,7 +186,7 @@ func (p Preferences) Validate(v AccelValidator) error {
 		allowed     []string
 	}{
 		{"appearance.appearanceMode", p.Appearance.AppearanceMode, []string{"system", "light", "dark"}},
-		{"appearance.language", p.Appearance.Language, []string{"", "en", "zh-Hans"}},
+		{"appearance.language", p.Appearance.Language, []string{"", "en", "ja", "zh-Hans", "zh-Hant"}},
 		{"appearance.style", p.Appearance.Style, []string{StyleStandard, StyleSketch}},
 		{"appearance.colorTheme", p.Appearance.ColorTheme, []string{"classic", "paper", "warmSand", "mistTeal", "graphite", "claude", "qoder"}},
 		{"appearance.markdownTheme", p.Appearance.MarkdownTheme, []string{"sonnet", "note", "clear", "book", "compact"}},

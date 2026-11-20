@@ -253,7 +253,7 @@ func TestOnboardingViewRendersSteps(t *testing.T) {
 		step  int
 		wants []string
 	}{
-		{1, []string{"外观与字体", "English", "简体中文", "明暗", "风格", "中文字体", "英文字体"}},
+		{1, []string{"外观与字体", "English", "日本語", "简体中文", "繁體中文", "明暗", "风格", "中文字体", "英文字体"}},
 		{2, []string{"笔记与保存", "初始标签数量", "保存位置", folder, "完成设置"}},
 	}
 	for _, s := range steps {
@@ -292,7 +292,7 @@ func TestOnboardingViewRendersSteps(t *testing.T) {
 	a.onboarding.step = 1
 	tt = ui.NewTester(a.onboardingView, 640, 560)
 	tt.Frame()
-	for _, want := range []string{"English", "简体中文"} {
+	for _, want := range []string{"English", "日本語", "简体中文", "繁體中文"} {
 		if strings.Count(strings.Join(tt.Texts(), "\n"), want) < 1 {
 			t.Fatalf("语言 %s 缺少可见 Text 子元素: %v", want, tt.Texts())
 		}
@@ -518,13 +518,13 @@ func absInt(v int) int {
 func TestOnboardingSegmentedCellsEqual(t *testing.T) {
 	a := newTestApp(t)
 	a.onboarding.step = 1
-	a.onboarding.languageIndex = 1
+	a.onboarding.languageIndex = 2
 	a.onboarding.modeIndex = 0
 	a.onboarding.styleIndex = 0
 	tt := ui.NewTester(a.onboardingView, 640, 560)
 	tt.Frame()
 
-	assertSegmentCells(t, tt, []string{"English", "简体中文"}, 1)
+	assertSegmentCells(t, tt, []string{"English", "日本語", "简体中文", "繁體中文"}, 2)
 	assertSegmentCells(t, tt, []string{"跟随系统", "浅色", "深色"}, 0)
 	assertSegmentCells(t, tt, []string{"标准", "手账"}, 0)
 }
