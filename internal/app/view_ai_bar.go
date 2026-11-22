@@ -28,8 +28,16 @@ func (a *app) aiBarOverlay(c *ui.Context, t *ui.Theme, dark bool) {
 	// 卡堆栈高度上限：留出顶栏、状态栏、输入行与呼吸空间。
 	maxCards := min(max(h-240, float32(120)), float32(400))
 	ui.Overlay(c, func() {
-		panel := ui.Column(c.Key("ai-bar")).Width(panelW).Gap(7).Padding(10, 12).
-			Radius(14).Background(style.surface)
+		// 纯输入态输入行贴满面板（零内边距、圆角与面板同 14）；
+		// 出现建议卡/错误行/思考行时才用内边距分隔。
+		solo := a.ai.bar.phase == aiBarInput && a.ai.bar.errText == ""
+		panel := ui.Column(c.Key("ai-bar")).Width(panelW).Gap(7)
+		if solo {
+			panel.Radius(14)
+		} else {
+			panel.Gap(7).Padding(10, 12).Radius(14)
+		}
+		panel.Background(style.surface)
 		panel.Absolute().Left((w - panelW) / 2).Bottom(statusBarHeight + 10)
 		panel.Shadow(0, 10, 28, 0, ui.RGBA(0, 0, 0, 0.22))
 		panel.Children(func() {

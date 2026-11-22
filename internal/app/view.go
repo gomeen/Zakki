@@ -512,13 +512,16 @@ func (a *app) statusBar(c *ui.Context, t *ui.Theme, dark bool) {
 		ui.Box(c).Grow(1)
 
 		ui.Row(c).Shrink(0).AlignItems(ui.Center).Children(func() {
-			// AI 助理入口（✦）：切换底部浮动助理面板；打开时用强调色。
-			sparkInk := fg
-			if a.ai.bar.open {
-				sparkInk = style.accent
-			}
-			if chromeIcon(c, "sb-ai", iconSparkles, locales.AiBarTitle(), sparkInk).Clicked() {
-				a.toggleAIBar()
+			// AI 助理入口（✦）：仅在偏好启用 AI 时可见（总开关在设置页）；
+			// 切换底部浮动助理面板，打开时用强调色。
+			if a.prefs.AI.Enabled {
+				sparkInk := fg
+				if a.ai.bar.open {
+					sparkInk = style.accent
+				}
+				if chromeIcon(c, "sb-ai", iconSparkles, locales.AiBarTitle(), sparkInk).Clicked() {
+					a.toggleAIBar()
+				}
 			}
 			// 源码模式开关（Lucide eye）：默认实时预览，打开后全文源码 + 语法高亮。
 			sourceLabel := locales.StatusSource()

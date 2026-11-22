@@ -58,8 +58,12 @@ func (a *app) invalidateMain() {
 	}
 }
 
-// openAIBar 打开助理条并聚焦输入框；已打开时只聚焦。
+// openAIBar 打开助理条并聚焦输入框；已打开时只聚焦。仅在偏好已启用
+// AI 时生效（✦ 图标、菜单、快捷键共用此门）：未启用时助理功能整体不可见。
 func (a *app) openAIBar() {
+	if !a.prefs.AI.Enabled {
+		return
+	}
 	if a.ai.bar.open {
 		a.ai.bar.focus = 1
 		a.invalidateMain()
@@ -88,7 +92,11 @@ func (a *app) toggleAIBar() {
 }
 
 // focusAIBarInput 聚焦助理输入框（⌘J）：面板未开则先打开并聚焦。
+// 未启用 AI 时整体不响应（与 ✦ 图标同一道门）。
 func (a *app) focusAIBarInput() {
+	if !a.prefs.AI.Enabled {
+		return
+	}
 	if !a.ai.bar.open {
 		a.openAIBar()
 		return

@@ -14,6 +14,7 @@ import (
 
 	"zakki/internal/ai"
 	"zakki/internal/markdown"
+	"zakki/locales"
 )
 
 const aiTestDoc = `# 周会纪要
@@ -345,6 +346,31 @@ func TestAIDefaultOpenAndFocusShortcut(t *testing.T) {
 	_ = a.updatePreferences(func(p *preferences) { p.AI.Enabled = false })
 	if a.ai.bar.open {
 		t.Fatal("停用 AI 应收起助理条")
+	}
+}
+
+// TestAIEntryGatedByPref 入口语义：设置页开关 = 功能总开关；右下角 ✦
+// 图标只控制显示隐藏。未启用时图标不渲染、openAIBar/聚焦快捷键均无效。
+func TestAIEntryGatedByPref(t *testing.T) {
+	a := newTestApp(t)
+	t.Cleanup(a.shutdown)
+	tt := ui.NewTester(a.view, 600, 700)
+	tt.Frame()
+	if _, ok := tt.Access(locales.AiBarTitle()); ok {
+		t.Fatal("未启用 AI 时 ✦ 图标不应渲染")
+	}
+	a.openAIBar()
+	a.focusAIBarInput()
+	if a.ai.bar.open {
+		t.Fatal("未启用时不应能打开助理条")
+	}
+	_ = a.updatePreferences(func(p *preferences) { p.AI.Enabled = true })
+	if !a.ai.bar.open {
+		t.Fatal("启用后应默认显示助理条")
+	}
+	tt.Frame()
+	if _, ok := tt.Access(locales.AiBarTitle()); !ok {
+		t.Fatal("启用后 ✦ 图标应可见")
 	}
 }
 
