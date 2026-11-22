@@ -143,23 +143,42 @@ func TestHeaderClosePreservesNotes(t *testing.T) {
 }
 
 // TestStatusBarActions 底栏保留 AI 助理入口与源码开关；搜索入口走 ⌘F 与菜单。
+// ✦ 图标仅在启用 AI 时可见；未启用时点击源码开关等其余底栏功能不受影响。
 func TestStatusBarActions(t *testing.T) {
 	a := newTestApp(t)
 	t.Cleanup(a.shutdown)
 	a.tabs[0].Text = ""
-	tt := ui.NewTester(func(c *ui.Context) {
-		a.statusBar(c, c.Theme(), themeIsDark(c.Theme()))
-	}, 400, 36)
-	want := []string{"0 行 · 0 词 · 0 字符", "尚未保存", "AI 助理", "源码"}
-	if got := tt.Texts(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("底栏内容=%q，要 %q", got, want)
+	statusBar := func() *ui.Tester {
+		return ui.NewTester(func(c *ui.Context) {
+			a.statusBar(c, c.Theme(), themeIsDark(c.Theme()))
+		}, 400, 36)
 	}
-	// AI 入径打开助理条并聚焦输入框。
+	tt := statusBar()
+	want := []string{"0 行 · 0 词 · 0 字符", "尚未保存", "源码"}
+	if got := tt.Texts(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("未启用 AI 时底栏内容=%q，要 %q", got, want)
+	}
+	_ = a.updatePreferences(func(p *preferences) { p.AI.Enabled = true })
+	tt = statusBar()
+	want = []string{"0 行 · 0 词 · 0 字符", "尚未保存", "AI 助理", "源码"}
+	if got := tt.Texts(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("启用后底栏内容=%q，要 %q", got, want)
+	}
+	// 启用后默认显示（不抢焦点），✦ 再点一次收起，第三次重新打开并聚焦。
+	if !a.ai.bar.open || a.ai.bar.focus != 0 {
+		t.Fatalf("启用后应默认显示且不抢焦点: %+v", a.ai.bar)
+	}
+	if err := tt.Click("AI 助理"); err != nil {
+		t.Fatal(err)
+	}
+	if a.ai.bar.open {
+		t.Fatal("已打开时点 ✦ 应收起")
+	}
 	if err := tt.Click("AI 助理"); err != nil {
 		t.Fatal(err)
 	}
 	if !a.ai.bar.open || a.ai.bar.focus != 1 {
-		t.Fatalf("点击底栏 ✦ 应打开助理条: %+v", a.ai.bar)
+		t.Fatalf("收起后点 ✦ 应重新打开并聚焦: %+v", a.ai.bar)
 	}
 	if err := tt.Click("源码"); err != nil {
 		t.Fatal(err)
