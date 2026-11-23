@@ -101,8 +101,10 @@ func listGapAfter(blocks []liveBlock, i int, gap float32) float32 {
 		return 0
 	}
 	if isLiveSeparator(blocks, i+1) {
+		// 空行隔开的仍是列表/待办项：现为一个列表（视觉紧凑），
+		// 只有跨出列表才给两倍块间距。
 		if sameListItem(blocks[i], blocks[i+2]) {
-			return gap
+			return roundHalf(gap * 0.25)
 		}
 		return gap * 2
 	}

@@ -6,9 +6,9 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// 预览块间距：同一列表的相邻项收紧到小间距；空行隔开的列表延续组只给
-// 整块间距（不能比普通块边界宽，否则组尾项像被孤立项）；其余块边界维持
-// 完整块间距；聚焦中间项不得改变任何节距。
+// 预览块间距：列表/待办项之间一律紧凑（源码有无空行都视为同一列表，
+// 空行隔开的延续组与相邻项同距）；跨出列表的边界维持两倍/整块间距；
+// 聚焦中间项不得改变任何节距。
 func TestLiveBlockGapLayout(t *testing.T) {
 	a := newTestApp(t)
 	t.Cleanup(a.shutdown)
@@ -36,7 +36,7 @@ func TestLiveBlockGapLayout(t *testing.T) {
 			dist, want float32
 		}{
 			{"同列表相邻项", yi.Y - jia.Y, row + tight},
-			{"空行分隔的列表延续组", bing.Y - yi.Y, row + gap},
+			{"空行分隔的列表延续组", bing.Y - yi.Y, row + tight},
 			{"无空行的跨块边界", wei.Y - bing.Y, row + gap},
 		} {
 			if tc.dist != tc.want {
@@ -49,7 +49,7 @@ func TestLiveBlockGapLayout(t *testing.T) {
 	a.focusBlock(1, 3, 3)
 	tt.Frame()
 	jia2, bing2, wei2 := rect("甲"), rect("丙"), rect("尾段")
-	if d := bing2.Y - jia2.Y; d != row+tight+row+gap {
+	if d := bing2.Y - jia2.Y; d != row+tight+row+tight {
 		t.Errorf("聚焦中间项后 甲→丙 节距 = %v, want %v", d, row+tight+row+gap*2)
 	}
 	if d := wei2.Y - bing2.Y; d != row+gap {
