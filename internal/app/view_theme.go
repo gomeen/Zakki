@@ -495,9 +495,8 @@ func monoFontStack(key string) string {
 // aiColors 是建议卡与 diff 块的语义色（随颜色主题与明暗解析，派生 +
 // 逐主题覆盖两层；见 aiColorsFor）。消费方是助理条建议卡（view_ai_bar.go）。
 type aiColors struct {
-	cardBg, cardBorder ui.Color // 建议卡面与描边
-	delBg, delInk      ui.Color // 删除块底/字（红系）
-	addBg, addInk      ui.Color // 新增块底/字（绿系）
+	delBg, delInk ui.Color // 删除块底/字（红系）
+	addBg, addInk ui.Color // 新增块底/字（绿系）
 }
 
 // aiSeeds 是一套红/绿墨色锚点（浅/深各一份）。
@@ -529,7 +528,7 @@ func aiInkOn(seed, bg, text ui.Color) ui.Color {
 }
 
 // aiColorsFor 解析一套调色板下的建议卡配色：红绿墨色自适应对比度，
-// diff 底色 = 背景 + 少量墨色；卡片面复用控件表面，描边取强调与边界的混合。
+// diff 底色 = 背景 + 少量墨色；建议卡无边框，层次靠色点、色条与分隔线。
 // 经典主题（随点配色/中性灰变体）传 "classic"，走默认锚点但同样自适应。
 func aiColorsFor(themeID string, pal colorPalette, dark bool) aiColors {
 	seed := aiSeedDefault
@@ -543,15 +542,13 @@ func aiColorsFor(themeID string, pal colorPalette, dark bool) aiColors {
 	delInk := aiInkOn(delSeed, pal.background, pal.text)
 	addInk := aiInkOn(addSeed, pal.background, pal.text)
 	// diff 底色只掺 6-8% 墨色（柔和粉彩，两家模型审阅的一致结论：
-	// 原先 10-12% 饱和度偏高）；卡面描边改用边界色而非强调色混合，
-	// 让卡安静地浮在纸面上。
+	// 原先 10-12% 饱和度偏高）；卡片无边框，不与纸面争抢注意力。
 	delBg := pal.background.Mix(delInk, 0.06)
 	addBg := pal.background.Mix(addInk, 0.08)
 	// 底色掺了墨色后对比略降，再校一轮。
 	delInk = aiInkOn(delInk, delBg, pal.text)
 	addInk = aiInkOn(addInk, addBg, pal.text)
 	return aiColors{
-		cardBg: pal.surface, cardBorder: pal.border.Mix(pal.text, 0.2),
 		delBg: delBg, delInk: delInk,
 		addBg: addBg, addInk: addInk,
 	}

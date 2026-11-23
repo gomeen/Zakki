@@ -117,7 +117,8 @@ func TestAIDeliverProposalsAndRender(t *testing.T) {
 		t.Fatal("应记录追问上下文")
 	}
 	tt := ui.NewTester(a.view, 400, 640)
-	for _, want := range []string{"插入 · 添加提醒", "替换 · 整理成待办", "应用", "放弃", "编辑原文", "全部应用"} {
+	// 入口文案在操作区已改为「应用到笔记」，这里同步断言。
+	for _, want := range []string{"插入 · 添加提醒", "替换 · 整理成待办", "应用到笔记", "放弃", "编辑原文", "全部应用"} {
 		if !tt.HasText(want) {
 			t.Fatalf("建议卡缺少 %q: %v", want, tt.Texts())
 		}

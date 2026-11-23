@@ -22,9 +22,6 @@ func TestAIColorsContrast(t *testing.T) {
 		if r := contrastRatio(cols.addInk, pal.background); r < 4.5 {
 			t.Errorf("%s 新增墨色对主题背景 %.2f < 4.5", name, r)
 		}
-		if r := contrastRatio(cols.cardBorder, cols.cardBg); r < 1.2 {
-			t.Errorf("%s 卡片描边对卡面 %.2f < 1.2", name, r)
-		}
 	}
 	for _, def := range append([]colorThemeDef{{id: "classic", light: classicNeutralPalette(false), dark: classicNeutralPalette(true)}}, colorThemes...) {
 		for _, dark := range []bool{false, true} {

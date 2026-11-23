@@ -1,8 +1,9 @@
 package app
 
-// 助理条视图：底部输入行 + 建议卡堆栈。卡片用 resolvedStyle.ai 的语义色
-// 渲染 diff（删除块红底删除线、新增块绿底）；替换卡同时展示锚点原文。
-// 手账风格（style.sketch）用铅笔描边卡片（与代码卡同语言）。文案经 locales.*。
+// 助理条视图：底部输入行 + 建议卡堆栈。卡片无边框：头行是语义色圆点 +
+// 墨色徽标 + 灰色落点提示，diff 行用左侧 2px 语义色条 + 极淡底色
+//（删除块红墨删除线）；卡间与输入行之间用细分隔线（手账主题为铅笔
+// 波浪线）分组。文案经 locales.*。
 
 import (
 	"strconv"
@@ -56,6 +57,9 @@ func (a *app) aiBarOverlay(c *ui.Context, t *ui.Theme, dark bool) {
 			}
 			if a.ai.bar.phase == aiBarInput && a.ai.bar.errText != "" {
 				a.aiErrorRow(c, t)
+			}
+			if a.ai.bar.phase == aiBarReview {
+				ruleLine(c, style, 41)
 			}
 			a.aiInputRow(c, t, style)
 		})
@@ -144,67 +148,66 @@ func (a *app) aiCards(c *ui.Context, t *ui.Theme, style resolvedStyle) {
 				FontSize(12).TextColor(t.TextMuted)
 			break
 		}
+		if i > 0 {
+			ruleLine(c, style, uint32(i+17))
+		}
 		a.aiCard(c, t, style, i)
 	}
 }
 
-// aiCard 单张建议卡。
+// aiCard 单张建议卡：无边框的安静卡片——语义色圆点 + 墨色徽标标头、
+// 左色条淡底预览、墨底主按钮操作区；多卡之间由 aiCards 画分隔线。
 func (a *app) aiCard(c *ui.Context, t *ui.Theme, style resolvedStyle, i int) {
 	p := a.ai.bar.proposals[i]
-	card := ui.Column(c.Key("ai-card-"+strconv.Itoa(i))).FillWidth().Gap(6).Padding(10, 11).
-		Radius(10).Background(style.ai.cardBg).Border(1, style.ai.cardBorder)
-	if style.sketch {
-		card.BorderWidth(0)
-		card.Draw(func(painter *ui.Painter, r ui.Rect) {
-			sketchRect(painter, r, 1.3, style.ai.cardBorder.Mix(style.ai.cardBg, 0.15), uint32(i+1))
-		})
-	}
+	card := ui.Column(c.Key("ai-card-" + strconv.Itoa(i))).FillWidth().Gap(7)
 	card.Children(func() {
-		// 头行：徽标 + 位置说明；下方细分隔线拉开与内容的层次。
+		// 头行：绿色圆点（净新增）+ 墨色徽标 + 灰色落点提示；强调色
+		// 只留给数据与 ✦，不再染标题。
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
-			ui.Icon(c, iconSparkles).Size(13, 13).TextColor(style.accent).Shrink(0)
-			ui.Text(c, aiBadgeText(p)).FontSize(12).Bold().TextColor(style.accent).Grow(1).MinWidth(0)
+			ui.Box(c).Width(6).Height(6).Radius(3).Background(style.ai.addInk).Shrink(0)
+			ui.Text(c, aiBadgeText(p)).FontSize(12).Bold().TextColor(style.text).Grow(1).MinWidth(0)
 			ui.Text(c, aiWhereText(p)).FontSize(11).TextColor(t.TextMuted).Shrink(0)
 		})
-		ui.Box(c).FillWidth().Height(1).Background(style.border.Mix(style.surface, 0.35))
 		if a.ai.bar.editing == i {
-			a.aiCardEditor(c, t, i)
+			a.aiCardEditor(c, t, style, i)
 		} else {
 			aiCardPreview(c, t, style, p)
 			if n := aiAlertNote(p); n != "" {
 				ui.Text(c, n).FontSize(11).TextColor(t.TextMuted)
 			}
-			// 操作区：细分隔线隔开预览；实心强调色主按钮 + 幽灵次按钮，
-			// 层级一眼可辨（两家模型审阅的共同结论）。
-			ui.Box(c).FillWidth().Height(1).Background(style.border.Mix(style.surface, 0.35))
+			// 操作区：墨底主按钮写明去向（强调色不染按钮），「放弃」
+			// 退到右端低层，远离高频点击区。
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(6).Children(func() {
 				apply := ui.ButtonBase(c.Key("ai-apply")).Padding(5, 14).Radius(8).
-					Background(style.accent).Cursor(ui.CursorPointer).FocusRing(false)
-				apply.Children(func() { ui.Text(c, locales.AiBarApply()).FontSize(12).Bold().TextColor(ui.Hex("#fffaf3")) })
+					Background(style.text).Cursor(ui.CursorPointer).FocusRing(false)
+				apply.Children(func() { ui.Text(c, locales.AiBarApply()).FontSize(12).Bold().TextColor(style.background) })
 				if apply.Clicked() {
 					a.aiApplyIndex(i)
 				}
+				edit := ui.ButtonBase(c.Key("ai-edit")).Padding(5, 10).Radius(8).Cursor(ui.CursorPointer)
+				edit.Children(func() { ui.Text(c, locales.AiBarEdit()).FontSize(12).TextColor(t.TextMuted) })
+				edit.OnClick(func() { a.aiToggleEdit(i) })
+				ui.Box(c).Grow(1)
 				dismiss := ui.ButtonBase(c.Key("ai-dismiss")).Padding(5, 10).Radius(8).Cursor(ui.CursorPointer)
 				dismiss.Children(func() { ui.Text(c, locales.AiBarDismiss()).FontSize(13).TextColor(t.TextMuted) })
 				dismiss.OnClick(func() { a.aiDismiss(i) })
-				ui.Box(c).Grow(1)
-				edit := ui.ButtonBase(c.Key("ai-edit")).Padding(5, 10).Radius(8).Cursor(ui.CursorPointer)
-				edit.Children(func() { ui.Text(c, locales.AiBarEdit()).FontSize(12).TextColor(style.accent) })
-				edit.OnClick(func() { a.aiToggleEdit(i) })
 			})
 		}
 	})
 }
 
 // aiCardEditor 原文编辑态：多行 Markdown 输入（TextArea）+ 完成/取消。
-func (a *app) aiCardEditor(c *ui.Context, t *ui.Theme, i int) {
+func (a *app) aiCardEditor(c *ui.Context, t *ui.Theme, style resolvedStyle, i int) {
 	ta := ui.TextAreaBase(c.Key("ai-edit-draft"), &a.ai.bar.editDraft).
 		Label(locales.AiBarEdit()).FillWidth().MinHeight(52).MaxHeight(160).
 		FontSize(12).Padding(6, 8).Radius(8).
 		Background(t.Background).Border(1, t.Border)
 	_ = ta
 	ui.Row(c).Gap(6).Children(func() {
-		if ui.Button(c.Key("ai-edit-done"), locales.AiBarEditDone()).Clicked() {
+		done := ui.ButtonBase(c.Key("ai-edit-done")).Padding(5, 14).Radius(8).
+			Background(style.text).Cursor(ui.CursorPointer).FocusRing(false)
+		done.Children(func() { ui.Text(c, locales.AiBarEditDone()).FontSize(12).Bold().TextColor(style.background) })
+		if done.Clicked() {
 			a.aiCommitEdit()
 		}
 		cancel := ui.ButtonBase(c.Key("ai-edit-cancel")).Padding(5, 10).Radius(8).Cursor(ui.CursorPointer)
@@ -242,50 +245,60 @@ func isTaskLine(line string) bool {
 	return strings.HasPrefix(s, "- [ ]") || strings.HasPrefix(s, "- [x]")
 }
 
-// aiDiffBlock 单行 diff 块：新增态绿底、删除态红底加删除线；待办行加方框，
-// 行尾时间令牌以墨色小胶囊呈现。
+// aiDiffBlock 单行 diff：左侧 2px 语义色条 + 极淡底色，正文保持墨色
+// （删除行红墨删除线）；待办行加方框并加粗，行尾时间令牌为中性胶囊。
 func aiDiffBlock(c *ui.Context, style resolvedStyle, add bool, line string, task bool) {
-	ui.Box(c).FillWidth().Radius(6).Padding(3, 8).Background(func() ui.Color {
-		if add {
-			return style.ai.addBg
-		}
-		return style.ai.delBg
-	}()).Children(func() {
-		ink := style.ai.addInk
-		bg := style.ai.addBg
-		if !add {
-			ink, bg = style.ai.delInk, style.ai.delBg
-		}
+	ink, bg := style.ai.addInk, style.ai.addBg
+	if !add {
+		ink, bg = style.ai.delInk, style.ai.delBg
+	}
+	blk := ui.Box(c).FillWidth().Radius(6).Padding(3, 8).Background(bg)
+	blk.Draw(func(p *ui.Painter, r ui.Rect) {
+		p.Fill(ui.Rect{X: r.X, Y: r.Y, W: 2, H: r.H}, ink, 0)
+	})
+	blk.Children(func() {
 		ui.RichText(c).Children(func() {
 			text := line
 			if task {
-				ui.RichText(c, ui.Span{Text: "☐ ", Color: ink})
+				ui.RichText(c, ui.Span{Text: "☐ ", Color: ink, Size: 13})
 				s := strings.TrimLeft(line, " \t")
 				text = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(s, "- [ ]"), "- [x]"))
 			}
 			body, chip, has := aiSplitTimeToken(text)
-			ui.RichText(c, ui.Span{Text: body, Color: ink, Strikethrough: !add, DecorationColor: ink})
+			span := ui.Span{Text: body, Color: style.text}
+			if task {
+				span.Size, span.Weight = 13, 600
+			}
+			if !add {
+				span.Color, span.Strikethrough, span.DecorationColor = ink, true, ink
+			}
+			ui.RichText(c, span)
 			if has {
-				ui.RichText(c, ui.Span{Text: " ◷ " + chip, Color: ink, Background: bg.Mix(ink, 0.14), Radius: 6})
+				ui.RichText(c, ui.Span{Text: "  " + chip, Color: style.text, Size: 11,
+					Background: style.border.Mix(style.surface, 0.45), Radius: 5})
 			}
 		})
 	})
 }
 
-// aiNewTabPreview 新建标签建议预览：标签名 + 内容首几行。
+// aiNewTabPreview 新建标签建议预览：标签名 + 内容首几行（左色条淡底）。
 func aiNewTabPreview(c *ui.Context, style resolvedStyle, p ai.Proposal) {
-	ui.Box(c).FillWidth().Radius(6).Padding(5, 9).Background(style.ai.addBg).Children(func() {
-		ui.Text(c, "# "+p.NewTab.Name).FontSize(13).Bold().TextColor(style.ai.addInk)
+	blk := ui.Box(c).FillWidth().Radius(6).Padding(5, 9).Background(style.ai.addBg)
+	blk.Draw(func(p *ui.Painter, r ui.Rect) {
+		p.Fill(ui.Rect{X: r.X, Y: r.Y, W: 2, H: r.H}, style.ai.addInk, 0)
+	})
+	blk.Children(func() {
+		ui.Text(c, "# "+p.NewTab.Name).FontSize(13).Bold().TextColor(style.text)
 		n := 0
 		for _, line := range strings.Split(strings.TrimRight(p.NewTab.Content, "\n"), "\n") {
 			if strings.TrimSpace(line) == "" {
 				continue
 			}
 			if n++; n > 4 {
-				ui.Text(c, "…").FontSize(12).TextColor(style.ai.addInk)
+				ui.Text(c, "…").FontSize(12).TextColor(style.textMuted)
 				break
 			}
-			ui.Text(c, line).FontSize(12).TextColor(style.ai.addInk)
+			ui.Text(c, line).FontSize(12).TextColor(style.textMuted)
 		}
 	})
 }

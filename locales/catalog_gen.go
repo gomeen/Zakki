@@ -6445,11 +6445,11 @@ func (msgs Messages) AiBarOpenSettings() string {
 	return Catalog.Format(msgs.locale, "aiBarOpenSettings", nil)
 }
 
-// AiBarApply says "Apply"
+// AiBarApply says "Apply to note"
 // in the language the app shows.
 func AiBarApply() string { return In(i18n.Locale()).AiBarApply() }
 
-// AiBarApply says "Apply"
+// AiBarApply says "Apply to note"
 // in the language of msgs.
 func (msgs Messages) AiBarApply() string {
 	return Catalog.Format(msgs.locale, "aiBarApply", nil)
