@@ -59,10 +59,9 @@ func (a *app) aiBarOverlay(c *ui.Context, t *ui.Theme, dark bool) {
 				}
 			}
 			if a.ai.bar.phase == aiBarThinking {
-				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					ui.Icon(c, iconSparkles).Size(14, 14).TextColor(style.accent)
-					ui.Text(c, locales.AiBarThinking()).FontSize(12).TextColor(t.TextMuted)
-				})
+				// 思考态不加 ✦——下方输入行已有同款图标，重复；
+				// 只留灰字，与回答行的克制一致。
+				ui.Text(c, locales.AiBarThinking()).FontSize(12).TextColor(t.TextMuted)
 			}
 			if a.ai.bar.phase == aiBarInput && a.ai.bar.errText != "" {
 				a.aiErrorRow(c, t)
