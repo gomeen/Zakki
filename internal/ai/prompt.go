@@ -38,8 +38,14 @@ func ProviderByID(id string) (Provider, bool) {
 	return Provider{}, false
 }
 
-// maxNoteRunes 发送给模型的笔记上限；超出截中间（保留首尾）。
+// maxNoteRunes 发送给模型的当前标签上限；超出截中间（保留首尾）。
 const maxNoteRunes = 12000
+
+// 其他标签上下文的截断参数：单个上限 + 合计预算，问答够用且不撑爆请求。
+const (
+	maxOtherTabRunes = 3000
+	maxOthersRunes   = 18000
+)
 
 // systemPrompt 是不变的系统提示：Zakki 的 Markdown 子集、时间令牌语法
 // 与输出 JSON 契约。now 用于把「明天下午三点」这类相对时间锚定到具体日期。
@@ -55,13 +61,15 @@ func systemPrompt(now time.Time) string {
 	fmt.Fprintf(&b, "- Today is %s (%s). Resolve relative dates and times to exact tokens.\n", now.Format("2006-01-02 15:04"), now.Weekday())
 	b.WriteString("- Write summary and note content in the same language as the user's instruction.\n")
 	b.WriteString("- Propose the smallest set of edits that satisfies the instruction; at most 4 proposals.\n")
-	b.WriteString("- Add/change requests are action requests: always propose the closest useful edit, even if a similar line already exists (add a lead time, a new entry, or a duplicate). Answer {\"proposals\":[]} only when the instruction is clearly a pure question or chat.\n")
+	b.WriteString("- Add/change requests are action requests: always propose the closest useful edit, even if a similar line already exists (add a lead time, a new entry, or a duplicate). Leave proposals empty only when the instruction is clearly a pure question or chat.\n")
+	b.WriteString("- Edit proposals must target the CURRENT tab only; other tabs listed below are read-only context for answering questions, never anchor targets.\n")
 	b.WriteString("- For kind \"replace\", anchor MUST be copied VERBATIM from the note (an exact, unique substring); lines replace the anchor's whole lines. Empty lines means deleting them.\n")
 	b.WriteString("- For kind \"insert\", at is one of \"docEnd\" (end of note), \"listEnd\" (after the last list item), \"afterAnchor\" (right after the anchor's line; requires anchor).\n")
 	b.WriteString("- For kind \"newTab\", propose a new tab (name + full markdown content); never touch the current note in the same proposal.\n")
 	b.WriteString("- The note may be elided in the middle (…); never anchor on elided text.\n\n")
-	b.WriteString("Answer with exactly this JSON shape:\n")
-	b.WriteString(`{"proposals":[{"kind":"replace|insert|newTab","summary":"short verb phrase","anchor":"verbatim note text (replace/afterAnchor only)","at":"docEnd|listEnd|afterAnchor","lines":["- [ ] task"],"tab":"new tab name (newTab only)","content":"markdown (newTab only)"}]}`)
+	b.WriteString("Answer with exactly one JSON object:\n")
+	b.WriteString(`{"answer":"1-2 sentences in the user's language","proposals":[{"kind":"replace|insert|newTab","summary":"short verb phrase","anchor":"verbatim note text (replace/afterAnchor only)","at":"docEnd|listEnd|afterAnchor","lines":["- [ ] task"],"tab":"new tab name (newTab only)","content":"markdown (newTab only)"}]}` + "\n")
+	b.WriteString("- \"answer\" is REQUIRED, never empty: for an edit request, state in one sentence what you propose; for a question or chat, answer it directly from the notes (all tabs are provided).\n")
 	return b.String()
 }
 
@@ -76,6 +84,25 @@ func userPrompt(req AskRequest) string {
 	b.WriteString("Note (may be elided in the middle):\n")
 	b.WriteString(truncateMiddle(req.NoteMarkdown, maxNoteRunes))
 	b.WriteString("\n\n")
+	// 其他标签：只读上下文，供问答引用；逐个截断并控制总量。
+	if len(req.Others) > 0 {
+		b.WriteString("Other tabs (read-only context; edit proposals never target these):\n")
+		budget := maxOthersRunes
+		for _, tb := range req.Others {
+			if budget <= 0 {
+				break
+			}
+			nm := strings.TrimSpace(tb.Name)
+			if nm == "" {
+				nm = "(untitled)"
+			}
+			fmt.Fprintf(&b, "## Tab 「%s」\n", nm)
+			shown := truncateMiddle(tb.Markdown, min(maxOtherTabRunes, budget))
+			b.WriteString(shown)
+			b.WriteString("\n\n")
+			budget -= len([]rune(shown))
+		}
+	}
 	if req.FollowUp != nil {
 		fmt.Fprintf(&b, "Previous instruction: %s\n", req.FollowUp.Instruction)
 		b.WriteString("Your previous proposals (now superseded):\n")

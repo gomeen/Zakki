@@ -100,6 +100,73 @@ func TestAISendRequiresConfig(t *testing.T) {
 	}
 }
 
+// TestAIAnswerOnlyRoundTrip 纯问答：模型只回 answer、无建议 → 进 review 态
+// 不报错，回答渲染在卡片位；追问一问答后状态依然一致。
+func TestAIAnswerOnlyRoundTrip(t *testing.T) {
+	a := aiTestApp(t)
+	res := ai.AskResult{Answer: "笔记里有两条待办和一条会议提醒。"}
+	a.deliverForTest(1, "这篇笔记讲了什么", res, nil)
+	if a.ai.bar.phase != aiBarReview || len(a.ai.bar.proposals) != 0 || a.ai.bar.answer == "" {
+		t.Fatalf("纯问答应进 review 态且无卡片: %+v", a.ai.bar)
+	}
+	if a.ai.bar.errText != "" {
+		t.Fatalf("纯问答不应报错: %q", a.ai.bar.errText)
+	}
+	tt := ui.NewTester(a.view, 640, 620)
+	if !tt.HasText("笔记里有两条待办和一条会议提醒。") {
+		t.Fatalf("应渲染回答: %v", tt.Texts())
+	}
+	// 追问一问答：answer 被替换，依旧无卡片。
+	a.deliverForTest(2, "明天几点开会", ai.AskResult{Answer: "明天 15:00 开会。"}, nil)
+	if a.ai.bar.answer != "明天 15:00 开会。" || len(a.ai.bar.proposals) != 0 {
+		t.Fatalf("追问应替换回答: %+v", a.ai.bar)
+	}
+}
+
+// captureAsker 捕获 AskRequest 供断言；应答固定为纯回答。
+type captureAsker struct {
+	got chan ai.AskRequest
+}
+
+func (c *captureAsker) Ask(_ context.Context, req ai.AskRequest) (ai.AskResult, error) {
+	c.got <- req
+	return ai.AskResult{Answer: "好的。"}, nil
+}
+
+// TestAIContextScopeAllTabs 上下文范围开关：默认其他非空标签进上下文
+// （当前标签与空标签除外）；开启「仅发送当前标签」后 Others 为空。
+func TestAIContextScopeAllTabs(t *testing.T) {
+	a := aiTestApp(t)
+	a.tabs[1].Text = "灵感的想法"
+	a.tabs[2].Text = "   " // 空白标签应被跳过
+	cap := &captureAsker{got: make(chan ai.AskRequest, 1)}
+	a.ai.asker = cap
+	a.aiSend("这周有什么安排")
+	var req ai.AskRequest
+	select {
+	case req = <-cap.got:
+	case <-time.After(2 * time.Second):
+		t.Fatal("未发起请求")
+	}
+	if len(req.Others) != 1 || req.Others[0].Name != a.tabs[1].Name {
+		t.Fatalf("其他标签应只有一个非空标签: %+v", req.Others)
+	}
+	// 收窄后再问：Others 为空。
+	if err := a.updatePreferences(func(p *preferences) { p.AI.ContextCurrentOnly = true }); err != nil {
+		t.Fatal(err)
+	}
+	a.ai.bar.phase = aiBarInput // 上一轮仍在 thinking；手动归位以便再次发送
+	a.aiSend("再来一问")
+	select {
+	case req = <-cap.got:
+	case <-time.After(2 * time.Second):
+		t.Fatal("第二次未发起请求")
+	}
+	if len(req.Others) != 0 {
+		t.Fatalf("收窄后 Others 应为空: %+v", req.Others)
+	}
+}
+
 func TestAIDeliverProposalsAndRender(t *testing.T) {
 	a := aiTestApp(t)
 	res := ai.AskResult{Proposals: []ai.Proposal{

@@ -21,6 +21,8 @@ func (a *app) aiPage(c *ui.Context) {
 			settingsLead(c, locales.AiSectionHint())
 			a.aiEnableRow(c)
 			sectionDivider(c)
+			a.aiContextRow(c)
+			sectionDivider(c)
 			a.aiProviderRow(c)
 			a.aiEndpointRow(c)
 			a.aiModelRow(c)
@@ -54,6 +56,22 @@ func (a *app) aiEnableRow(c *ui.Context) {
 				}
 			}); err != nil {
 				a.settingsUI.draft.AI.Enabled = a.prefs.AI.Enabled
+				a.settingsUI.keyErr = err.Error()
+				a.refreshSettingsWindow()
+				return
+			}
+			a.settingsUI.keyErr = ""
+		}
+	})
+}
+
+// aiContextRow 上下文范围：默认回答问题时参考所有标签；开启后仅发送当前标签。
+func (a *app) aiContextRow(c *ui.Context) {
+	settingsRow(c, locales.AiContextCurrentOnly(), locales.AiContextCurrentOnlyHint(), func() {
+		if ui.Switch(c.Key("ai-context-scope"), &a.settingsUI.draft.AI.ContextCurrentOnly).Label(locales.AiContextCurrentOnly()).Changed() {
+			v := a.settingsUI.draft.AI.ContextCurrentOnly
+			if err := a.updatePreferences(func(p *preferences) { p.AI.ContextCurrentOnly = v }); err != nil {
+				a.settingsUI.draft.AI.ContextCurrentOnly = a.prefs.AI.ContextCurrentOnly
 				a.settingsUI.keyErr = err.Error()
 				a.refreshSettingsWindow()
 				return

@@ -43,11 +43,22 @@ func (a *app) aiBarOverlay(c *ui.Context, t *ui.Theme, dark bool) {
 		panel.Shadow(0, 10, 28, 0, ui.RGBA(0, 0, 0, 0.22))
 		panel.Children(func() {
 			if a.ai.bar.phase == aiBarReview {
-				ui.Scroll(c.Key("ai-cards-scroll")).FillWidth().MaxHeight(maxCards).Children(func() {
-					ui.Column(c).FillWidth().Gap(8).Children(func() {
-						a.aiCards(c, t, style)
+				// 模型的回答/说明：常驻在卡片上方；纯问答时没有卡片，
+				// 只有这一行 + 输入行。
+				if a.ai.bar.answer != "" {
+					ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+						ui.Icon(c, iconSparkles).Size(13, 13).TextColor(style.accent).Shrink(0)
+						ui.Text(c, a.ai.bar.answer).FontSize(12).TextColor(t.Text).
+							Wrap().Grow(1).MinWidth(0)
 					})
-				})
+				}
+				if len(a.ai.bar.proposals) > 0 {
+					ui.Scroll(c.Key("ai-cards-scroll")).FillWidth().MaxHeight(maxCards).Children(func() {
+						ui.Column(c).FillWidth().Gap(8).Children(func() {
+							a.aiCards(c, t, style)
+						})
+					})
+				}
 			}
 			if a.ai.bar.phase == aiBarThinking {
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
@@ -86,7 +97,7 @@ func (a *app) aiErrorRow(c *ui.Context, t *ui.Theme) {
 // 聚焦不改变外观（边框恒定）。追问态换占位文案。
 func (a *app) aiInputRow(c *ui.Context, t *ui.Theme, style resolvedStyle) {
 	placeholder := locales.AiBarPlaceholder()
-	if a.ai.bar.phase == aiBarReview {
+	if a.ai.bar.phase == aiBarReview && len(a.ai.bar.proposals) > 0 {
 		placeholder = locales.AiBarFollowUp()
 	}
 	input := ui.Row(c).FillWidth().Height(38).PaddingX(10).Gap(7).Radius(10).

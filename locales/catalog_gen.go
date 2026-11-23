@@ -5995,6 +5995,26 @@ func (msgs Messages) AiEnableHint() string {
 	return Catalog.Format(msgs.locale, "aiEnableHint", nil)
 }
 
+// AiContextCurrentOnly says "Send current tab only"
+// in the language the app shows.
+func AiContextCurrentOnly() string { return In(i18n.Locale()).AiContextCurrentOnly() }
+
+// AiContextCurrentOnly says "Send current tab only"
+// in the language of msgs.
+func (msgs Messages) AiContextCurrentOnly() string {
+	return Catalog.Format(msgs.locale, "aiContextCurrentOnly", nil)
+}
+
+// AiContextCurrentOnlyHint says "By default the assistant reads all tabs when answering questions. Turn on to send only the current tab."
+// in the language the app shows.
+func AiContextCurrentOnlyHint() string { return In(i18n.Locale()).AiContextCurrentOnlyHint() }
+
+// AiContextCurrentOnlyHint says "By default the assistant reads all tabs when answering questions. Turn on to send only the current tab."
+// in the language of msgs.
+func (msgs Messages) AiContextCurrentOnlyHint() string {
+	return Catalog.Format(msgs.locale, "aiContextCurrentOnlyHint", nil)
+}
+
 // AiProvider says "Provider"
 // in the language the app shows.
 func AiProvider() string { return In(i18n.Locale()).AiProvider() }
@@ -6205,11 +6225,11 @@ func (msgs Messages) AiKeyringUnavailable() string {
 	return Catalog.Format(msgs.locale, "aiKeyringUnavailable", nil)
 }
 
-// AiPrivacy says "Whatever you ask about goes only to the endpoint above; with a local Ollama it never leaves this computer."
+// AiPrivacy says "What you send goes only to the service configured above: your instruction and note context (all tabs by default; narr…"
 // in the language the app shows.
 func AiPrivacy() string { return In(i18n.Locale()).AiPrivacy() }
 
-// AiPrivacy says "Whatever you ask about goes only to the endpoint above; with a local Ollama it never leaves this computer."
+// AiPrivacy says "What you send goes only to the service configured above: your instruction and note context (all tabs by default; narr…"
 // in the language of msgs.
 func (msgs Messages) AiPrivacy() string {
 	return Catalog.Format(msgs.locale, "aiPrivacy", nil)

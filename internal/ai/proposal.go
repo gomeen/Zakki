@@ -54,10 +54,19 @@ type AskRequest struct {
 	Instruction  string
 	TabName      string
 	NoteMarkdown string
+	// Others 是其他标签的只读上下文（名字 + 全文）；调用方已按范围开关
+	// 与空标签过滤。编辑建议永不锚定它们，仅供问答引用。
+	Others []TabContext
 	// Now 提问时刻：用于把相对日期锚定到具体日期；零值时取 time.Now。
 	Now time.Time
 	// FollowUp 非空表示追问：附上一轮指令与建议，要求返回整组替换。
 	FollowUp *FollowUp
+}
+
+// TabContext 是一个非当前标签的上下文片段。
+type TabContext struct {
+	Name     string
+	Markdown string
 }
 
 // FollowUp 是追问的上下文：上一轮指令与它的建议。
@@ -66,8 +75,10 @@ type FollowUp struct {
 	Result      AskResult
 }
 
-// AskResult 是一次提问的输出。
+// AskResult 是一次提问的输出：answer 总有值（动作请求 = 一句话说明；
+// 纯问答 = 完整回答），proposals 仅在需要改笔记时非空。
 type AskResult struct {
+	Answer    string
 	Proposals []Proposal
 }
 
@@ -94,12 +105,13 @@ func parseProposals(content string) (AskResult, error) {
 		return AskResult{}, fmt.Errorf("%w: 输出里没有 JSON 对象", ErrParse)
 	}
 	var wire struct {
+		Answer    string         `json:"answer"`
 		Proposals []proposalWire `json:"proposals"`
 	}
 	if err := json.Unmarshal([]byte(s[start:end+1]), &wire); err != nil {
 		return AskResult{}, fmt.Errorf("%w: %v", ErrParse, err)
 	}
-	res := AskResult{}
+	res := AskResult{Answer: strings.TrimSpace(wire.Answer)}
 	var unknown []string
 	for _, p := range wire.Proposals {
 		kind := Kind(strings.TrimSpace(p.Kind))
@@ -119,6 +131,9 @@ func parseProposals(content string) (AskResult, error) {
 		})
 	}
 	if len(res.Proposals) == 0 {
+		if res.Answer != "" {
+			return res, nil // 纯问答（或混入未知类型但有回答）：不算失败
+		}
 		if len(unknown) > 0 {
 			return AskResult{}, fmt.Errorf("%w: 类型 %q 均不可用", ErrNoProposal, unknown)
 		}

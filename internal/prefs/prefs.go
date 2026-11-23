@@ -155,6 +155,9 @@ type AI struct {
 	// Provider 是提供方预设 ID：openai / deepseek / openrouter / ollama /
 	// custom；空串 = 未选择（未开启时的默认态）。
 	Provider string `json:"provider"`
+	// ContextCurrentOnly 把上下文收窄到仅当前标签；缺键/false（默认）时
+	// 回答问题可参考所有标签内容。编辑建议始终只锚定当前标签，与此开关无关。
+	ContextCurrentOnly bool `json:"contextCurrentOnly,omitempty"`
 	// BaseURL 是 OpenAI 兼容接口地址（含版本路径，如 https://api.openai.com/v1）。
 	// 预设提供方也显式落盘，便于端点变化时用户可见。
 	BaseURL string `json:"baseUrl"`

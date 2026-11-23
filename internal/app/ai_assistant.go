@@ -37,6 +37,7 @@ type aiBarState struct {
 	lastInstruction string
 	followUp        *ai.FollowUp
 	proposals       []ai.Proposal
+	answer          string // 模型的回答/说明（review 态显示在卡片上方；纯问答时是唯一内容）
 	editing         int    // 正在编辑原文的建议下标；-1 无
 	editDraft       string // 编辑框工作副本（多行 Markdown）
 
@@ -138,11 +139,23 @@ func (a *app) aiSend(instruction string) {
 	seq := a.ai.bar.reqSeq + 1
 	follow, now := a.ai.bar.followUp, a.now()
 	name, doc := tab.Name, tab.Text
+	// 其他标签只读上下文（问答用）：范围开关收窄或空标签不进上下文。
+	var others []ai.TabContext
+	if !a.prefs.AI.ContextCurrentOnly {
+		for i := range a.tabs {
+			tb := &a.tabs[i]
+			if tb.ID == tab.ID || strings.TrimSpace(tb.Text) == "" {
+				continue
+			}
+			others = append(others, ai.TabContext{Name: tb.Name, Markdown: tb.Text})
+		}
+	}
 	a.ai.bar.cancel = cancel
 	a.ai.bar.reqSeq = seq
 	a.ai.bar.phase = aiBarThinking
 	a.ai.bar.errText = ""
 	a.ai.bar.input = ""
+	a.ai.bar.answer = ""
 	a.ai.bar.editing = -1
 	a.ai.bar.lastInstruction = instruction
 	a.ai.bar.tabID = tab.ID
@@ -151,7 +164,7 @@ func (a *app) aiSend(instruction string) {
 	go func() {
 		res, err := client.Ask(ctx, ai.AskRequest{
 			Instruction: instruction, TabName: name, NoteMarkdown: doc,
-			Now: now, FollowUp: follow,
+			Others: others, Now: now, FollowUp: follow,
 		})
 		if err != nil {
 			// 排障线索：不记密钥与笔记内容，只记指令长度与错误本身。
@@ -188,12 +201,14 @@ func (a *app) aiDeliver(seq int, instruction string, res ai.AskResult, err error
 		a.ai.bar.phase = aiBarInput
 		a.ai.bar.followUp = nil
 		a.ai.bar.proposals = nil
+		a.ai.bar.answer = ""
 		a.ai.bar.errText = locales.AiStaleNote()
 		a.ai.bar.focus = 1
 		a.invalidateMain()
 		return
 	}
 	a.ai.bar.proposals = res.Proposals
+	a.ai.bar.answer = res.Answer
 	a.ai.bar.followUp = &ai.FollowUp{Instruction: instruction, Result: res}
 	a.ai.bar.phase = aiBarReview
 	a.invalidateMain()
@@ -209,6 +224,7 @@ func (a *app) aiDismiss(i int) {
 	if len(a.ai.bar.proposals) == 0 {
 		a.ai.bar.phase = aiBarInput
 		a.ai.bar.followUp = nil
+		a.ai.bar.answer = ""
 		a.ai.bar.focus = 1
 	}
 	a.invalidateMain()

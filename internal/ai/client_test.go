@@ -134,8 +134,14 @@ func TestParseFencedAndProseWrappedJSON(t *testing.T) {
 	if _, err := parseProposals(`{"proposals":[{"kind":"teleport","summary":"s"}]}`); !errors.Is(err, ErrNoProposal) {
 		t.Errorf("全部未知类型应报 ErrNoProposal，got %v", err)
 	}
+	if res, err := parseProposals(`{"answer":"今天没有提醒。","proposals":[]}`); err != nil || res.Answer == "" {
+		t.Errorf("纯问答（answer + 空 proposals）应成功，got %+v %v", res, err)
+	}
+	if res, err := parseProposals(`{"answer":"好的","proposals":[{"kind":"teleport"}]}`); err != nil || len(res.Proposals) != 0 || res.Answer == "" {
+		t.Errorf("未知类型但有 answer 应成功且无卡片，got %+v %v", res, err)
+	}
 	if _, err := parseProposals(`{"proposals":[]}`); !errors.Is(err, ErrNoProposal) {
-		t.Errorf("空 proposals 应报 ErrNoProposal，got %v", err)
+		t.Errorf("空 answer 空 proposals 应报 ErrNoProposal，got %v", err)
 	}
 	if _, err := parseProposals(`{"proposals":[{"kind":"teleport"},{"kind":"insert","at":"docEnd","lines":["x"]}]}`); err != nil {
 		t.Errorf("未知类型与有效建议混合时应保留有效项，got %v", err)

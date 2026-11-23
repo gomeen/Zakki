@@ -26,6 +26,24 @@ func TestAIPreferencesMigrateV15(t *testing.T) {
 	}
 }
 
+func TestAIContextScopeDecode(t *testing.T) {
+	// 缺键（旧文件）→ false（默认全部标签）；显式 true 保留。
+	got, err := Decode([]byte(`{"version":16,"ai":{"enabled":true}}`), testAccel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AI.ContextCurrentOnly {
+		t.Fatal("缺 contextCurrentOnly 键应解码为 false（全部标签）")
+	}
+	got, err = Decode([]byte(`{"version":16,"ai":{"enabled":true,"contextCurrentOnly":true}}`), testAccel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.AI.ContextCurrentOnly {
+		t.Fatal("显式 contextCurrentOnly=true 应保留")
+	}
+}
+
 func TestAIPreferencesValidate(t *testing.T) {
 	valid := func(mutate func(*AI)) bool {
 		p := Default()
