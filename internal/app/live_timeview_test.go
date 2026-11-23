@@ -68,11 +68,14 @@ func TestTimeObjectTextSharesBaseline(t *testing.T) {
 							if reference {
 								_, color, _, _ := a.timeObjectVisual(c, md, blk)
 								el.DrawTextObjects(func(p *ui.Painter, object ui.TextObject) {
-									// 对象盒子底边就是正文基线，小字与正文应共用这条线。
+									// 对象盒子底边就是正文基线，小字与正文应共用这条线；
+									// 盒高按正文度量给足（带时间的行不收紧间距）。
 									p.Glyphs(glyphs, object.Rect.X+1, object.Rect.Y+object.Rect.H, color)
 									painted = true
-									if object.Rect.H != labelFont.Metrics().Ascent {
-										t.Errorf("对象高度应只保留基线以上部分：got %g want %g", object.Rect.H, labelFont.Metrics().Ascent)
+									body := ui.Font{Family: md.bodyFont, Size: size}
+									want := body.Metrics().Ascent + body.Metrics().Descent
+									if object.Rect.H != want {
+										t.Errorf("对象高度应按正文度量给足：got %g want %g", object.Rect.H, want)
 									}
 								})
 							}

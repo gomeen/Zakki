@@ -19,17 +19,23 @@ func (a *app) timeObjectVisual(c *ui.Context, md resolvedStyle, blk liveBlock) (
 	case chipOverdue:
 		color = c.Theme().Danger
 	}
-	return glyphs, color, width + 2, font.Metrics().Ascent
+	// 对象高度按正文字体的度量给足：胶囊以小字号绘制，但行盒不能
+	// 比普通行矮——否则带时间令牌的行间距明显收紧。
+	body := ui.Font{Family: md.bodyFont, Size: md.bodySize}
+	m := body.Metrics()
+	return glyphs, color, width + 2, m.Ascent + m.Descent
 }
 
 func (a *app) timeObjectRanges(c *ui.Context, md resolvedStyle, blk liveBlock, p liveProjection) []ui.TextRange {
 	if len(p.objects) == 0 {
 		return nil
 	}
-	_, _, width, height := a.timeObjectVisual(c, md, blk)
+	_, _, width, box := a.timeObjectVisual(c, md, blk)
+	// TextRange 只能表达基线以上的高度（无 descent 字段），盒子总高
+	// 按正文度量给足，行盒不再比普通行矮；绘制沿盒子底边即正文基线。
 	out := make([]ui.TextRange, 0, len(p.objects))
 	for _, at := range p.objects {
-		out = append(out, ui.TextRange{Start: at, End: at + 1, ObjectWidth: width, ObjectHeight: height})
+		out = append(out, ui.TextRange{Start: at, End: at + 1, ObjectWidth: width, ObjectHeight: box})
 	}
 	return out
 }
