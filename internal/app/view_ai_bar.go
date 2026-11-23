@@ -94,14 +94,21 @@ func (a *app) aiErrorRow(c *ui.Context, t *ui.Theme) {
 }
 
 // aiInputRow 输入行：加大的圆角输入框（含 ✦ 图标），Enter 发送；
-// 聚焦不改变外观（边框恒定）。追问态换占位文案。
+// 聚焦不改变外观（边框恒定）。追问态换占位文案。输入面比面板亮一档
+// （浅色用 Theme.Background、暗色提亮），两种主题下都与面板拉开对比。
 func (a *app) aiInputRow(c *ui.Context, t *ui.Theme, style resolvedStyle) {
 	placeholder := locales.AiBarPlaceholder()
 	if a.ai.bar.phase == aiBarReview && len(a.ai.bar.proposals) > 0 {
 		placeholder = locales.AiBarFollowUp()
 	}
+	field := t.Background
+	if themeIsDark(t) {
+		// 暗色下面板与 Theme.Background 几乎同色，输入面向文字色提亮
+		// 12% 拉开层次（实测 1.4:1，占位文字仍 ≥4.3:1）。
+		field = t.Background.Mix(t.Text, 0.12)
+	}
 	input := ui.Row(c).FillWidth().Height(38).PaddingX(10).Gap(7).Radius(10).
-		AlignItems(ui.Center).Background(t.Background)
+		AlignItems(ui.Center).Background(field)
 	input.Children(func() {
 		ui.Icon(c, iconSparkles).Size(15, 15).TextColor(style.accent).Shrink(0)
 		in := ui.TextInputBase(c.Key("ai-input"), &a.ai.bar.input).
