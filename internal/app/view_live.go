@@ -91,7 +91,9 @@ func (a *app) livePane(c *ui.Context, t *ui.Theme, dark bool) {
 // listGapAfter 返回块 i 与下一块之间应有的间距（画在块 i 的尾部 padding 里）：
 //   - 最后一行为 0；
 //   - 下一块是分隔空行时给两倍：分隔行自身 0 高（Height 是 border-box，padding 被裁掉），
-//     原先它在统一 Gap 下贡献了两侧两个间隙；
+//     原先它在统一 Gap 下贡献了两侧两个间隙；但列表/待办项尾随的分隔空行例外，
+//     只给整块间距：空行隔开的是同一列表的延续组，两倍会让“组尾→下一项”比
+//     普通块间距还宽，新加的待办像被孤立项。
 //   - 同一列表的相邻项（列表/待办相连，源码中间无空行）收紧到 blockGap 的四分之一，
 //     避免列表节距接近双倍行距；其余边界维持完整块间距。
 func listGapAfter(blocks []liveBlock, i int, gap float32) float32 {
@@ -99,6 +101,9 @@ func listGapAfter(blocks []liveBlock, i int, gap float32) float32 {
 		return 0
 	}
 	if isLiveSeparator(blocks, i+1) {
+		if sameListItem(blocks[i], blocks[i+2]) {
+			return gap
+		}
 		return gap * 2
 	}
 	if sameListItem(blocks[i], blocks[i+1]) {

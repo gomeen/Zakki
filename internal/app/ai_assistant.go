@@ -8,6 +8,7 @@ package app
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 
 	"zakki/internal/ai"
@@ -152,6 +153,10 @@ func (a *app) aiSend(instruction string) {
 			Instruction: instruction, TabName: name, NoteMarkdown: doc,
 			Now: now, FollowUp: follow,
 		})
+		if err != nil {
+			// 排障线索：不记密钥与笔记内容，只记指令长度与错误本身。
+			slog.Warn("AI 请求失败", "seq", seq, "instruction_len", len(instruction), "error", err)
+		}
 		a.runOnMain(func() { a.aiDeliver(seq, instruction, res, err) })
 	}()
 }

@@ -160,12 +160,13 @@ func (a *app) aiCard(c *ui.Context, t *ui.Theme, style resolvedStyle, i int) {
 		})
 	}
 	card.Children(func() {
+		// 头行：徽标 + 位置说明；下方细分隔线拉开与内容的层次。
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
 			ui.Icon(c, iconSparkles).Size(13, 13).TextColor(style.accent).Shrink(0)
-			ui.Text(c, aiBadgeText(p)).FontSize(12).Bold().TextColor(style.accent)
-			ui.Box(c).Grow(1)
-			ui.Text(c, aiWhereText(p)).FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, aiBadgeText(p)).FontSize(12).Bold().TextColor(style.accent).Grow(1).MinWidth(0)
+			ui.Text(c, aiWhereText(p)).FontSize(11).TextColor(t.TextMuted).Shrink(0)
 		})
+		ui.Box(c).FillWidth().Height(1).Background(style.border.Mix(style.surface, 0.35))
 		if a.ai.bar.editing == i {
 			a.aiCardEditor(c, t, i)
 		} else {
@@ -173,8 +174,14 @@ func (a *app) aiCard(c *ui.Context, t *ui.Theme, style resolvedStyle, i int) {
 			if n := aiAlertNote(p); n != "" {
 				ui.Text(c, n).FontSize(11).TextColor(t.TextMuted)
 			}
+			// 操作区：细分隔线隔开预览；实心强调色主按钮 + 幽灵次按钮，
+			// 层级一眼可辨（两家模型审阅的共同结论）。
+			ui.Box(c).FillWidth().Height(1).Background(style.border.Mix(style.surface, 0.35))
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(6).Children(func() {
-				if ui.Button(c.Key("ai-apply"), locales.AiBarApply()).Clicked() {
+				apply := ui.ButtonBase(c.Key("ai-apply")).Padding(5, 14).Radius(8).
+					Background(style.accent).Cursor(ui.CursorPointer).FocusRing(false)
+				apply.Children(func() { ui.Text(c, locales.AiBarApply()).FontSize(12).Bold().TextColor(ui.Hex("#fffaf3")) })
+				if apply.Clicked() {
 					a.aiApplyIndex(i)
 				}
 				dismiss := ui.ButtonBase(c.Key("ai-dismiss")).Padding(5, 10).Radius(8).Cursor(ui.CursorPointer)

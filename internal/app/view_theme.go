@@ -510,11 +510,12 @@ var aiSeedDefault = aiSeeds{
 }
 
 // aiSeedOverrides 随主题调色的锚点：手账用朱红批注与马克笔绿，claude/qoder
-// 各随主题基调；未列出的主题用默认锚点。
+// 各随主题基调；未列出的主题用默认锚点。锚点只取墨色，底色在
+// aiColorsFor 里以更低饱和度混出，避免红绿块在纸面上刺眼。
 var aiSeedOverrides = map[string]aiSeeds{
-	"sketch": {delL: ui.Hex("#a33a1e"), addL: ui.Hex("#3f6b2e"), delD: ui.Hex("#f2a66e"), addD: ui.Hex("#a8d8b0")},
-	"claude": {delL: ui.Hex("#9c3a1e"), addL: ui.Hex("#3d6b4f"), delD: ui.Hex("#e8a188"), addD: ui.Hex("#9ecdb0")},
-	"qoder":  {delL: ui.Hex("#8a3a2a"), addL: ui.Hex("#2c5a3f"), delD: ui.Hex("#e3a08e"), addD: ui.Hex("#8ee5a1")},
+	"sketch": {delL: ui.Hex("#8a4436"), addL: ui.Hex("#46583d"), delD: ui.Hex("#e8a188"), addD: ui.Hex("#a8d8b0")},
+	"claude": {delL: ui.Hex("#8f4030"), addL: ui.Hex("#3d6b4f"), delD: ui.Hex("#e8a188"), addD: ui.Hex("#9ecdb0")},
+	"qoder":  {delL: ui.Hex("#7e3a2c"), addL: ui.Hex("#2c5a3f"), delD: ui.Hex("#e3a08e"), addD: ui.Hex("#8ee5a1")},
 }
 
 // aiInkOn 让 seed 在 bg 上达到至少 4.6:1：不足时向该主题正文色逐步收敛
@@ -541,13 +542,16 @@ func aiColorsFor(themeID string, pal colorPalette, dark bool) aiColors {
 	}
 	delInk := aiInkOn(delSeed, pal.background, pal.text)
 	addInk := aiInkOn(addSeed, pal.background, pal.text)
-	delBg := pal.background.Mix(delInk, 0.10)
-	addBg := pal.background.Mix(addInk, 0.12)
+	// diff 底色只掺 6-8% 墨色（柔和粉彩，两家模型审阅的一致结论：
+	// 原先 10-12% 饱和度偏高）；卡面描边改用边界色而非强调色混合，
+	// 让卡安静地浮在纸面上。
+	delBg := pal.background.Mix(delInk, 0.06)
+	addBg := pal.background.Mix(addInk, 0.08)
 	// 底色掺了墨色后对比略降，再校一轮。
 	delInk = aiInkOn(delInk, delBg, pal.text)
 	addInk = aiInkOn(addInk, addBg, pal.text)
 	return aiColors{
-		cardBg: pal.surface, cardBorder: pal.accent.Mix(pal.border, 0.45),
+		cardBg: pal.surface, cardBorder: pal.border.Mix(pal.text, 0.2),
 		delBg: delBg, delInk: delInk,
 		addBg: addBg, addInk: addInk,
 	}
