@@ -20,7 +20,8 @@ import (
 
 const (
 	// defaultTimeout 非流式请求的默认超时；可经 Config.HTTP 覆盖。
-	defaultTimeout = 60 * time.Second
+	// 推理型模型（如 MiniMax M3）思考阶段可能超过 60 秒。
+	defaultTimeout = 120 * time.Second
 	// maxResponseBytes 响应体读取上限，防异常服务端耗尽内存。
 	maxResponseBytes = 4 << 20
 )
