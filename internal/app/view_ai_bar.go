@@ -2,8 +2,8 @@ package app
 
 // 助理条视图：底部输入行 + 建议卡堆栈。卡片无边框：头行是语义色圆点 +
 // 墨色徽标 + 灰色落点提示，diff 行用左侧 2px 语义色条 + 极淡底色
-//（删除块红墨删除线）；卡间与输入行之间用细分隔线（手账主题为铅笔
-// 波浪线）分组。文案经 locales.*。
+//（删除块红墨删除线）；卡间与输入行之间用 1px 直细线分组（与规划稿
+// 一致，不用波浪线）。文案经 locales.*。
 
 import (
 	"strconv"
@@ -44,10 +44,10 @@ func (a *app) aiBarOverlay(c *ui.Context, t *ui.Theme, dark bool) {
 		panel.Children(func() {
 			if a.ai.bar.phase == aiBarReview {
 				// 模型的回答/说明：常驻在卡片上方；纯问答时没有卡片，
-				// 只有这一行 + 输入行。
+				// 只有这一行 + 输入行。圆点标记与建议卡头行同语言。
 				if a.ai.bar.answer != "" {
 					ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-						ui.Icon(c, iconSparkles).Size(13, 13).TextColor(style.accent).Shrink(0)
+						ui.Box(c).Width(6).Height(6).Radius(3).Background(style.ai.addInk).Shrink(0)
 						ui.Text(c, a.ai.bar.answer).FontSize(12).TextColor(t.Text).
 							Wrap().Grow(1).MinWidth(0)
 					})
@@ -70,7 +70,8 @@ func (a *app) aiBarOverlay(c *ui.Context, t *ui.Theme, dark bool) {
 				a.aiErrorRow(c, t)
 			}
 			if a.ai.bar.phase == aiBarReview {
-				ruleLine(c, style, 41)
+				// 规划稿的 1px 直细线：比波浪线轻，两种主题一致。
+				ui.Box(c).FillWidth().Height(1).Background(style.border.Mix(style.surface, 0.35))
 			}
 			a.aiInputRow(c, t, style)
 		})
@@ -160,7 +161,8 @@ func (a *app) aiCards(c *ui.Context, t *ui.Theme, style resolvedStyle) {
 			break
 		}
 		if i > 0 {
-			ruleLine(c, style, uint32(i+17))
+			// 卡间分隔：与规划稿一致的 1px 直细线。
+			ui.Box(c).FillWidth().Height(1).Background(style.border.Mix(style.surface, 0.35))
 		}
 		a.aiCard(c, t, style, i)
 	}
