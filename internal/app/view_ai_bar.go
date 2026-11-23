@@ -257,40 +257,54 @@ func isTaskLine(line string) bool {
 	return strings.HasPrefix(s, "- [ ]") || strings.HasPrefix(s, "- [x]")
 }
 
-// aiDiffBlock 单行 diff：左侧 2px 语义色条 + 极淡底色，正文保持墨色
-// （删除行红墨删除线）；待办行加方框并加粗，行尾时间令牌为中性胶囊。
+// aiDiffBlock 单行 diff：左侧 2px 语义色条 + 极淡底色；待办名与提醒时间
+// 同行（任务左、胶囊右，与规划稿 preview-row 一致），正文保持墨色
+// （删除行红墨删除线）；待办行加粗，时间令牌为中性胶囊。
 func aiDiffBlock(c *ui.Context, style resolvedStyle, add bool, line string, task bool) {
 	ink, bg := style.ai.addInk, style.ai.addBg
 	if !add {
 		ink, bg = style.ai.delInk, style.ai.delBg
 	}
-	blk := ui.Box(c).FillWidth().Radius(6).Padding(3, 8).Background(bg)
+	blk := ui.Box(c).FillWidth().Radius(6).Padding(4, 9).Background(bg)
 	blk.Draw(func(p *ui.Painter, r ui.Rect) {
 		p.Fill(ui.Rect{X: r.X, Y: r.Y, W: 2, H: r.H}, ink, 0)
 	})
 	blk.Children(func() {
-		ui.RichText(c).Children(func() {
-			text := line
+		row := ui.Row(c).FillWidth().AlignItems(ui.Baseline).Gap(12)
+		row.Children(func() {
+			_, chip, has := aiSplitTimeToken(taskBody(line, task))
+			span := ui.Span{Text: taskLabel(line, task), Color: style.text}
 			if task {
-				ui.RichText(c, ui.Span{Text: "☐ ", Color: ink, Size: 13})
-				s := strings.TrimLeft(line, " \t")
-				text = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(s, "- [ ]"), "- [x]"))
-			}
-			body, chip, has := aiSplitTimeToken(text)
-			span := ui.Span{Text: body, Color: style.text}
-			if task {
-				span.Size, span.Weight = 13, 600
+				span.Size, span.Weight = 14, 600
 			}
 			if !add {
 				span.Color, span.Strikethrough, span.DecorationColor = ink, true, ink
 			}
-			ui.RichText(c, span)
+			ui.RichText(c, span).Grow(1).MinWidth(0)
 			if has {
-				ui.RichText(c, ui.Span{Text: "  " + chip, Color: style.text, Size: 11,
-					Background: style.border.Mix(style.surface, 0.45), Radius: 5})
+				// 提醒时间胶囊：与待办名同行右侧，中性暖底。
+				ui.RichText(c, ui.Span{Text: chip, Color: style.text, Size: 11,
+					Background: style.border.Mix(style.surface, 0.45), Radius: 5}).Shrink(0)
 			}
 		})
 	})
+}
+
+// taskBody 待办行去掉标记后的正文（非待办行原样）。
+func taskBody(line string, task bool) string {
+	if !task {
+		return line
+	}
+	s := strings.TrimLeft(line, " \t")
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(s, "- [ ]"), "- [x]"))
+}
+
+// taskLabel 待办行显示「☐ 正文」，非待办行显示原文。
+func taskLabel(line string, task bool) string {
+	if !task {
+		return line
+	}
+	return "☐ " + taskBody(line, task)
 }
 
 // aiNewTabPreview 新建标签建议预览：标签名 + 内容首几行（左色条淡底）。

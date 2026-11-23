@@ -211,6 +211,8 @@ func (a *app) aiDeliver(seq int, instruction string, res ai.AskResult, err error
 	a.ai.bar.answer = res.Answer
 	a.ai.bar.followUp = &ai.FollowUp{Instruction: instruction, Result: res}
 	a.ai.bar.phase = aiBarReview
+	// 交付后输入框保持焦点：追问/新指令不用再点一次。
+	a.ai.bar.focus = 1
 	a.invalidateMain()
 }
 
@@ -230,13 +232,15 @@ func (a *app) aiDismiss(i int) {
 	a.invalidateMain()
 }
 
-// aiProposalDone 应用成功后从待审列表移除。
+// aiProposalDone 应用成功后从待审列表移除；仍有待审时保持输入框焦点，
+// 便于连续确认或追问。
 func (a *app) aiProposalDone(i int) {
 	a.aiDismiss(i)
 	if len(a.ai.bar.proposals) > 0 {
 		// 追问上下文仍指向旧组；后续追问以当前待审组为准意义不大，
 		// 清掉避免把已应用的建议再发给模型。
 		a.ai.bar.followUp = nil
+		a.ai.bar.focus = 1
 	}
 }
 
