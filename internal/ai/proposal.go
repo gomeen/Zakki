@@ -100,12 +100,14 @@ func parseProposals(content string) (AskResult, error) {
 		return AskResult{}, fmt.Errorf("%w: %v", ErrParse, err)
 	}
 	res := AskResult{}
+	var unknown []string
 	for _, p := range wire.Proposals {
 		kind := Kind(strings.TrimSpace(p.Kind))
 		switch kind {
 		case KindInsert, KindReplace, KindNewTab:
 		default:
-			continue // 未知类型跳过，不整体失败
+			unknown = append(unknown, string(kind)) // 未知类型跳过，不整体失败
+			continue
 		}
 		res.Proposals = append(res.Proposals, Proposal{
 			Kind:    kind,
@@ -117,7 +119,10 @@ func parseProposals(content string) (AskResult, error) {
 		})
 	}
 	if len(res.Proposals) == 0 {
-		return AskResult{}, fmt.Errorf("%w: 没有可用的建议", ErrParse)
+		if len(unknown) > 0 {
+			return AskResult{}, fmt.Errorf("%w: 类型 %q 均不可用", ErrNoProposal, unknown)
+		}
+		return AskResult{}, fmt.Errorf("%w: proposals 为空", ErrNoProposal)
 	}
 	return res, nil
 }

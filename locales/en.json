@@ -736,6 +736,7 @@
   "aiErrAuth": "The API key was rejected. Check it in Settings.",
   "aiErrCancelled": "Request cancelled.",
   "aiErrParse": "The model's reply could not be understood. Try again or switch models.",
+  "aiErrNoProposal": "The model didn't propose any usable edit. Try rephrasing or retry.",
   "aiErrAnchor": "The proposal points at text that no longer matches the note. Try again.",
   "aiErrRateLimit": "Too many requests — wait a moment and try again.",
   "aiErrNetwork": "Network problem: {err}",

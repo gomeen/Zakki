@@ -17,6 +17,10 @@ var (
 	ErrNetwork = errors.New("网络请求失败")
 	// ErrParse 模型输出无法解析为建议组。
 	ErrParse = errors.New("无法解析模型返回的建议")
+
+	// ErrNoProposal 模型成功应答但没有任何可执行的修改建议
+	//（proposals 为空，或类型全部未知被滤掉）。
+	ErrNoProposal = errors.New("模型没有给出可执行的修改建议")
 	// ErrAnchorNotFound 建议的锚点在笔记中找不到或不唯一。
 	ErrAnchorNotFound = errors.New("建议引用的原文在笔记中找不到")
 	// ErrCancelled 请求在完成前被取消。

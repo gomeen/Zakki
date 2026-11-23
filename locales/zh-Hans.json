@@ -635,6 +635,7 @@
   "aiErrAuth": "API 密钥被拒绝，请在设置中检查。",
   "aiErrCancelled": "请求已取消。",
   "aiErrParse": "模型的回复无法解析，请重试或更换模型。",
+  "aiErrNoProposal": "模型没有给出可执行的修改建议，请换个说法重试。",
   "aiErrAnchor": "建议指向的原文与笔记不一致，请重试。",
   "aiErrRateLimit": "请求过于频繁，请稍后再试。",
   "aiErrNetwork": "网络问题：{err}",

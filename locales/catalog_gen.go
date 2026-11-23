@@ -6325,6 +6325,16 @@ func (msgs Messages) AiErrParse() string {
 	return Catalog.Format(msgs.locale, "aiErrParse", nil)
 }
 
+// AiErrNoProposal says "The model didn't propose any usable edit. Try rephrasing or retry."
+// in the language the app shows.
+func AiErrNoProposal() string { return In(i18n.Locale()).AiErrNoProposal() }
+
+// AiErrNoProposal says "The model didn't propose any usable edit. Try rephrasing or retry."
+// in the language of msgs.
+func (msgs Messages) AiErrNoProposal() string {
+	return Catalog.Format(msgs.locale, "aiErrNoProposal", nil)
+}
+
 // AiErrAnchor says "The proposal points at text that no longer matches the note. Try again."
 // in the language the app shows.
 func AiErrAnchor() string { return In(i18n.Locale()).AiErrAnchor() }

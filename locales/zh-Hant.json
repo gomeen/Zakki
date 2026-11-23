@@ -611,6 +611,7 @@
   "aiErrAuth": "API 金鑰被拒絕，請在設定中檢查。",
   "aiErrCancelled": "請求已取消。",
   "aiErrParse": "模型的回覆無法解析，請重試或更換模型。",
+  "aiErrNoProposal": "模型沒有給出可執行的修改建議，請換個說法重試。",
   "aiErrAnchor": "建議指向的原文與筆記不一致，請重試。",
   "aiErrRateLimit": "請求過於頻繁，請稍後再試。",
   "aiErrNetwork": "網路問題：{err}",

@@ -55,6 +55,7 @@ func systemPrompt(now time.Time) string {
 	fmt.Fprintf(&b, "- Today is %s (%s). Resolve relative dates and times to exact tokens.\n", now.Format("2006-01-02 15:04"), now.Weekday())
 	b.WriteString("- Write summary and note content in the same language as the user's instruction.\n")
 	b.WriteString("- Propose the smallest set of edits that satisfies the instruction; at most 4 proposals.\n")
+	b.WriteString(`- If the instruction is a question or chat and needs no edit, answer {"proposals":[]}.` + "\n")
 	b.WriteString("- For kind \"replace\", anchor MUST be copied VERBATIM from the note (an exact, unique substring); lines replace the anchor's whole lines. Empty lines means deleting them.\n")
 	b.WriteString("- For kind \"insert\", at is one of \"docEnd\" (end of note), \"listEnd\" (after the last list item), \"afterAnchor\" (right after the anchor's line; requires anchor).\n")
 	b.WriteString("- For kind \"newTab\", propose a new tab (name + full markdown content); never touch the current note in the same proposal.\n")

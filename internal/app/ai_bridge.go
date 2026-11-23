@@ -177,6 +177,8 @@ func aiErrText(err error) string {
 		return locales.AiErrCancelled()
 	case errors.Is(err, ai.ErrParse):
 		return locales.AiErrParse()
+	case errors.Is(err, ai.ErrNoProposal):
+		return locales.AiErrNoProposal()
 	case errors.Is(err, ai.ErrAnchorNotFound):
 		return locales.AiErrAnchor()
 	case errors.As(err, &rl):

@@ -112,6 +112,7 @@ func TestAIErrTextMapping(t *testing.T) {
 		{ai.ErrAuth, locales.AiErrAuth()},
 		{ai.ErrCancelled, locales.AiErrCancelled()},
 		{ai.ErrParse, locales.AiErrParse()},
+		{ai.ErrNoProposal, locales.AiErrNoProposal()},
 		{ai.ErrAnchorNotFound, locales.AiErrAnchor()},
 		{&ai.RateLimitError{}, locales.AiErrRateLimit()},
 	}
