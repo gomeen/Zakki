@@ -44,13 +44,11 @@ func (a *app) aiBarOverlay(c *ui.Context, t *ui.Theme, dark bool) {
 		panel.Children(func() {
 			if a.ai.bar.phase == aiBarReview {
 				// 模型的回答/说明：常驻在卡片上方；纯问答时没有卡片，
-				// 只有这一行 + 输入行。圆点标记与建议卡头行同语言。
+				// 只有这一行 + 输入行。不加前置图标——输入行已有 ✦，
+				// 建议卡头行已有圆点，再标一个就重复了。
 				if a.ai.bar.answer != "" {
-					ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-						ui.Box(c).Width(6).Height(6).Radius(3).Background(style.ai.addInk).Shrink(0)
-						ui.Text(c, a.ai.bar.answer).FontSize(12).TextColor(t.Text).
-							Wrap().Grow(1).MinWidth(0)
-					})
+					ui.Text(c, a.ai.bar.answer).FontSize(12).TextColor(t.Text).
+						FillWidth().Wrap().MinWidth(0)
 				}
 				if len(a.ai.bar.proposals) > 0 {
 					ui.Scroll(c.Key("ai-cards-scroll")).FillWidth().MaxHeight(maxCards).Children(func() {
