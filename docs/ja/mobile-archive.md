@@ -25,7 +25,7 @@
 | M3 iOS リマインダー | トークンのポップオーバー、単発通知の並べ直し、完了の前進、繰り返しの展開、タスクを横断する 64 スロットを最も早い `fireAt` で割当 + 最終スロットの継続スケジュール、状態表示（スケジュール済み/同期待ち/継続待ち/権限制限による降格）| [#51](https://github.com/gomeen/Zakki/issues/51) | [2026-11-08](../reports/2026-11-08-m3-ios-reminders-verification.md)（中国語）（53 件の新規 XCTest、シミュレータ scheduled=63+renewal）|
 | M4-1 同期エンジン + GitHub バックエンド A | §2.2 判定表の 4 ケース、sha CAS（409/422 で再取得して再判定）、Device Flow + 更新 + 失効、Keychain、`conflicts/` アーカイブ、衝突ダイアログ | [#52](https://github.com/gomeen/Zakki/issues/52) | [2026-11-08](../reports/2026-11-08-m4-1-sync-verification.md)（中国語）（46 件の新規 XCTest + プロセス内 GitHub stub のエンドツーエンド）|
 | M4-2 iCloud クラウドドライブ バックエンド B | ファイル選択の認可 + security-scoped bookmark、ベースライン = ファイル同一性 + mtime の書き込み前照合、命名スキャン + NSFileVersion の 2 経路の衝突コピー、ブックマーク失効時の再選択状態機械 | [#53](https://github.com/gomeen/Zakki/issues/53) | [2026-11-08](../reports/2026-11-08-m4-2-icloud-backend-verification.md)（中国語）（35 件の新規 XCTest + 3 シナリオ + コンテナをまたぐ実 picker）|
-| iCloud プローブ（D21 ゲート）| capability の照合、picker の認可、プレースホルダファイルのダウンロード誘発、衝突コピーの列挙——**3 項目すべて通過**したため、バックエンド B は M5 に後退しなかった | — | [2026-11-08](../reports/2026-11-08-icloud-sync-probe.md)（中国語） |
+| iCloud プローブ（D21 ゲート）| シミュレータでは entitlement なしのファイル選択、再起動後のブックマーク復元とローカルファイルの直接読み書き、プレースホルダ判定と衝突スキャンのローカルでの挙動を確認。実際の iCloud Drive、プレースホルダのダウンロード、衝突検出は実機検証が必要 | — | [2026-11-08](../reports/2026-11-08-icloud-sync-probe.md)（中国語） |
 
 ### 2.2 M4-3 デスクトップ同期の付帯：**デスクトップに属し、モバイルの凍結に含まれない**
 
@@ -150,22 +150,22 @@ Siri/ショートカット、ベンダープッシュチャネル、ストア掲
 ## 6. 凍結期間の取り決め
 
 - iOS のバグを直さない、iOS の機能を追加しない、実機検収を行わない；`mobile/` と `mobile.yml` はそのまま残す。
-- `core/` は**凍結しない**：デスクトップが消費している。`core/` を変更するときは `go test ./...`（core の契約テストを含む）を必ず実行し、
+- `core/` は**凍結しない**：デスクトップが消費している。`core/` を変更するときは `make test`（ルートでの `go test ./...` はネストされたモジュールの core 契約テストを実行しない）を必ず実行し、
   `mobile/binding` が依存する `zakkicore` のエクスポート面に注意する。
 - デスクトップ側で `zakki.json` の形式や移行の意味論を変える場合も、仕様 §2.1 の共有契約に拘束される（ADR-0003 第 5 条）。
 - issue [#26](https://github.com/gomeen/Zakki/issues/26)、
   [#50](https://github.com/gomeen/Zakki/issues/50)、[#57](https://github.com/gomeen/Zakki/issues/57)、
   [#19](https://github.com/gomeen/Zakki/issues/19) は再開の入口として open のまま保ち、triage キューには入れない。
 
-## 7. モバイルに関係しない残作業
+## 7. 凍結時点のデスクトップ残作業
 
-モバイル凍結後にリポジトリに残った事柄を「やる価値があるか」で粗く並べます：
+以下は凍結時点の記録であり、現在の進捗ではありません。現在のデスクトップの残作業は [`.scratch/`](../../.scratch/) を参照してください。モバイルの凍結範囲は変わりません。
 
 | 待ち項目 | 現状 | 関与範囲 |
 |---|---|---|
 | [#22](https://github.com/gomeen/Zakki/issues/22) Windows 通知の実機 + macOS 通知センターの視覚確認 | チェックリストは作成済み（`docs/verification/notifications-manual-checklist.md`）、パラメータ/スクリプトの単体テストとクロスコンパイルの証拠のみ | 実機の Windows 1 台 + macOS が必要 |
 | デスクトップ同期の実アカウント検証 | デスクトップの GitHub バックエンド A はリリース済みだが、Device Flow、token の失効/取り消し、レート制限、>1MB の raw フォールバックは mock の証拠しかない | 純粋にデスクトップ、GitHub App 1 つで開始できる |
 | Windows DPAPI の安全なストレージ | クロスコンパイル + インターフェーステストは通過、**実際の Windows では一度も実行していない** | 純粋にデスクトップ、Windows 1 台が必要 |
-| Copilot 風の入力補完 | 調査レポートは完成（`docs/reports/2026-11-11-copilot-style-input-research.md`、未コミット）、MVP の提案はレポート §6.4；根本的な欠落は MyGo に ghost text の装飾層がないこと | 純粋にデスクトップ、まず意思決定が必要 |
+| Copilot 風の入力補完 | 調査レポートは完成（[リポジトリ収録済み](../reports/2026-11-11-copilot-style-input-research.md)・中国語）、MVP の提案はレポート §6.4；根本的な欠落は MyGo に ghost text の装飾層がないこと | 純粋にデスクトップ、まず意思決定が必要 |
 | [#49](https://github.com/gomeen/Zakki/issues/49) Awesome MyGo への掲載 | 対外的なリストへの登録で、コードではない | メタデータ |
 | パフォーマンスと起動に関する今後の提案 | `docs/reports/2026-10-18-performance-review.md`、`2026-10-18-startup-shutdown-review.md` の「今後の提案」を参照：大きな表のブロック内仮想化、ミラー取得と Git runner のタイムアウト、バックアップ同期入口のバックグラウンド化、移行時のメタデータ事前検査 | 純粋にデスクトップ、いずれも非ブロッキング |

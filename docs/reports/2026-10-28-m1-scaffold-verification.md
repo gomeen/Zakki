@@ -1,6 +1,6 @@
 # 2026-10-28 移动端 M1 iOS 脚手架验证记录
 
-对应 [docs/mobile-spec.md](../mobile-spec.md) §7 里程碑 M1 的 iOS 侧：`mobile/ios` 工程、
+对应 [docs/mobile-spec.md](https://github.com/gomeen/Zakki/blob/afe363348864e4901e937690cf0c802067a5d27a/docs/mobile-spec.md) §7 里程碑 M1 的 iOS 侧：`mobile/ios` 工程、
 绑定产物链接、只读导入管道、单测与 CI。桌面侧 5 个提交（model 提取、绑定、
 `make mobile-framework`）已先行合入 `feat/m1-scaffold`，本记录只覆盖 iOS 侧
 `feat:`/`ci:` 提交的验证过程与结果。样例数据全部为合成 JSON，不含任何真实用户数据。

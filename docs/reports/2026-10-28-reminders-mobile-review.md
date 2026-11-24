@@ -1,6 +1,6 @@
 # 提醒实现与移动端规划全面审查（2026-10-28）
 
-审查对象：提交 `8aad0ea` 时的桌面提醒实现、共享内核 `core/`、移动端规划（[#1](https://github.com/gomeen/Zakki/issues/1)–[#12](https://github.com/gomeen/Zakki/issues/12)、[mobile-spec.md](../mobile-spec.md)、[ADR-0001](../adr/0001-inline-time-tokens.md)、[ADR-0002](../adr/0002-recurring-time-tokens.md)、2026-10-27 各报告、[design-tokens-mobile-draft.md](../design-tokens-mobile-draft.md)）与上述代码的测试覆盖。
+审查对象：提交 `8aad0ea` 时的桌面提醒实现、共享内核 `core/`、移动端规划（[#1](https://github.com/gomeen/Zakki/issues/1)–[#12](https://github.com/gomeen/Zakki/issues/12)、[mobile-spec.md](https://github.com/gomeen/Zakki/blob/afe363348864e4901e937690cf0c802067a5d27a/docs/mobile-spec.md)、[ADR-0001](../adr/0001-inline-time-tokens.md)、[ADR-0002](../adr/0002-recurring-time-tokens.md)、2026-10-27 各报告、[design-tokens-mobile-draft.md](https://github.com/gomeen/Zakki/blob/afe363348864e4901e937690cf0c802067a5d27a/docs/design-tokens-mobile-draft.md)）与上述代码的测试覆盖。
 
 方法：只读审查，可疑边界写临时探针程序（/tmp 独立模块，`replace` 指向 core 或仓库副本）实测，跑完删除；仓库未改动。范围内 `go test`、`-race`、`-count=3`/`-count=15` 均通过，无不稳定用例，下列问题都是现有测试没走到的路径。
 

@@ -2,7 +2,7 @@
 
 日期：2026-11-08 ｜ 环境：Xcode 26.5 (17F42)、iPhone 17 Pro 模拟器 (iOS 26.5)、xcodegen 2.46.0、macOS（已登录 iCloud，CloudDocs 存在）
 探针工程归档：[icloud-probe-assets release](https://github.com/gomeen/Zakki/releases/tag/icloud-probe-assets)（源码 + 文本证据 + 本报告；解包后 `xcodegen generate` 重建）
-决策上下文：[mobile-spec §7](../mobile-spec.md) D21（M3+M4 合并轮，后端 B 探针门禁）｜实施票 #53
+决策上下文：[mobile-spec §7](https://github.com/gomeen/Zakki/blob/afe363348864e4901e937690cf0c802067a5d27a/docs/mobile-spec.md) D21（M3+M4 合并轮，后端 B 探针门禁）｜实施票 #53
 
 ## 0. 探针设计
 

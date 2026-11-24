@@ -7,7 +7,7 @@
 项目分两层：`internal/app` 是 UI 与应用装配（唯一允许依赖 MyGo 的 internal 包）；
 `internal/` 其余包是纯逻辑与持久化，禁止依赖 MyGo 与 `internal/app`。根目录只有入口 `main.go`。
 
-依赖通过标准 `vendor/` 固定。MyGo v0.5.1 的原生文字区间样式补丁在
+依赖通过标准 `vendor/` 固定。MyGo 版本见 [`go.mod`](../go.mod)，原生文字区间样式补丁在
 `patches/mygo-text-range-background.patch`，行内对象尺寸与真实几何补丁在
 `patches/mygo-textinput-objects.patch`，快捷键优先于编辑器词间移动的按键路由补丁在
 `patches/mygo-shortcut-claimed-keys.patch`（⌘数字切标签后编辑器持有焦点，⌘⌥←/→
@@ -72,7 +72,7 @@
 | `internal/app/live_input.go` | 边界键：Enter 分段与列表续行、退格合块、方向键跨块；代码块内 Enter 委托 `applyCodeEnter`。 |
 | `internal/app/live_codeblock.go` | 围栏代码块专属编辑：Tab/Shift+Tab 缩进（`applyCodeTab`，单位取通用页代码分区的 `appearance.codeIndent`，退化围栏落到合成内容行）、Enter 续行缩进（`applyCodeEnter`，继承行首缩进、开括号再加一级）、右下角语言徽标（`codeLangBadge`：FocusBind 聚焦、失焦/Enter 提交、Esc 取消，改写围栏 info 串不经 `applyDocEditAt` 以免抢主编辑器焦点；会话态 `codeLang*` 存 `liveEditorState`）。 |
 | `internal/app/live_virtual.go` | 块内虚拟化：200 行以上的代码块预览与表格（含正在编辑的表格）只构建视口上下各一屏的行，其余用占位撑开；位置取上一帧 `Bounds` 并按滚动量校正，行高按构建过的行实测缓存（`liveVirtState`，键为块源码 + 块类型 + 参与布局的字体、字号、行高、表格 padding 与排版变体，帧末清掉未用条目），未测行用实测均值；正在编辑的表格行总会构建；窗口依据过期（首帧或刚滚动）时再要一帧校正。单个超长段落仍整段排版。 |
-| `internal/app/notify.go` | 系统通知投递与点击回落（ADR-0005）：首次投递时判定通道并缓存——打包运行（`mygo dev` / `mygo build` 产物）用 MyGo 原生通知（macOS UNUserNotificationCenter、Windows 托盘气泡），拿到真实应用图标与点击回调；未打包运行（裸 `go run` / `go test`）退回 `internal/sysnotify`。两通道共用 `sysnotify.Sanitize`。用户拒绝授权映射为 `errNotifyDenied`，只在应用内提示一次且不回落（不绕过系统设置继续弹横幅）。通知 ID 为 `zakki-reminder/<标签持久ID>/<实例dueMs>/<行号>`，同一实例重发替换旧通知；`App.OnNotificationClick` 在 `App.Run` 之前注册（macOS 由点击启动应用时回调早于 `WhenReady`），点击后 `showWindow` → 按持久标签 ID 切标签 → 行号命中则聚焦该块，行号漂移按 due 兜底，标签已删除只唤起窗口；源码模式沿用会话选区不抢光标。 |
+| `internal/app/notify.go` | 系统通知投递与点击回落（ADR-0005）：在主线程 `App.WhenReady` 判定并缓存通道；此前的通知只当次走回落，不缓存——打包运行（`mygo dev` / `mygo build` 产物）用 MyGo 原生通知（macOS UNUserNotificationCenter、Windows 托盘气泡），拿到真实应用图标与点击回调；未打包运行（裸 `go run` / `go test`）退回 `internal/sysnotify`。两通道共用 `sysnotify.Sanitize`。用户拒绝授权映射为 `errNotifyDenied`，只在应用内提示一次且不回落（不绕过系统设置继续弹横幅）。通知 ID 为 `zakki-reminder/<标签持久ID>/<实例dueMs>/<行号>`，同一实例重发替换旧通知；`App.OnNotificationClick` 在 `App.Run` 之前注册（macOS 由点击启动应用时回调早于 `WhenReady`），点击后 `showWindow` → 按持久标签 ID 切标签 → 行号命中则聚焦该块，行号漂移按 due 兜底，标签已删除只唤起窗口；源码模式沿用会话选区不抢光标。 |
 | `internal/app/live_task.go` | 普通与手账复选框共用 `toggleTask`：未勾选的合法重复任务经 `Advance` 推进锚点，保留提醒和规则且保持未勾选；序列结束才勾选，取消勾选沿用普通切换；一次文档事务支持撤销/重做。 |
 | `internal/app/live_widgets.go` | 焦点块输入（`applyProjectedHint`）与表格单元格编辑控件。 |
 | `internal/app/live_timechip.go` / `live_timeprojection.go` / `live_timeview.go` | 时间组件的文案、状态与行内对象呈现：预览和聚焦保持同一组件位置与样式，`liveProjection` 中单个 U+FFFC 对应完整时间源码。原生对象尺寸参与换行与光标布局；前后均可输入，组件后正文保留原位。合法重复任务的 chip 经 `Occurrence` 显示当前实例，当天即使过点仍显示今天，过去或结束实例保持中性、不标逾期。首次点击进入条目时光标默认在条目末尾；搜索选区触及令牌时扩展到整个组件。源码模式仍可直接修改令牌。 |
@@ -111,11 +111,17 @@
 
 ## 持久化生命周期
 
-数据文件：`<数据目录>/zakki.json`。数据目录为 `<系统应用数据>/Zakki`（macOS
-`~/Library/Application Support/Zakki/`、Windows `%APPDATA%\Zakki\`），开发运行为同级的 `Zakki Dev`。
-其中的文件：`zakki.json`（笔记）、`preferences.json`（偏好）、`window-state.json`（MyGo 记的三个窗口
-坐标尺寸）、`updater.json`（MyGo 更新器的检查时间与选择）、`sync-state.json`（仅开启
-云同步后，内含上次同步原文供合并），没有其他文件。版本 12 之前的 `backups/` 目录当前代码从不读写，升级后可自行删除。
+应用数据目录为 macOS `~/Library/Application Support/Zakki/` 或 Windows `%APPDATA%\Zakki\`；开发运行为同级的 `Zakki Dev`。
+
+| 内容 | 备份与同步 |
+|---|---|
+| `zakki.json` | 唯一的笔记文件，含标签内容和部分标签栏设置。备份实际使用的文件：默认在应用数据目录，也可由 `storage.dataFile` 指向其他位置。应用的 Git 自动提交与云同步均只处理这个笔记文件。 |
+| `preferences.json` | 应用偏好；需要保留配置时另行备份。恢复到另一台设备时核对 `storage.dataFile` 等本机路径。 |
+| `window-state.json`、`updater.json`、`fonts/` | MyGo 窗口状态、更新器状态和可重新下载的字体缓存。不需要随笔记备份或同步。 |
+| `sync-state.json` | 设备本地的同步基线，含上次同步的笔记原文。不是独立备份，不要提交到 Git 或跨设备复制。缺失时按首次同步处理：有云端笔记则采用云端，否则上传现有本地笔记。 |
+| AI 密钥和 GitHub 同步凭据 | macOS 存系统钥匙串；Windows 存当前用户的 DPAPI 密文（应用数据目录中的 `ai-key.bin`、`sync-token.bin`）。不在笔记或偏好里，不应提交或同步；换设备后重新保存密钥或授权。 |
+
+当前代码不读写版本 12 之前的 `backups/`；清理之前先确认其中没有需要保留的旧笔记。
 
 不落盘的东西：
 
@@ -158,10 +164,10 @@
 内容不同时：`sync_merge.go` 以基线原文为公共祖先按标签 ID 三方合并，同一标签两边都改按修改时间较新者
 胜——本机文件 mtime vs 远端最近提交的 committer 时间，查不到远端时间按本机较新；合并结果落盘、上传并
 提示已合并，不弹窗、不留档；缺基线原文/解码失败/超标签上限/回验失败时退化为整文件较新者胜）。
-从未同步过的设备以云端为准，欢迎文本不会覆盖云端笔记。CAS 被拒不盲重试旧版本号，重拉重判上限 3 轮。
+从未同步过的设备在云端有笔记时以云端为准，否则上传现有本地笔记；欢迎文本不会覆盖云端笔记。CAS 被拒不盲重试旧版本号，重拉重判上限 3 轮。
 基线（内容指纹 + 上次同步原文 + 后端版本号 + 本地/远端存在性）存应用数据目录 `sync-state.json`，
 损坏时按「从未同步」降级（以云端为准）。开启同步经 `syncActive` 门禁暂停旧 Git 调度器（用户偏好原样保留），关闭后
-按保留配置恢复；token 只存在于后端闭包与系统安全存储，绝不落盘（R7，测试扫描数据目录断言）。
+按保留配置恢复。同步令牌只用于后端认证并经系统安全存储持久化，不以明文写入笔记、偏好或同步基线。
 
 ### 异常处理（无备份副本）
 

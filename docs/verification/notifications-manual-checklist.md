@@ -126,10 +126,8 @@ docs/reports/2026-10-28-review-remediation-verification.md：Windows 原生通�
 | M3 | 未授权提示 | | |
 | M4 | 退出不提醒 | | |
 
-完成后：截图与本文件（含结果）放入 `docs/verification/notifications-<日期>/`，并在
-docs/reports/2026-10-28-review-remediation-verification.md 的「未验证项」处回链执行结果，
-关闭本 issue。
+完成后：将结果与截图写入 `docs/verification/notifications-<日期>/`，在本清单与
+[本地验收票](../../.scratch/desktop-verification/issues/01-native-notifications.md)回链。旧报告保留当时的结果。
 
-macOS 的 M1、M2（除重启后点击）与 M4 已按
-[notifications-2026-11-19](notifications-2026-11-19/README.md) 验收（图标、emoji、截断、
-关窗/删标签/源码模式点击、退出不提醒均通过）；M2 重启后点击、M3 与 Windows W1–W6 待执行。
+[2026-11-19 的 macOS 验收](notifications-2026-11-19/README.md)覆盖当时工作树的 M1、M2（除重启后点击）与 M4，
+不代表当前提交已复验。M2 重启后点击、M3 与 Windows W1–W6 待执行。

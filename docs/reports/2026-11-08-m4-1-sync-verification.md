@@ -1,6 +1,6 @@
 # 2026-11-08 移动端 M4-1 同步引擎与 GitHub 后端 A 验证记录
 
-对应 [docs/mobile-spec.md](../mobile-spec.md) §2.2 同步协议、§7 里程碑 M4（实施票
+对应 [docs/mobile-spec.md](https://github.com/gomeen/Zakki/blob/afe363348864e4901e937690cf0c802067a5d27a/docs/mobile-spec.md) §2.2 同步协议、§7 里程碑 M4（实施票
 [#52](https://github.com/gomeen/Zakki/issues/52)）：GitHub Contents API sha CAS 后端、
 Device Flow 认证（GitHub App user token）、D13 冲突判定与二选一对话框、conflicts/ 留档、
 前台拉推与 M3-1 对账管线串联。模拟器端到端实测完成（进程内 GitHub stub）；**真实 GitHub

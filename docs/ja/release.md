@@ -8,7 +8,7 @@
 - アプリ名とインストールパッケージ：macOS は `Zakki.app` / DMG、Windows は `Zakki.exe` / Setup EXE。アプリ識別子は `com.gomeen.zakki`、
   Go module 名は `zakki`；データディレクトリは macOS が `~/Library/Application Support/Zakki/`、
   Windows が `%APPDATA%\Zakki\` で、JSON 構造は変えません。アプリは新規インストールとして扱い、旧データディレクトリの移行は行いません。
-- アップデータ：MyGo v0.5.1 の `plugins/updater/native` で、すべてネイティブ UI、webview なし；アプリメニューとトレイの両方が「アップデートを確認…」を提供し、
+- アップデータ：[`go.mod`](../../go.mod) で固定した MyGo の `plugins/updater/native` で、すべてネイティブ UI、webview なし；アプリメニューとトレイの両方が「アップデートを確認…」を提供し、
   既定では手動チェックのみです。ユーザーはバージョン情報の確認、ダウンロードとインストール、スキップ、後で再起動を選べます。
 - リリース対象は **darwin/universal**（Intel と Apple Silicon）と **windows/amd64**（Windows 10/11 x64）に固定します。
   同じ Release が `update-darwin-universal.json` と `update-windows-amd64.json` を別々に提供し、2 つのシステムで更新が混ざることはありません。
@@ -62,7 +62,7 @@ gh secret set MYGO_UPDATER_PRIVATE_KEY --repo gomeen/Zakki \
 
 1. **`mygo.json` の `version`** を変更し（唯一のバージョン源）、`CHANGELOG.md` に `## X.Y.Z` の節を追加します。アプリ内の更新説明はこの節から来ます；
    ファイルが存在しても節がない場合はビルドが失敗します。
-2. `make check` と `go mod verify` を実行し、README と挙動の変化の説明を同期させます。
+2. 下記のワークフローと同じルールでルートモジュールと `core` を検証し、`make check` を実行します。README と挙動変更の説明も更新します。
 3. コードをコミットし、リリース対象のコミットに漏れがないことを確認してから同じ番号の tag を打ちます。以下のコマンドは能動的なリリース操作であり、設定段階では実行しないでください：
 
    ```sh
@@ -75,7 +75,8 @@ gh secret set MYGO_UPDATER_PRIVATE_KEY --repo gomeen/Zakki \
 4. Actions の `release` ワークフローを確認します。それは：
    - tag、バージョン、リポジトリ、秘密鍵の Secret を照合し、新バージョンが現在の Latest より厳密に高いことを要求します；秘密鍵がない場合やバージョンが後退している場合は直ちに失敗し、
      不完全な配布物を生成しません。
-   - `go mod verify` と完全な `make check` を実行します；macOS ランナーが universal パッケージをビルドし、Ubuntu ランナーが NSIS をインストールして
+   - ルートで `go mod verify` を実行し、ローカルディレクトリに置換した `zakki/core`（`replace zakki/core => ./core`）の既知の `missing ziphash` 誤検知だけを例外とします。他の検証エラーはリリースを中止します。続いて `go -C core mod verify` と完全な `make check` を実行し、両方の通過を必須とします。
+   - macOS ランナーが universal パッケージをビルドし、Ubuntu ランナーが NSIS をインストールして
      Windows x64 インストーラをクロスビルドします。
    - インストーラ、マニフェストのバージョン/URL、アーカイブのサイズを検査します；加えて macOS の両アーキテクチャと ad-hoc 署名、Windows の PE x64 実行ファイルを照合します。
    - 現在の Latest バージョンを読み、両プラットフォームのマニフェストと添付がそのバージョンから新バージョンへの有効な delta を含むことを要求し、署名フィールドと実際のファイルサイズを照合します。
@@ -166,7 +167,7 @@ https://github.com/gomeen/Zakki/releases/latest/download/update-windows-amd64.js
 
 ## リリース検収
 
-- [ ] `mygo.json` と tag が同じ番号で、CHANGELOG に対応する節があり、`make check` と `go mod verify` が通る。
+- [ ] `mygo.json` と tag が同じ番号で、CHANGELOG に対応する節があり、ルートモジュールの検証が上記のルールを満たし、`go -C core mod verify` と `make check` が通る。
 - [ ] Secret が現在の公開鍵に対応し、秘密鍵は独立した安全なバックアップがあり、Git と添付のいずれにも秘密鍵がない。
 - [ ] macOS と Windows のビルド job がともに成功し、ドラフトに DMG、Setup EXE、2 つの署名済みアーカイブ、2 つの更新マニフェスト、両プラットフォームの delta が含まれ、余分な添付がない。
 - [ ] Intel / Apple Silicon のインストールが起動する；実際にダウンロードしたファイルで Gatekeeper の挙動を検証し、ローカルの隔離マークのないパッケージで代用しない。

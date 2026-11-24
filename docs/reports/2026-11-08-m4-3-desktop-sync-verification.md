@@ -1,6 +1,6 @@
 # 2026-11-08 桌面同步配套（M4-3）验证记录
 
-对应 [docs/mobile-spec.md](../mobile-spec.md) §2.2 / §6.3 / §7 M4 行、实施票
+对应 [docs/mobile-spec.md](https://github.com/gomeen/Zakki/blob/afe363348864e4901e937690cf0c802067a5d27a/docs/mobile-spec.md) §2.2 / §6.3 / §7 M4 行、实施票
 [#54](https://github.com/gomeen/Zakki/issues/54)（总票 #50）：sync 偏好节（v14）、开启同步
 暂停旧 Git 调度器、桌面同步循环（后端 A：先 pull 再 commit）、D13 冲突呈现与留档。
 自动化 + 隔离探针实测完成；**真实 GitHub 连接、真机联调未验证**，清单见文末。

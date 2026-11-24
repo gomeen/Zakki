@@ -9,7 +9,7 @@
 專案分兩層：`internal/app` 是 UI 與應用程式裝配（唯一允許依賴 MyGo 的 internal 套件）；
 `internal/` 其餘套件是純邏輯與持久化，禁止依賴 MyGo 與 `internal/app`。根目錄只有進入點 `main.go`。
 
-依賴透過標準 `vendor/` 固定。MyGo v0.5.1 的原生文字區間樣式補丁在
+依賴透過標準 `vendor/` 固定。MyGo 版本見 [`go.mod`](../../go.mod)，原生文字區間樣式補丁在
 `patches/mygo-text-range-background.patch`，行內物件尺寸與真實幾何補丁在
 `patches/mygo-textinput-objects.patch`，快速鍵優先於編輯器詞間移動的按鍵路由補丁在
 `patches/mygo-shortcut-claimed-keys.patch`（⌘數字切分頁後編輯器持有焦點，⌘⌥←/→
@@ -46,7 +46,7 @@
 | `internal/app/menu_edit.go` | 編輯指令路由：正文聚焦時，選單列與右鍵選單的復原、重做及剪貼簿操作共用文件事務；搜尋、分頁重新命名和設定中的輸入保留系統編輯角色。焦點切換時 `refreshEditMenuRouting` 只刷新編輯子選單項目（系統 Role ↔ 應用程式 Click），不全量 `buildMenu`。右鍵指令在主視圖影格末執行，避免控制項建構期間重複記錄歷史。`copyTabTextToClipboard` 供選單與快速鍵兜底共用。 |
 | `internal/app/live_format.go` | 格式指令執行（`execFormatCommand`）：標題/清單/引用/行內/程式碼區塊/插入在即時預覽與原始碼模式共用；無選取區切換「待輸入格式」意圖（`mdPending`，輸入/貼上/IME 確認時經 `pendingWrapFor` 產生有效 Markdown）；指令以獨立復原事務執行（`editCommand`）。 |
 | `internal/app/live_link.go` | 連結浮層 `linkTool`：開啟、驗證並寫回連結。 |
-| `internal/app/settings_window.go` / `internal/app/settings_ui.go` / `internal/app/settings_storage.go` / `internal/app/settings_keymap.go` | 原生設定視窗：單一實例非模態（`StateKey: "settings"`），四頁導覽（一般、分頁、儲存與同步、快速鍵）與草稿綁定；變更經 `updatePreferences`；「儲存與同步」頁在 settings_storage.go（檔案路徑、儲存狀態與 Git 開關，見 storage_file.go 行）；快速鍵頁點擊徽標錄鍵、衝突就地「改用至此」（錄鍵期間經 `setKeymapRecording` 臨時摘除選單與全域快速鍵，結束時重建；驗證與寫入在 keymap_bindings.go），全域快速鍵先註冊新鍵再註銷舊鍵。欄位契約見 [configuration.md](configuration.md)。 |
+| `internal/app/settings_window.go` / `internal/app/settings_ui.go` / `internal/app/settings_storage.go` / `internal/app/settings_keymap.go` | 原生設定視窗：單一實例非模態（`StateKey: "settings"`），五頁導覽（一般、分頁、AI 助理、儲存與同步、快速鍵）與草稿綁定；變更經 `updatePreferences`；AI 頁在 `settings_ai.go`（設定存入偏好的 `ai` 節，API 金鑰只存系統安全儲存）；「儲存與同步」頁在 settings_storage.go（檔案路徑、儲存狀態與 Git 開關，見 storage_file.go 行）；快速鍵頁點擊徽標錄鍵、衝突就地「改用至此」（錄鍵期間經 `setKeymapRecording` 臨時摘除選單與全域快速鍵，結束時重建；驗證與寫入在 keymap_bindings.go），全域快速鍵先註冊新鍵再註銷舊鍵。欄位契約見 [configuration.md](configuration.md)。 |
 | `internal/app/sync_bridge.go` / `internal/app/settings_sync.go` | 桌面雲端同步橋接：`configureSync` 把偏好 sync 節裝配為 `notes.Store` 的同步設定（後端 A + token provider + 基線狀態檔路徑，隨每次偏好套用重放，但僅在儲存庫/Client ID/端點/安全儲存變化時重建後端實例——Store 按指標身分判設定變更，新指標會作廢在途輪次並丟掉防抖排程）；同步觸發（啟動、視窗啟用、儲存後防抖、手動）與狀態泵 `syncPump`（遠端已套用或合併完成則重載筆記並重排提醒並提示；視窗聚焦拉取（限頻 30s）、失焦/隱藏時未推送修改立即推送（限頻 5s）、結束時經 `FinalSync` 限時 3s 補推，失敗不阻止結束）；連接流程 `connectGitHubSync`（Device Flow：裝置碼 → 使用者碼彈層在獨立 goroutine 展示不阻塞輪詢 → 權杖存系統安全儲存；Client ID 取偏好 `sync.clientId`，空時回落環境變數 `ZAKKI_GITHUB_CLIENT_ID`，`ZAKKI_GITHUB_BASE_URL` 僅供自測注入本地假服務）、中斷連接清憑證；`open_url.go` 只接受 https 的授權頁位址並在預設瀏覽器開啟（`open` / `rundll32`）；憑證存在與否只在開啟設定頁、連接/中斷後讀取並快取，不在建構影格裡做系統呼叫；「儲存與同步」頁雲端同步分區（settings_sync.go：開關、儲存庫、Client ID、連接/中斷、立即同步、開啟授權頁、狀態行與 Git 暫停說明橫幅，缺 Client ID 時顯示原因；雙方都改時自動合併，無衝突入口）。 |
 | `internal/app/settings_general.go` | 「一般」頁骨架：一般（語言、視窗）在前，隨後由 `settings_ui.go` 的 `appearanceSections` 建構主題、排版、程式碼、頂端列分區，整頁共用受視窗高度約束的捲動區與單一重設入口；重設同時回復視窗與外觀，保留儲存、Git、快速鍵和筆記。預設視窗大小按每行字數 × 行數輸入，附目前字級換算的像素。偏好異常的復原入口保留在頁頂。 |
 | `internal/app/settings_select.go` | 設定頁下拉：`boundedSelect` 與 `ui.Select` 同外觀與鍵盤行為，彈層限高 300 並在內部捲動（`ui.Select` 不限高，選項多時被視窗裁掉）；`selectTrigger` / `selectPanel` 供字型選擇器共用。 |
@@ -72,7 +72,7 @@
 | `internal/app/live_input.go` | 邊界鍵：Enter 分段與清單續行、退格合塊、方向鍵跨區塊；程式碼區塊內 Enter 委託 `applyCodeEnter`。 |
 | `internal/app/live_codeblock.go` | 圍籬程式碼區塊專屬編輯：Tab/Shift+Tab 縮排（`applyCodeTab`，單位取一般頁程式碼分區的 `appearance.codeIndent`，退化圍籬落到合成內容行）、Enter 續行縮排（`applyCodeEnter`，繼承行首縮排、開括號再加一級）、右下角語言徽標（`codeLangBadge`：FocusBind 聚焦、失焦/Enter 提交、Esc 取消，改寫圍籬 info 串不經 `applyDocEditAt` 以免搶主編輯器焦點；工作階段態 `codeLang*` 存 `liveEditorState`）。 |
 | `internal/app/live_virtual.go` | 區塊內虛擬化：200 行以上的程式碼區塊預覽與表格（含正在編輯的表格）只建構視口上下各一螢幕的行，其餘用佔位撐開；位置取上一影格 `Bounds` 並按捲動量校正，行高按建構過的行實測快取（`liveVirtState`，鍵為區塊原始碼 + 區塊類型 + 參與版面的字型、字級、行高、表格 padding 與排版變體，影格末清掉未用項目），未測行用實測均值；正在編輯的表格行總會建構；視窗依據過期（首影格或剛捲動）時再要一影格校正。單一超長段落仍整段排版。 |
-| `internal/app/notify.go` | 系統通知投遞與點擊回落（ADR-0005）：首次投遞時判定通道並快取——封裝執行（`mygo dev` / `mygo build` 產物）用 MyGo 原生通知（macOS UNUserNotificationCenter、Windows 系統匣氣泡），拿到真實應用程式圖示與點擊回呼；未封裝執行（裸 `go run` / `go test`）退回 `internal/sysnotify`。兩通道共用 `sysnotify.Sanitize`。使用者拒絕授權映射為 `errNotifyDenied`，只在應用程式內提示一次且不回落（不繞過系統設定繼續彈橫幅）。通知 ID 為 `zakki-reminder/<分頁持久ID>/<實例dueMs>/<行號>`，同一實例重發替換舊通知；`App.OnNotificationClick` 在 `App.Run` 之前註冊（macOS 由點擊啟動應用程式時回呼早於 `WhenReady`），點擊後 `showWindow` → 按持久分頁 ID 切分頁 → 行號命中則聚焦該區塊，行號漂移按 due 兜底，分頁已刪除只喚起視窗；原始碼模式沿用工作階段選取區不搶游標。 |
+| `internal/app/notify.go` | 系統通知投遞與點擊回落（ADR-0005）：在主執行緒的 `App.WhenReady` 判定通道並快取；就緒前的通知僅當次使用備援通道，不快取判定。封裝執行（`mygo dev` / `mygo build` 產物）用 MyGo 原生通知（macOS UNUserNotificationCenter、Windows 系統匣氣泡），拿到真實應用程式圖示與點擊回呼；未封裝執行（裸 `go run` / `go test`）退回 `internal/sysnotify`。兩通道共用 `sysnotify.Sanitize`。使用者拒絕授權映射為 `errNotifyDenied`，只在應用程式內提示一次且不回落（不繞過系統設定繼續彈橫幅）。通知 ID 為 `zakki-reminder/<分頁持久ID>/<實例dueMs>/<行號>`，同一實例重發替換舊通知；`App.OnNotificationClick` 在 `App.Run` 之前註冊（macOS 由點擊啟動應用程式時回呼早於 `WhenReady`），點擊後 `showWindow` → 按持久分頁 ID 切分頁 → 行號命中則聚焦該區塊，行號漂移按 due 兜底，分頁已刪除只喚起視窗；原始碼模式沿用工作階段選取區不搶游標。 |
 | `internal/app/live_task.go` | 一般與手帳核取方塊共用 `toggleTask`：未勾選的合法重複任務經 `Advance` 推進錨點，保留提醒和規則且保持未勾選；序列結束才勾選，取消勾選沿用一般切換；一次文件事務支援復原/重做。 |
 | `internal/app/live_widgets.go` | 焦點區塊輸入（`applyProjectedHint`）與表格儲存格編輯控制項。 |
 | `internal/app/live_timechip.go` / `live_timeprojection.go` / `live_timeview.go` | 時間元件的文案、狀態與行內物件呈現：預覽和聚焦保持同一元件位置與樣式，`liveProjection` 中單一 U+FFFC 對應完整時間原始碼。原生物件尺寸參與換行與游標版面；前後均可輸入，元件後正文保留原位。合法重複任務的 chip 經 `Occurrence` 顯示當前實例，當天即使過點仍顯示今天，過去或結束實例保持中性、不標逾期。首次點擊進入條目時游標預設在條目末尾；搜尋選取區觸及權杖時擴展到整個元件。原始碼模式仍可直接修改權杖。 |
@@ -111,11 +111,17 @@
 
 ## 持久化生命週期
 
-資料檔案：`<資料目錄>/zakki.json`。資料目錄為 `<系統應用程式資料>/Zakki`（macOS
-`~/Library/Application Support/Zakki/`、Windows `%APPDATA%\Zakki\`），開發執行為同級的 `Zakki Dev`。
-其中的檔案：`zakki.json`（筆記）、`preferences.json`（偏好）、`window-state.json`（MyGo 記的三個視窗
-座標尺寸）、`updater.json`（MyGo 更新器的檢查時間與選擇）、`sync-state.json`（僅開啟
-雲端同步後，內含上次同步原文供合併），沒有其他檔案。版本 12 之前的 `backups/` 目錄目前程式碼從不讀寫，升級後可自行刪除。
+應用程式資料目錄為 macOS 的 `~/Library/Application Support/Zakki/` 或 Windows 的 `%APPDATA%\Zakki\`；開發執行使用同層的 `Zakki Dev`。
+
+| 內容 | 備份與同步 |
+|---|---|
+| `zakki.json` | 唯一的筆記檔案，含分頁內容和部分分頁列設定。備份實際使用的檔案：預設在應用程式資料目錄，也可由 `storage.dataFile` 指向其他位置。應用程式的 Git 自動提交和雲端同步只處理這個筆記檔案。 |
+| `preferences.json` | 應用程式偏好；需要保留設定時另外備份。還原到其他裝置時，確認 `storage.dataFile` 等本機路徑。 |
+| `window-state.json`、`updater.json`、`fonts/` | MyGo 視窗狀態、更新器狀態和可重新下載的字型快取。不需隨筆記備份或同步。 |
+| `sync-state.json` | 裝置本機的同步基線，含上次同步的筆記原文。不是獨立備份，請勿提交至 Git 或跨裝置複製。缺少此檔時視為首次同步：有雲端筆記就採用雲端，否則上傳現有本機筆記。 |
+| AI 金鑰與 GitHub 同步憑證 | macOS 存在系統鑰匙圈；Windows 以目前使用者的 DPAPI 加密後，存放在應用程式資料目錄中的 `ai-key.bin`、`sync-token.bin`。筆記與偏好不含憑證，請勿提交或同步；更換裝置後請重新儲存金鑰或授權。 |
+
+目前程式碼不讀寫版本 12 之前的 `backups/`；清除前請先確認沒有需要保留的舊筆記。
 
 不落盤的東西：
 
@@ -161,7 +167,7 @@
 從未同步過的裝置以雲端為準，歡迎文字不會覆蓋雲端筆記。CAS 被拒不盲重試舊版本號，重拉重判上限 3 輪。
 基線（內容指紋 + 上次同步原文 + 後端版本號 + 本地/遠端存在性）存應用程式資料目錄 `sync-state.json`，
 損毀時按「從未同步」降級（以雲端為準）。開啟同步經 `syncActive` 門禁暫停舊 Git 排程器（使用者偏好原樣保留），關閉後
-按保留設定還原；token 只存在於後端閉包與系統安全儲存，絕不落盤（R7，測試掃描資料目錄斷言）。
+按保留設定還原。同步權杖僅供後端驗證身分並持久儲存在系統安全儲存空間，不以明文寫入筆記、偏好或同步基線。
 
 ### 異常處理（無備份副本）
 
@@ -218,7 +224,7 @@
 執行期所有偏好變更走 `updatePreferences` 統一入口：驗證 → 套用執行期 → 同步選單/視窗/快速鍵 →
 防抖自動儲存；磁碟寫經 `prefs.Store` 串行化、tmp/rename 原子替換，修訂號防舊快照覆蓋新值。
 `preferences.json` 損毀或版本超前時進入待復原狀態：不覆蓋原檔案，設定頁提供「捨棄損壞的檔案並回復預設設定」（直接覆蓋原檔，不留 `.bad` 副本）；復原成功後目前工作階段立即按復原後的路徑重新載入筆記，只有載入成功才解除寫入保護。
-偏好版本目前為 **15**：版本 15 新增 `sync.clientId`（GitHub App Client ID，非憑證；空字串回落環境變數 `ZAKKI_GITHUB_CLIENT_ID`，從 Finder 啟動拿不到 shell 環境變數時連接按鈕不再永遠點不動）；版本 14 新增雲端同步 `sync` 節（見「儲存與同步」雲端同步小節與 `internal/app/sync_bridge.go` 行）；版本 13 新增正文區左右/上下內距覆蓋；版本 12 由 `storage` 與 `git` 取代 `backup` 與防抖毫秒（見 `internal/prefs` 行）；
+偏好版本目前為 **16**：版本 16 新增不含憑證的 `ai` 節（API 金鑰只存系統安全儲存）。版本 15 新增 `sync.clientId`（GitHub App Client ID，非憑證；空字串回落環境變數 `ZAKKI_GITHUB_CLIENT_ID`，從 Finder 啟動拿不到 shell 環境變數時連接按鈕不再永遠點不動）；版本 14 新增雲端同步 `sync` 節（見「儲存與同步」雲端同步小節與 `internal/app/sync_bridge.go` 行）；版本 13 新增正文區左右/上下內距覆蓋；版本 12 由 `storage` 與 `git` 取代 `backup` 與防抖毫秒（見 `internal/prefs` 行）；
 更早版本的鍵升級語意見 configuration.md。結束流程（`shutdownForQuit`）在筆記資料最終儲存後等待
 偏好最終儲存，任一失敗阻止結束或更新重新啟動。完整契約見 [偏好與設定](configuration.md)；
 MyGo 更新器另外管理 `updater.json`，不改變應用程式偏好的 JSON 契約。
@@ -237,6 +243,6 @@ MyGo 更新器另外管理 `updater.json`，不改變應用程式偏好的 JSON 
 - **偏好測試**：`internal/prefs` 的測試覆蓋預設值、嚴格解碼（已移除的舊 backup 欄位在相容版本中摘除）、損毀與超前版本復原、寫失敗回報、修訂號防回寫；筆記版本移轉表在 `internal/notes`；
   `menu_commands_test.go` / `internal/markdown` 的格式與行內邊界測試 / `view_theme_test.go`
   分別覆蓋加速器與衝突驗證、純格式轉換（含 CJK/emoji/游標映射）與全主題對比度；
-  `menu_contract_test.go` 驗證新選單結構、設定視窗四頁（`ui.NewTester`）與改鍵流程。
+  `menu_contract_test.go` 驗證新選單結構、設定視窗導覽（`ui.NewTester`）與改鍵流程。
 - 測試指令見 `Makefile`：`make test`（`CGO_ENABLED=0 go test ./... -count=1`）、
   `make race`、`make vet`（含 `go tool mygo vet .` 的 UI 生命週期檢查）。

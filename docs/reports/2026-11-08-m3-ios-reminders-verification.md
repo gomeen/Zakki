@@ -1,6 +1,6 @@
 # 2026-11-08 移动端 M3-1 iOS 提醒验证记录
 
-对应 [docs/mobile-spec.md](../mobile-spec.md) §7 里程碑 M3（实施票
+对应 [docs/mobile-spec.md](https://github.com/gomeen/Zakki/blob/afe363348864e4901e937690cf0c802067a5d27a/docs/mobile-spec.md) §7 里程碑 M3（实施票
 [#51](https://github.com/gomeen/Zakki/issues/51)）：令牌弹层（D17）、通知对账重排（§3.3）、
 完成推进（Advance）、64 槽与状态展示（§3.4）、Time Sensitive 尝试（R2）。模拟器端到端
 实测完成；**真机项未验证**，清单见文末（不作为完成声明）。

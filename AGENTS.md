@@ -36,15 +36,9 @@ Zakki：基于 [MyGo](https://github.com/egoist/mygo) 原生 UI 的 macOS/Window
 
 ## 命令
 
-```bash
-make check          # 提交前必须全绿：fmt-check + vet（含 mygo vet）+ test + race + arch-check
-make test           # CGO_ENABLED=0 go test ./... -count=1，含 MyGo vendor 补丁测试
-make race           # go test -race ./... -count=1，含 MyGo vendor 补丁测试
-make vet            # go vet ./... && go tool mygo vet .
-make build          # go tool mygo build，产物在 build/
-make vendor         # 重新生成依赖副本并应用 MyGo 补丁
-go list -f '{{.Dir}}' github.com/egoist/mygo/ui   # 查看实际参与构建的 MyGo UI 源码
-```
+- 提交前运行 `make check`，必须全绿。单独复查测试、竞态或静态检查时用 `make test`、`make race`、`make vet`。各目标的检查范围以 [Makefile](Makefile) 为准。
+- 打包用 `make build`；刷新依赖副本及补丁用 `make vendor`。
+- 查看实际参与构建的 MyGo UI 源码：`go list -f '{{.Dir}}' github.com/egoist/mygo/ui`。
 
 ## 提交
 
@@ -54,6 +48,14 @@ go list -f '{{.Dir}}' github.com/egoist/mygo/ui   # 查看实际参与构建的 
 
 ## Agent skills
 
+### Issue tracker
+
+事项和规格使用 `.scratch/` 下的 Markdown 文件。发布、读取或关闭事项时，见 [事项约定](docs/agents/issue-tracker.md)。
+
+### Triage labels
+
+使用五个默认分诊状态。设置或读取状态时，见 `docs/agents/triage-labels.md`。
+
 ### Domain docs
 
-单上下文布局：根目录 `GLOSSARY.md` + `docs/adr/`。见 `docs/agents/domain.md`。
+单上下文布局，使用根目录 `GLOSSARY.md` 和 `docs/adr/`。探索领域或查阅架构决策时，见 `docs/agents/domain.md`。

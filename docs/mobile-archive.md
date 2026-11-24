@@ -23,7 +23,7 @@
 | M3 iOS 提醒 | 令牌弹层、单次通知重排、完成推进、重复展开、64 槽跨任务按最早 `fireAt` 分配 + 最后槽续排、状态展示（已排定/待同步/待续排/权限受限降级）| [#51](https://github.com/gomeen/Zakki/issues/51) | [2026-11-08](reports/2026-11-08-m3-ios-reminders-verification.md)（53 条新增 XCTest，模拟器 scheduled=63+renewal）|
 | M4-1 同步引擎 + GitHub 后端 A | §2.2 判定表四种情况、sha CAS（409/422 重拉重判定）、Device Flow + 刷新 + 撤销、Keychain、`conflicts/` 留档、冲突对话框 | [#52](https://github.com/gomeen/Zakki/issues/52) | [2026-11-08](reports/2026-11-08-m4-1-sync-verification.md)（46 条新增 XCTest + 进程内 GitHub stub 端到端）|
 | M4-2 iCloud 云盘后端 B | 文件选择器授权 + security-scoped bookmark、基线=文件身份 + mtime 的写前比对、命名扫描 + NSFileVersion 双通道冲突副本、书签失效重选状态机 | [#53](https://github.com/gomeen/Zakki/issues/53) | [2026-11-08](reports/2026-11-08-m4-2-icloud-backend-verification.md)（35 条新增 XCTest + 3 场景 + 跨容器真实 picker）|
-| iCloud 探针（D21 门禁）| capability 核对、picker 授权、占位文件触发下载、冲突副本枚举——**三项全通过**，所以后端 B 没有回落 M5 | — | [2026-11-08](reports/2026-11-08-icloud-sync-probe.md) |
+| iCloud 探针（D21 门禁）| 模拟器验证了无 entitlement 的文件选择、书签冷恢复和本地就地读写，以及占位检测与冲突扫描的本地行为；真实 iCloud Drive、占位下载和冲突检测仍需真机验证 | — | [2026-11-08](reports/2026-11-08-icloud-sync-probe.md) |
 
 ### 2.2 M4-3 桌面同步配套：**属于桌面，不随移动端冻结**
 
@@ -148,22 +148,22 @@ iCloud for Windows、CloudKit、Syncthing、自建同步服务、Dropbox（§0�
 ## 6. 冻结期间的约定
 
 - 不修 iOS bug、不加 iOS 功能、不跑真机验收；`mobile/` 与 `mobile.yml` 原样保留。
-- `core/` **不冻结**：桌面在消费它。改 `core/` 必须跑 `go test ./...`（含 core 契约测试），
+- `core/` **不冻结**：桌面在消费它。改 `core/` 必须跑 `make test`（根目录的 `go test ./...` 不运行嵌套模块的 core 契约测试），
   并注意 `mobile/binding` 依赖的 `zakkicore` 导出面。
 - 桌面侧若改 `zakki.json` 格式或迁移语义，规格 §2.1 的共享契约仍受约束（ADR-0003 第 5 条）。
 - issue [#26](https://github.com/gomeen/Zakki/issues/26)、[#50](https://github.com/gomeen/Zakki/issues/50)、
   [#57](https://github.com/gomeen/Zakki/issues/57)、[#19](https://github.com/gomeen/Zakki/issues/19)
   保持 open 作为恢复入口，不进入 triage 队列。
 
-## 7. 不涉及手机端的剩余工作
+## 7. 冻结时的桌面待办快照
 
-移动端冻结后仓库里剩下的事，按「值不值得做」粗排：
+下表保留冻结时的历史记录，不代表当前进度。现行桌面待办见 [`.scratch/`](../.scratch/)，不改变移动端冻结范围。
 
 | 待办 | 现状 | 涉及面 |
 |---|---|---|
 | [#22](https://github.com/gomeen/Zakki/issues/22) Windows 通知实机 + macOS 通知中心视觉确认 | 清单已写好（`docs/verification/notifications-manual-checklist.md`），只有参数/脚本单测与交叉编译证据 | 需一台真机 Windows + macOS |
 | 桌面同步真实账号验证 | 桌面 GitHub 后端 A 已发布，但 Device Flow、token 过期/撤销、限流、>1MB raw 回退仍只有 mock 证据 | 纯桌面，1 个 GitHub App 即可开始 |
 | Windows DPAPI 安全存储 | 交叉编译 + 接口测试过，**从未在真实 Windows 上运行** | 纯桌面，需一台 Windows |
-| Copilot 式输入补全 | 调研报告已完成（`docs/reports/2026-11-11-copilot-style-input-research.md`，未提交），MVP 建议在报告 §6.4；硬缺口是 MyGo 没有 ghost text 装饰层 | 纯桌面，需先决策 |
+| Copilot 式输入补全 | 调研报告已完成（[报告已入库](reports/2026-11-11-copilot-style-input-research.md)），MVP 建议在报告 §6.4；硬缺口是 MyGo 没有 ghost text 装饰层 | 纯桌面，需先决策 |
 | [#49](https://github.com/gomeen/Zakki/issues/49) Listed on Awesome MyGo | 对外列表登记，非代码 | 元数据 |
 | 性能与启动的后续建议 | 见 `docs/reports/2026-10-18-performance-review.md`、`2026-10-18-startup-shutdown-review.md` 的「后续建议」：大表格块内虚拟化、镜像扫描与 Git runner 的超时、备份同步入口后台化、迁移改元数据预检 | 纯桌面，均非阻塞 |

@@ -10,15 +10,14 @@ display notification`，Windows 走固定 AUMID 的 PowerShell WinRT toast。两
 
 MyGo v0.9.0（已在 `vendor/`）提供 `mygo.Notification`：macOS 走
 `UNUserNotificationCenter`（应用包身份、前台也显示横幅、授权被拒可感知），Windows 走
-托盘气泡（应用托盘图标），三平台的点击都经 `App.OnNotificationClick(id)` 回到应用，
-且 ID 在应用重启后仍可识别。
+托盘气泡（应用托盘图标）。原生点击回调通过 `App.OnNotificationClick(id)` 交给应用；
+通知 ID 可以跨进程解析，但点击能否启动应用并交付 ID 取决于平台。
 
 ## 决策
 
-1. **打包运行改用 MyGo 原生通知**。首次投递时用 `NotificationsSupported()` 判定一次
-   并缓存：可用就只走原生通道；不可用（裸 `go run`、`go test` 没有应用包）退回
-   `internal/sysnotify`，开发与测试行为不变。判定之后即使某次投递失败也不回落——
-   用户拒绝授权后绕过系统设置继续弹横幅是错的。
+1. **打包运行改用 MyGo 原生通知**。在主线程的 `App.WhenReady` 内用 `NotificationsSupported()`
+   判定一次并缓存：可用就只走原生通道，不可用则交给 `internal/sysnotify`（包括裸 `go run`、`go test`）。
+   就绪前到达的通知仅当次走回落，不缓存判定；选定原生后，投递失败或拒绝授权都不回落。
 2. **通知 ID 承载定位信息**：`zakki-reminder/<标签持久ID>/<实例dueMs>/<行号>`。
    同一实例重发替换旧通知；点击按持久标签 ID（不是索引）切标签，行号命中就聚焦该块，
    行号因编辑漂移时按 due 兜底；标签已删除只唤起窗口；源码模式沿用会话选区，不抢光标。
@@ -49,7 +48,8 @@ MyGo v0.9.0（已在 `vendor/`）提供 `mygo.Notification`：macOS 走
 ## Consequences
 
 - 两平台的通知都显示 Zakki 自己的身份与图标；macOS 不再出现 Script Editor。
-- 点击通知会前置窗口、切到提醒所属标签并把光标放到那条提醒；重启后点击旧通知同样生效。
+- 收到点击回调时，应用前置窗口，并按上面的规则定位提醒。macOS 的旧通知冷启动定位仍需实机验证；
+  Windows 的托盘气泡依赖当次运行的托盘条目，不承诺退出后点击旧通知仍能定位。
 - macOS 首次通知会弹出授权询问。若 30 秒内没有回答，该条投递作废（窗口开着时仍有
   应用内气泡），后续提醒不受影响。
 - Windows 的「固定 AUMID / 来源显示 Windows PowerShell」验证项作废，清单已改写；

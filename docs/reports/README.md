@@ -1,16 +1,14 @@
 # 调查报告归档
 
-一次性性能、启动与渲染核查报告，带日期前缀，不作为日常维护的架构文档。
-长期事实以 [architecture.md](../architecture.md) 为准。
+带日期的调研、验收与测量记录用于追溯当时的证据。长期事实见 [架构说明](../architecture.md)，待办见 [本地事项](../../.scratch/)。
 
 | 报告 | 说明 |
 |---|---|
 | [2026-11-13-mygo-090-adoption-audit.md](2026-11-13-mygo-090-adoption-audit.md) | MyGo v0.9.0 升级后新能力接入评估：B1–B5 逐项结论（中文排版的段间距/首行缩进、更新器语言跟随与 OnInstalled、Edit 菜单与快捷键兜底、菜单 Danger、链接点状下划线），可接入项形成提交，不适用项写下客观条件 |
 | [2026-11-11-copilot-style-input-research.md](2026-11-11-copilot-style-input-research.md) | 输入时 AI 补全与模型可配置性调研：Copilot/Cursor/Continue/Zed/JetBrains 先例、可接入 FIM API 面、触发/防抖/IME 通用做法，附 MyGo 编辑器能力盘点与 Zakki MVP 建议 |
 | [2026-11-08-m4-2-icloud-backend-verification.md](2026-11-08-m4-2-icloud-backend-verification.md) | 移动端 M4-2 iCloud 云盘后端 B：文件选择器授权/书签失效重选、身份+mtime 基线 CAS、双通道冲突副本、复用 D13 判定表与留档的 35 条新 XCTest 与模拟器端到端实测（含跨容器真实 picker 授权） |
-| [2026-11-08-m4-3-desktop-sync-verification.md](2026-11-08-m4-3-desktop-sync-verification.md) | 桌面同步配套（M4-3）：sync 偏好节 v14、旧 Git 调度器暂停/恢复、先拉后提同步循环、D13 冲突对话框与留档，隔离探针全流程实测 |
+| [2026-11-08-m4-3-desktop-sync-verification.md](2026-11-08-m4-3-desktop-sync-verification.md) | 桌面同步配套（M4-3）：sync 偏好节 v14、旧 Git 调度器暂停/恢复、先拉后提同步循环、D13 冲突对话框与留档的历史探针；现行桌面冲突行为见 [ADR-0004](../adr/0004-sync-auto-merge-no-archives.md) |
 | [2026-11-08-m4-1-sync-verification.md](2026-11-08-m4-1-sync-verification.md) | 移动端 M4-1 同步引擎与 GitHub 后端 A：D13 判定表、sha CAS 重拉、Device Flow/刷新/撤销、Keychain、conflicts/ 留档的 46 条 XCTest 与 stub 端到端实测 |
-(docs: M4-3 桌面同步验证记录与架构/配置/规格勾选更新)
 | [2026-11-08-m3-ios-reminders-verification.md](2026-11-08-m3-ios-reminders-verification.md) | 移动端 M3-1 iOS 提醒：评审遗留 bug 核对、弹层/对账/推进/64 槽实现对照、53 条新 XCTest 与模拟器端到端实测 |
 | [2026-11-08-icloud-sync-probe.md](2026-11-08-icloud-sync-probe.md) | M4-2 门禁探针：文件选择器路线免 entitlement 验证可行，占位/冲突真机项与 runbook |
 | [2026-10-29-m2-editor-verification.md](2026-10-29-m2-editor-verification.md) | 移动端 M2 编辑器：子票 PR 对照、两次数据丢失级回归、126 条 XCTest 与性能预算 |
@@ -22,7 +20,7 @@
 | [2026-10-18-startup-shutdown-review.md](2026-10-18-startup-shutdown-review.md) | 首帧后后台任务、启动/关窗原生实测 |
 | [2026-10-18-focus-rendering-review.md](2026-10-18-focus-rendering-review.md) | 聚焦前后样式差异（已修复，保留根因记录） |
 
-汇总数据见 [performance/summary.json](../performance/summary.json)；复现脚本见 [performance/](../performance/)。
+旧基线见 [performance/summary.json](../performance/summary.json)；复现版本和当前测试入口见 [性能说明](../performance/README.md)。
 
 ## 仍未解决的性能项（摘自报告并按当前实现校正）
 

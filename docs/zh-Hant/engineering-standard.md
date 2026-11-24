@@ -33,6 +33,7 @@ zakki/
 ├── main.go
 ├── internal/
 │   ├── app/                  # 唯一可依賴 MyGo 的 internal 套件
+│   ├── ai/                   # OpenAI 相容補全與結構化建議（純邏輯）
 │   ├── markdown/             # 解析、格式、表格純函式（時間權杖委託 core）
 │   ├── codehl/               # 圍籬程式碼區塊詞法著色
 │   ├── notes/                # 唯一筆記檔案 zakki.json、定時儲存與 Git 同步
@@ -52,20 +53,28 @@ flowchart TD
     appPkg["internal/app"]
     mdPkg["internal/markdown"]
     hlPkg["internal/codehl"]
+    aiPkg["internal/ai"]
+    notifyPkg["internal/sysnotify"]
     notesPkg["internal/notes"]
     prefsPkg["internal/prefs"]
     fontsPkg["internal/fonts"]
     atomicPkg["internal/atomicfile"]
-    corePkg["core（巢狀 module）"]
+    corePkg["zakki/core"]
+    modelPkg["zakki/core/model"]
     entry --> appPkg
     appPkg --> mdPkg
     appPkg --> hlPkg
+    appPkg --> aiPkg
+    appPkg --> notifyPkg
     appPkg --> notesPkg
     appPkg --> prefsPkg
     appPkg --> fontsPkg
+    appPkg --> atomicPkg
+    appPkg --> modelPkg
     prefsPkg --> atomicPkg
     prefsPkg --> fontsPkg
     notesPkg --> atomicPkg
+    notesPkg --> modelPkg
     mdPkg --> corePkg
 ```
 
@@ -76,10 +85,11 @@ flowchart TD
 
    | 套件 | 允許依賴的 internal 套件 |
    |---|---|
-   | `app` | `markdown`、`codehl`、`notes`、`prefs`、`atomicfile`、`fonts`、`sysnotify` |
+   | `app` | `markdown`、`codehl`、`notes`、`prefs`、`atomicfile`、`ai`、`fonts`、`sysnotify` |
    | `markdown` | 無 |
    | `codehl` | 無 |
    | `atomicfile` | 無 |
+   | `ai` | 無 |
    | `fonts` | 無 |
    | `sysnotify` | 無 |
    | `notes` | `atomicfile` |
@@ -90,8 +100,8 @@ flowchart TD
 5. **共享核心 `core/`（巢狀 module `zakki/core`）鐵律**：
    - 葉節點 module：零第三方依賴（`core/go.mod` 不得出現 `require`）、禁止依賴 MyGo 與任何 `zakki/internal/*`，`make arch-check` 直接驗證；
    - 單一事實來源：時間權杖（`@`/`~`/`^`）與重複實例展開的語意只在 `core` 寫一份，桌面 `internal/markdown` 與未來行動端（gomobile bind）都是消費方，禁止各自持副本；
-   - 對外邊界只跨字串、數值、布林與 JSON（gomobile 形狀）；
-   - 內部套件 `markdown` 允許且僅允許額外依賴 `core`；測試隨 `make test`/`make race` 經 `go -C core` 執行；
+   - 只有 `core/zakkicore` 的 gomobile 綁定介面限於字串、數值、布林與 JSON；桌面 Go 呼叫不受此限制；
+   - 桌面的 `internal/markdown` 依賴 `zakki/core` 的時間語意；`internal/notes` 使用 `zakki/core/model` 的磁碟模型與移轉，`internal/app` 使用該套件的分頁數量常數。核心測試隨 `make test` / `make race` 經 `go -C core` 執行；
    - 行動端綁定同倉：`mobile/binding` 是獨立 Go module（`require zakki/core` 並 `replace => ../../core`），是**唯一允許依賴 golang.org/x/mobile 的 module**；`mobile/ios` 是 XcodeGen 專案，不參與任何 Go 建置；兩者都不參與桌面 `make check` 的根 module 建置與測試，core 仍是零依賴葉節點。行動端已於 2026-11-11 凍結（[mobile-archive.md](mobile-archive.md)），綁定仍須能編譯。
 
 機械驗證：`make arch-check`（實作見根目錄 `Makefile`，已納入 `make check` 與 CI）。
@@ -131,7 +141,7 @@ flowchart TD
 | 持久化 | `notes`、`prefs` | `t.TempDir()` + 注入時鐘；不寫真實使用者目錄 |
 | UI | `internal/app/*_test.go` | `ui.NewTester`、`newTestApp(t)` |
 
-修 bug 先補失敗測試。檢查指令以 [AGENTS.md](../../AGENTS.md)（中文）與 `Makefile` 為準；**每次提交前 `make check` 全綠**。
+修 bug 先補失敗測試。檢查目標的實作以 [Makefile](../../Makefile) 為準；**每次提交前 `make check` 全綠**。
 CI（`.github/workflows/ci.yml`）不得跳過測試或放寬檢查。
 
 ## 7. 評審清單

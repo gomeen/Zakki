@@ -1,6 +1,6 @@
 # 2026-11-08 移动端 M4-2 iCloud 云盘后端 B 验证记录
 
-对应 [docs/mobile-spec.md](../mobile-spec.md) §2.2 后端 B「打开对账 + 冲突副本」模型、
+对应 [docs/mobile-spec.md](https://github.com/gomeen/Zakki/blob/afe363348864e4901e937690cf0c802067a5d27a/docs/mobile-spec.md) §2.2 后端 B「打开对账 + 冲突副本」模型、
 §7 里程碑 M4（实施票 [#53](https://github.com/gomeen/Zakki/issues/53)，门禁探针见
 [2026-11-08-icloud-sync-probe](2026-11-08-icloud-sync-probe.md)）：iCloud Drive 文件夹
 文件选择器授权 + security-scoped bookmark、占位文件下载轮询、`zakki (N).json` /

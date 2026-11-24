@@ -33,6 +33,7 @@ zakki/
 ├── main.go
 ├── internal/
 │   ├── app/                  # MyGo に依存できる唯一の internal パッケージ
+│   ├── ai/                   # OpenAI 互換の補完と構造化された提案（純粋ロジック）
 │   ├── markdown/             # 解析、整形、表の純関数（時刻トークンは core に委譲）
 │   ├── codehl/               # フェンス付きコードブロックの字句着色
 │   ├── notes/                # 唯一のノートファイル zakki.json、定期保存と Git 同期
@@ -52,20 +53,28 @@ flowchart TD
     appPkg["internal/app"]
     mdPkg["internal/markdown"]
     hlPkg["internal/codehl"]
+    aiPkg["internal/ai"]
+    notifyPkg["internal/sysnotify"]
     notesPkg["internal/notes"]
     prefsPkg["internal/prefs"]
     fontsPkg["internal/fonts"]
     atomicPkg["internal/atomicfile"]
-    corePkg["core（ネストした module）"]
+    corePkg["zakki/core"]
+    modelPkg["zakki/core/model"]
     entry --> appPkg
     appPkg --> mdPkg
     appPkg --> hlPkg
+    appPkg --> aiPkg
+    appPkg --> notifyPkg
     appPkg --> notesPkg
     appPkg --> prefsPkg
     appPkg --> fontsPkg
+    appPkg --> atomicPkg
+    appPkg --> modelPkg
     prefsPkg --> atomicPkg
     prefsPkg --> fontsPkg
     notesPkg --> atomicPkg
+    notesPkg --> modelPkg
     mdPkg --> corePkg
 ```
 
@@ -77,10 +86,11 @@ flowchart TD
 
    | パッケージ | 依存してよい internal パッケージ |
    |---|---|
-   | `app` | `markdown`、`codehl`、`notes`、`prefs`、`atomicfile`、`fonts`、`sysnotify` |
+   | `app` | `markdown`、`codehl`、`notes`、`prefs`、`atomicfile`、`ai`、`fonts`、`sysnotify` |
    | `markdown` | なし |
    | `codehl` | なし |
    | `atomicfile` | なし |
+   | `ai` | なし |
    | `fonts` | なし |
    | `sysnotify` | なし |
    | `notes` | `atomicfile` |
@@ -93,8 +103,8 @@ flowchart TD
      `make arch-check` が直接検証する；
    - 単一の真実の源：時間トークン（`@`/`~`/`^`）と繰り返しインスタンス展開の意味論は `core` に 1 か所だけ書き、デスクトップの `internal/markdown` と将来のモバイル
      （gomobile bind）は消費側であり、それぞれがコピーを持ってはならない；
-   - 外部境界は文字列、数値、真偽値、JSON（gomobile の形）のみを渡る；
-   - internal パッケージ `markdown` は `core` への追加依存のみを許可される；テストは `make test`/`make race` で `go -C core` 経由で実行される；
+   - 文字列、数値、真偽値、JSON に限定するのは `core/zakkicore` の gomobile バインディングのみ。デスクトップからの Go 呼び出しには適用しない；
+   - デスクトップの `internal/markdown` は `zakki/core` の時刻処理に、`internal/notes` は `zakki/core/model` のディスクモデルと移行処理に、`internal/app` は同パッケージのタブ数の定数に依存する。コアのテストは `make test` / `make race` から `go -C core` 経由で実行する；
    - モバイルバインディングは同リポジトリ：`mobile/binding` は独立した Go module（`require zakki/core` と `replace => ../../core`）で、
      **golang.org/x/mobile への依存を唯一許されるモジュール**；`mobile/ios` は XcodeGen プロジェクトで、いかなる Go ビルドにも参加しない；
      どちらもデスクトップの `make check` におけるルート module のビルドとテストには参加せず、core は依然として依存ゼロのリーフ。
@@ -139,7 +149,7 @@ flowchart TD
 | 永続化 | `notes`、`prefs` | `t.TempDir()` + 時計の注入；実際のユーザーディレクトリに書かない |
 | UI | `internal/app/*_test.go` | `ui.NewTester`、`newTestApp(t)` |
 
-バグを直すときはまず失敗するテストを追加します。検査コマンドは [AGENTS.md](../../AGENTS.md)（中国語）と `Makefile` を正とします；
+バグを直すときはまず失敗するテストを追加します。検査ターゲットの実装は [Makefile](../../Makefile) を参照してください；
 **コミット前に毎回 `make check` を全緑にします**。CI （`.github/workflows/ci.yml`）はテストをスキップしたり検査を緩めたりしてはなりません。
 
 ## 7. レビューチェックリスト

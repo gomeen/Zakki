@@ -1,6 +1,6 @@
 # 2026-10-29 移动端 M2 编辑器验证记录
 
-对应 [docs/mobile-spec.md](../mobile-spec.md) §7 里程碑 M2（实施票
+对应 [docs/mobile-spec.md](https://github.com/gomeen/Zakki/blob/afe363348864e4901e937690cf0c802067a5d27a/docs/mobile-spec.md) §7 里程碑 M2（实施票
 [#26](https://github.com/gomeen/Zakki/issues/26)）：双模式编辑器、令牌簇往返、写回管道、
 源码模式与快捷栏、最小主题集、标签管理绑定扩展、系统分享导出与实时 Markdown 样式渲染。
 五个子票全部合入 `main`，自动化验证完成；长中文重度编辑等人工验收项**尚未执行**，

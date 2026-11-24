@@ -9,7 +9,7 @@
   應用程式識別碼 `com.gomeen.zakki`，Go module 名 `zakki`；資料目錄 macOS 為
   `~/Library/Application Support/Zakki/`，Windows 為 `%APPDATA%\Zakki\`，不改變 JSON 結構。
   應用程式按全新安裝處理，不做舊資料目錄移轉。
-- 更新器：MyGo v0.5.1 的 `plugins/updater/native`，全原生 UI，無 webview；應用程式選單與系統匣
+- 更新器：由 [`go.mod`](../../go.mod) 鎖定的 MyGo 提供的 `plugins/updater/native`，全原生 UI，無 webview；應用程式選單與系統匣
   均提供「檢查更新…」，預設只手動檢查。使用者可檢視版本說明、下載安裝、略過或稍後重新啟動。
 - 發布目標固定為 **darwin/universal**（Intel 與 Apple Silicon）和 **windows/amd64**（Windows 10/11 x64）。
   同一個 Release 分別提供 `update-darwin-universal.json` 與 `update-windows-amd64.json`，兩種系統不會混用更新。
@@ -64,7 +64,7 @@ gh secret set MYGO_UPDATER_PRIVATE_KEY --repo gomeen/Zakki \
 
 1. 修改 **`mygo.json` 的 `version`**（唯一版本來源），並為 `CHANGELOG.md` 增加 `## X.Y.Z` 章節。
    應用程式內更新說明來自該章節；檔案存在但章節缺失時建置會失敗。
-2. 執行 `make check` 和 `go mod verify`，同步 README 與行為變化說明。
+2. 依下述工作流程的規則驗證根模組與 `core` 並執行 `make check`，同步 README 與行為變化說明。
 3. 提交程式碼，確認待發布提交無遺漏，然後打同號 tag。以下指令屬於主動發布操作，設定階段不要執行：
 
    ```sh
@@ -76,7 +76,8 @@ gh secret set MYGO_UPDATER_PRIVATE_KEY --repo gomeen/Zakki \
 
 4. 檢視 Actions 的 `release` 工作流。它會：
    - 核對 tag、版本、儲存庫與私鑰 Secret，並要求新版本嚴格高於目前 Latest；缺私鑰或版本倒退直接失敗，不產生不完整的發行包。
-   - 執行 `go mod verify`、完整 `make check`；macOS runner 建置 universal 包，Ubuntu runner 安裝 NSIS 並交叉建置 Windows x64 安裝器。
+   - 在根目錄執行 `go mod verify`，只豁免本機目錄替換（`replace zakki/core => ./core`）的已知 `missing ziphash` 誤報；其餘驗證失敗均阻擋發布。接著執行 `go -C core mod verify` 和完整 `make check`，兩者皆須通過。
+   - macOS runner 建置 universal 包，Ubuntu runner 安裝 NSIS 並交叉建置 Windows x64 安裝器。
    - 檢查安裝器、清單版本/URL、壓縮檔大小；額外核對 macOS 雙架構與 ad-hoc 簽章、Windows PE x64 可執行檔。
    - 讀取目前 Latest 版本，要求兩個平台的清單和附件均包含該版本到新版本的有效 delta，並核對簽章欄位與實際檔案大小。
    - 保留兩個平台的 Actions 附件；全部成功後彙總、再次驗證，再上傳至草稿 Release，兩個更新清單最後上傳。
@@ -162,7 +163,7 @@ https://github.com/gomeen/Zakki/releases/latest/download/update-windows-amd64.js
 
 ## 發布驗收
 
-- [ ] `mygo.json` 與 tag 同號，CHANGELOG 有對應章節，`make check` 與 `go mod verify` 通過。
+- [ ] `mygo.json` 與 tag 同號，CHANGELOG 有對應章節，根模組驗證符合上述規則，且 `go -C core mod verify` 與 `make check` 通過。
 - [ ] Secret 對應目前公鑰，私鑰有獨立安全備份，Git 與附件中均無私鑰。
 - [ ] macOS 與 Windows 建置 job 均成功，草稿包含 DMG、Setup EXE、兩份簽章壓縮檔、兩份更新清單與兩平台的 delta，無多餘附件。
 - [ ] Intel / Apple Silicon 安裝可啟動；對真實下載檔案驗證 Gatekeeper 行為，不以本機無隔離標記的包代替。
