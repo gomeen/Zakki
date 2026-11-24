@@ -5985,11 +5985,11 @@ func (msgs Messages) AiEnable() string {
 	return Catalog.Format(msgs.locale, "aiEnable", nil)
 }
 
-// AiEnableHint says "Requires an OpenAI-compatible endpoint and a model name."
+// AiEnableHint says "To send a request, configure an OpenAI-compatible endpoint and a model."
 // in the language the app shows.
 func AiEnableHint() string { return In(i18n.Locale()).AiEnableHint() }
 
-// AiEnableHint says "Requires an OpenAI-compatible endpoint and a model name."
+// AiEnableHint says "To send a request, configure an OpenAI-compatible endpoint and a model."
 // in the language of msgs.
 func (msgs Messages) AiEnableHint() string {
 	return Catalog.Format(msgs.locale, "aiEnableHint", nil)
@@ -6115,21 +6115,41 @@ func (msgs Messages) AiModel() string {
 	return Catalog.Format(msgs.locale, "aiModel", nil)
 }
 
-// AiModelHint says "Enter the model ID, or fetch a list from this service."
+// AiModelHint says "Enter a model ID and press Enter to save."
 // in the language the app shows.
 func AiModelHint() string { return In(i18n.Locale()).AiModelHint() }
 
-// AiModelHint says "Enter the model ID, or fetch a list from this service."
+// AiModelHint says "Enter a model ID and press Enter to save."
 // in the language of msgs.
 func (msgs Messages) AiModelHint() string {
 	return Catalog.Format(msgs.locale, "aiModelHint", nil)
 }
 
-// AiModelsFetch says "Fetch model list"
+// AiModelPlaceholder says "Choose a model"
+// in the language the app shows.
+func AiModelPlaceholder() string { return In(i18n.Locale()).AiModelPlaceholder() }
+
+// AiModelPlaceholder says "Choose a model"
+// in the language of msgs.
+func (msgs Messages) AiModelPlaceholder() string {
+	return Catalog.Format(msgs.locale, "aiModelPlaceholder", nil)
+}
+
+// AiModelActions says "Model options"
+// in the language the app shows.
+func AiModelActions() string { return In(i18n.Locale()).AiModelActions() }
+
+// AiModelActions says "Model options"
+// in the language of msgs.
+func (msgs Messages) AiModelActions() string {
+	return Catalog.Format(msgs.locale, "aiModelActions", nil)
+}
+
+// AiModelsFetch says "Refresh model list"
 // in the language the app shows.
 func AiModelsFetch() string { return In(i18n.Locale()).AiModelsFetch() }
 
-// AiModelsFetch says "Fetch model list"
+// AiModelsFetch says "Refresh model list"
 // in the language of msgs.
 func (msgs Messages) AiModelsFetch() string {
 	return Catalog.Format(msgs.locale, "aiModelsFetch", nil)
@@ -6195,11 +6215,11 @@ func (msgs Messages) AiKeyTitle() string {
 	return Catalog.Format(msgs.locale, "aiKeyTitle", nil)
 }
 
-// AiKeyHint says "Stored only in the system secure storage (macOS Keychain / Windows DPAPI), never in preferences or notes."
+// AiKeyHint says "Press Enter to save to system secure storage (macOS Keychain / Windows DPAPI)."
 // in the language the app shows.
 func AiKeyHint() string { return In(i18n.Locale()).AiKeyHint() }
 
-// AiKeyHint says "Stored only in the system secure storage (macOS Keychain / Windows DPAPI), never in preferences or notes."
+// AiKeyHint says "Press Enter to save to system secure storage (macOS Keychain / Windows DPAPI)."
 // in the language of msgs.
 func (msgs Messages) AiKeyHint() string {
 	return Catalog.Format(msgs.locale, "aiKeyHint", nil)
@@ -6215,21 +6235,11 @@ func (msgs Messages) AiKeyLabel() string {
 	return Catalog.Format(msgs.locale, "aiKeyLabel", nil)
 }
 
-// AiKeySave says "Save to Secure Storage"
-// in the language the app shows.
-func AiKeySave() string { return In(i18n.Locale()).AiKeySave() }
-
-// AiKeySave says "Save to Secure Storage"
-// in the language of msgs.
-func (msgs Messages) AiKeySave() string {
-	return Catalog.Format(msgs.locale, "aiKeySave", nil)
-}
-
-// AiKeyClear says "Remove"
+// AiKeyClear says "Remove saved key"
 // in the language the app shows.
 func AiKeyClear() string { return In(i18n.Locale()).AiKeyClear() }
 
-// AiKeyClear says "Remove"
+// AiKeyClear says "Remove saved key"
 // in the language of msgs.
 func (msgs Messages) AiKeyClear() string {
 	return Catalog.Format(msgs.locale, "aiKeyClear", nil)
@@ -6245,11 +6255,11 @@ func (msgs Messages) AiKeyBusy() string {
 	return Catalog.Format(msgs.locale, "aiKeyBusy", nil)
 }
 
-// AiKeyConfigured says "A key is saved in secure storage."
+// AiKeyConfigured says "Key saved. Press Enter to replace it, or right-click the field to remove it."
 // in the language the app shows.
 func AiKeyConfigured() string { return In(i18n.Locale()).AiKeyConfigured() }
 
-// AiKeyConfigured says "A key is saved in secure storage."
+// AiKeyConfigured says "Key saved. Press Enter to replace it, or right-click the field to remove it."
 // in the language of msgs.
 func (msgs Messages) AiKeyConfigured() string {
 	return Catalog.Format(msgs.locale, "aiKeyConfigured", nil)

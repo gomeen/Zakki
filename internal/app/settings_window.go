@@ -234,29 +234,26 @@ func floatText(v float32) string {
 // 重复打开只聚焦已有窗口；打开 Keymap 直接定位快捷键页。
 // 事件循环未启动（测试）时只路由状态，不创建原生窗口。
 func (a *app) openSettings(page string) {
+	changed := a.settingsPage != page
 	a.settingsPage = page
-	if page == pageStorage {
-		// 云同步分区要在首帧就显示正确的连接状态：安全存储读取只在
-		// 这里与页面切换时做，不进构建帧。
-		a.refreshSyncTokenState()
-	}
-	if page == pageAI {
-		a.refreshAIKeyState()
-	}
 	if !a.ready {
-		if a.settingsWin == nil {
-			a.settingsUI.syncDraftFromPrefs(a.prefs)
+		if changed || !a.settingsUI.draftReady {
+			a.activateSettingsPage()
 		}
 		return
 	}
 	if a.settingsWin != nil {
+		if changed {
+			a.activateSettingsPage()
+		} else if page == pageStorage {
+			a.refreshSyncTokenState()
+		}
 		a.settingsWin.Update(func() {})
 		a.settingsWin.Restore()
 		a.settingsWin.Show()
 		a.settingsWin.Focus()
 		return
 	}
-	a.settingsUI.syncDraftFromPrefs(a.prefs)
 	win := mygo.NewWindow(mygo.WindowOptions{
 		Title:     locales.SettingsTitle(appName),
 		Width:     900,
@@ -268,6 +265,7 @@ func (a *app) openSettings(page string) {
 	})
 	a.settingsWin = win
 	a.settingsWindow.Store(win)
+	a.activateSettingsPage()
 	win.OnClose(func(e *mygo.CloseEvent) {
 		if a.storageMoving {
 			e.PreventDefault()
@@ -289,6 +287,22 @@ func (a *app) openSettings(page string) {
 	})
 	win.Show()
 	a.syncMenus()
+}
+
+// activateSettingsPage 初始化当前页，打开或切换时调用，不随重绘重复执行。
+func (a *app) activateSettingsPage() {
+	a.settingsUI.syncDraftFromPrefs(a.prefs)
+	a.setKeymapRecording("")
+	a.ai.invalidateConnection()
+	switch a.settingsPage {
+	case pageStorage:
+		a.refreshSyncTokenState()
+	case pageAI:
+		if !a.ai.keyBusy {
+			a.refreshAIKeyState()
+		}
+		a.loadSavedAIModels()
+	}
 }
 
 // refreshSettingsWindow 偏好变更后刷新设置窗口（若开着）。
@@ -320,14 +334,7 @@ func (a *app) settingsView(c *ui.Context) {
 			ui.SidebarItem(c, pageStorage, iconDatabase, locales.PageStorage())
 			ui.SidebarItem(c, pageKeymap, iconKeyboard, locales.PageKeymap())
 		}).Width(200).FillHeight().Changed() {
-			a.settingsUI.syncDraftFromPrefs(a.prefs)
-			a.setKeymapRecording("")
-			if a.settingsPage == pageStorage {
-				a.refreshSyncTokenState()
-			}
-			if a.settingsPage == pageAI {
-				a.refreshAIKeyState()
-			}
+			a.activateSettingsPage()
 		}
 		ui.Column(c).Fill().Grow(1).Padding(28, 12, 28, 24).Gap(18).Children(func() {
 			switch a.settingsPage {
@@ -430,8 +437,7 @@ func (a *app) resetPageDefaults(page string) {
 			p.Advanced.WindowRows = defaults.Advanced.WindowRows
 			p.Appearance = defaults.Appearance
 		case pageAI:
-			// 只恢复偏好（关闭并清空非凭据配置）；安全存储里的密钥
-			// 不是偏好，不动（可在本页显式清除）。
+			// 只恢复偏好；安全存储不动，密钥仍可从输入框菜单清除。
 			p.AI = defaults.AI
 		case pageKeymap:
 			p.Keymap = defaults.Keymap

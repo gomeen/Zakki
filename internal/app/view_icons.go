@@ -23,6 +23,7 @@ var (
 	iconAlignLeft   = lucide(`<path d="M4 6h16M4 12h10M4 18h16"/>`)
 	iconAlignCenter = lucide(`<path d="M4 6h16M7 12h10M4 18h16"/>`)
 	iconAlignRight  = lucide(`<path d="M4 6h16M10 12h10M4 18h16"/>`)
+	iconEllipsis    = lucide(`<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>`)
 	iconTrash       = lucide(`<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/>`)
 	iconCloseWindow = lucide(`<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>`)
 	// iconPin 窗口置顶（Lucide pin）

@@ -20,17 +20,17 @@ func (a *app) aiPage(c *ui.Context) {
 		ui.Column(c).FillWidth().Padding(0, 22, 0, 0).Children(func() {
 			settingsSectionTitle(c, locales.AiSection())
 			settingsLead(c, locales.AiSectionHint())
+			a.aiEnableRow(c)
 
 			a.aiProviderRow(c)
 			a.aiEndpointRow(c)
-			a.aiKeyRows(c)
+			a.aiKeyRow(c)
 			a.aiModelRow(c)
 			a.aiTestRow(c)
 
 			sectionDivider(c)
 			settingsSectionTitle(c, locales.AiBehaviorTitle())
 			a.aiContextRow(c)
-			a.aiEnableRow(c)
 			if a.settingsUI.keyErr != "" {
 				ui.Text(c, a.settingsUI.keyErr).FontSize(12).TextColor(c.Theme().Danger).Wrap()
 			}
@@ -120,54 +120,74 @@ func (a *app) aiEndpointRow(c *ui.Context) {
 	})
 }
 
-// aiModelRow 模型名：手填，或拉取端点模型列表后下拉选择（保留手填兼容
-// 任意 OpenAI 兼容服务）。选择即提交，免回车。
+// aiModelRow 保持模型选择与二级操作同行，状态只占一行说明。
 func (a *app) aiModelRow(c *ui.Context) {
 	models := a.currentAIModels()
 	hint := locales.AiModelHint()
-	if len(models) > 0 && !a.ai.manualModel {
+	modelErr := ""
+	if a.ai.modelsSource == a.aiSettingsSource() {
+		modelErr = a.ai.modelsErr
+	}
+	switch {
+	case a.ai.listing:
+		hint = locales.AiModelsFetching()
+	case modelErr != "":
+		hint = ""
+	case len(models) > 0 && !a.ai.manualModel:
 		hint = locales.AiModelsLoaded(strconv.Itoa(len(models)))
 	}
 	settingsRow(c, locales.AiModel(), hint, func() {
-		ui.Column(c.Key("ai-model-controls")).AlignItems(ui.End).Gap(6).Children(func() {
+		ui.Row(c.Key("ai-model-controls")).AlignItems(ui.Center).Gap(6).Children(func() {
+			const fieldWidth = 202
 			if len(models) > 0 && !a.ai.manualModel {
 				c.Key("ai-model-select")
-				if boundedSelect(c, &a.settingsUI.aiModelText, models).Width(240).Changed() {
+				if boundedSelectWithPlaceholder(c, &a.settingsUI.aiModelText, models, locales.AiModelPlaceholder()).Width(fieldWidth).Changed() {
 					a.saveAIModel()
 				}
 			} else {
-				input := ui.TextInput(c.Key("ai-model"), &a.settingsUI.aiModelText).Width(240).
-					Placeholder("gpt-4o-mini")
+				input := ui.TextInput(c.Key("ai-model"), &a.settingsUI.aiModelText).Width(fieldWidth).
+					Label(locales.AiModel()).Placeholder("gpt-4o-mini")
 				if input.Changed() {
+					// 加载完成时不能打断已经开始的手动输入。
+					a.ai.manualModel = true
 					a.ai.invalidateTest()
 				}
 				if input.Submitted() {
 					a.saveAIModel()
 				}
 			}
-			ui.Row(c.Key("ai-model-actions")).Gap(8).Children(func() {
-				label := locales.AiModelsFetch()
-				if a.ai.listing {
-					label = locales.AiModelsFetching()
-				}
-				if ui.Button(c.Key("ai-models-fetch"), label).Disabled(a.ai.listing || a.ai.keyBusy).Clicked() {
-					a.fetchAIModels()
-				}
-				if len(models) > 0 {
-					label := locales.AiModelManual()
-					if a.ai.manualModel {
-						label = locales.AiModelChoose()
-					}
-					if ui.Button(c.Key("ai-model-mode"), label).Clicked() {
-						a.ai.manualModel = !a.ai.manualModel
-					}
-				}
-			})
+			a.aiModelMenu(c, len(models) > 0)
 		})
 	})
-	if a.ai.modelsErr != "" && a.ai.modelsSource == a.aiSettingsSource() {
-		ui.Text(c, a.ai.modelsErr).FontSize(12).TextColor(c.Theme().Danger).Wrap()
+	if modelErr != "" {
+		ui.Text(c, modelErr).FontSize(12).TextColor(c.Theme().Danger).Wrap()
 	}
+}
+
+func (a *app) aiModelMenu(c *ui.Context, hasModels bool) {
+	label := locales.AiModelActions()
+	btn := ui.ButtonBase(c.Key("ai-model-actions")).Label(label).Tooltip(label).
+		Size(32, 32).Radius(c.Theme().Radius).AlignItems(ui.Center).Justify(ui.Center)
+	if btn.Hovered() || btn.Pressed() {
+		btn.Background(c.Theme().SurfaceHover)
+	}
+	btn.Children(func() {
+		ui.Icon(c, iconEllipsis).Size(16, 16).TextColor(tMuted(c))
+	})
+	btn.Menu(func(m *ui.Menu) {
+		if m.Item(locales.AiModelsFetch()).Disabled(a.ai.listing || a.ai.keyBusy).Chosen() {
+			a.fetchAIModels()
+		}
+		if hasModels {
+			mode := locales.AiModelManual()
+			if a.ai.manualModel {
+				mode = locales.AiModelChoose()
+			}
+			if m.Item(mode).Chosen() {
+				a.ai.manualModel = !a.ai.manualModel
+			}
+		}
+	})
 }
 
 func (a *app) saveAIModel() {
@@ -184,27 +204,35 @@ func (a *app) saveAIModel() {
 	a.settingsUI.keyErr = ""
 }
 
-// aiKeyRows API 密钥：密码式输入 + 保存到钥匙串 / 清除 + 状态行。
-// 密钥只进系统安全存储；输入框不回显已存值。
-func (a *app) aiKeyRows(c *ui.Context) {
-	settingsRow(c, locales.AiKeyTitle(), locales.AiKeyHint(), func() {
-		ui.TextInput(c.Key("ai-key"), &a.settingsUI.aiKeyText).Width(240).
-			Placeholder("sk-…").Password().Disabled(a.ai.keyBusy)
-	})
-	ui.Row(c).FillWidth().Justify(ui.End).Gap(8).Children(func() {
-		if ui.Button(c.Key("ai-key-save"), locales.AiKeySave()).Disabled(a.ai.keyBusy).Clicked() {
+// aiKeyRow 已存密钥不回显，回车提交新密钥，清除动作留在输入框菜单。
+func (a *app) aiKeyRow(c *ui.Context) {
+	placeholder, hint := "sk-…", locales.AiKeyHint()
+	if a.ai.keyConfigured {
+		placeholder, hint = "••••••••", locales.AiKeyConfigured()
+	}
+	if a.ai.keyBusy {
+		hint = locales.AiKeyBusy()
+	} else if a.settingsUI.aiKeyErr != "" {
+		hint = ""
+	}
+	settingsRow(c, locales.AiKeyTitle(), hint, func() {
+		input := ui.TextInput(c.Key("ai-key"), &a.settingsUI.aiKeyText).Width(240).
+			Label(locales.AiKeyLabel()).Placeholder(placeholder).Password().Disabled(a.ai.keyBusy)
+		if input.Submitted() {
 			a.saveAIKey()
 		}
-		if ui.Button(c.Key("ai-key-clear"), locales.AiKeyClear()).Disabled(a.ai.keyBusy || !a.ai.keyConfigured).Clicked() {
-			a.clearAIKey()
+		if a.ai.keyConfigured {
+			input.ContextMenu(func(m *ui.Menu) {
+				m.EditItems()
+				m.Separator()
+				if m.Item(locales.AiKeyClear()).Disabled(a.ai.keyBusy).Chosen() {
+					a.clearAIKey()
+				}
+			})
 		}
 	})
-	if a.ai.keyBusy {
-		ui.Text(c, locales.AiKeyBusy()).FontSize(12).TextColor(tMuted(c))
-	} else if a.settingsUI.aiKeyErr != "" {
-		ui.Text(c, a.settingsUI.aiKeyErr).FontSize(12).TextColor(c.Theme().Danger)
-	} else if a.ai.keyConfigured {
-		ui.Text(c, locales.AiKeyConfigured()).FontSize(12).TextColor(tMuted(c))
+	if a.settingsUI.aiKeyErr != "" {
+		ui.Text(c, a.settingsUI.aiKeyErr).FontSize(12).TextColor(c.Theme().Danger).Wrap()
 	}
 }
 

@@ -4,7 +4,10 @@ package app
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -47,10 +50,18 @@ func TestAIPageRenders(t *testing.T) {
 			t.Fatalf("AI 页缺少 %q: %v", want, tt.Texts())
 		}
 	}
+	if tt.HasText(locales.AiKeyClear()) || tt.HasText(locales.AiModelsFetch()) || tt.HasText(locales.AiModelManual()) {
+		t.Fatal("密钥和模型操作不应再占用独立按钮行")
+	}
+	model, foundModel := tt.Find(locales.AiModel())
+	actions, foundActions := tt.Find(locales.AiModelActions())
+	if !foundModel || !foundActions || actions.X <= model.X || actions.Y >= model.Y+model.H || model.Y >= actions.Y+actions.H {
+		t.Fatalf("模型菜单应与模型控件同行: model=%+v actions=%+v", model, actions)
+	}
 	var lastY float32 = -1
 	for _, label := range []string{
-		locales.AiProvider(), locales.AiBaseURL(), locales.AiKeyTitle(), locales.AiModel(),
-		locales.AiTestButton(), locales.AiContextCurrentOnly(), locales.AiEnable(),
+		locales.AiEnable(), locales.AiProvider(), locales.AiBaseURL(), locales.AiKeyTitle(),
+		locales.AiModel(), locales.AiTestButton(), locales.AiContextCurrentOnly(),
 	} {
 		bounds, ok := tt.Find(label)
 		if !ok || bounds.Y <= lastY {
@@ -70,13 +81,24 @@ func TestAIPageModelInputModes(t *testing.T) {
 	a.ai.models = []string{"demo-model"}
 	tt := ui.NewTester(a.settingsView, 900, 900)
 	tt.Frame()
-	if err := tt.Click(locales.AiModelManual()); err != nil {
+	if err := tt.Click(locales.AiModelActions()); err != nil {
 		t.Fatal(err)
 	}
-	if !a.ai.manualModel || !tt.HasText(locales.AiModelChoose()) {
+	if err := tt.ChooseMenuItem(locales.AiModelManual()); err != nil {
+		t.Fatal(err)
+	}
+	if !a.ai.manualModel {
 		t.Fatal("拉取成功后仍应能切换到手动输入")
 	}
-	if err := tt.Click(locales.AiModelChoose()); err != nil {
+	a.finishAIModels(a.ai.modelRequest, a.aiSettingsSource(), []string{"refreshed-model"}, nil)
+	if !a.ai.manualModel {
+		t.Fatal("刷新结果不能打断手动输入")
+	}
+	tt.Frame()
+	if err := tt.Click(locales.AiModelActions()); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem(locales.AiModelChoose()); err != nil {
 		t.Fatal(err)
 	}
 	if a.ai.manualModel {
@@ -85,6 +107,128 @@ func TestAIPageModelInputModes(t *testing.T) {
 	a.settingsUI.aiBaseURLText = "http://localhost:12345/v1"
 	if len(a.currentAIModels()) != 0 {
 		t.Fatal("修改端点后不能继续使用旧模型列表")
+	}
+}
+
+func TestAISettingsAutoLoadModelsOnEntry(t *testing.T) {
+	a := newTestApp(t)
+	t.Cleanup(a.shutdown)
+	t.Cleanup(a.ai.invalidateConnection)
+	keyring := &fakeAIKeyring{}
+	if err := notes.SaveAIKey(keyring, "test-key"); err != nil {
+		t.Fatal(err)
+	}
+	withAIKeyring(t, keyring)
+	type request struct{ method, path, auth string }
+	requests := make(chan request, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- request{r.Method, r.URL.Path, r.Header.Get("Authorization")}
+		_, _ = w.Write([]byte(`{"data":[{"id":"model-from-service"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	a.openSettings(pageAI)
+	if a.ai.listing || a.ai.modelsErr != "" {
+		t.Fatal("未配置地址时不应自动拉取，也不应报错")
+	}
+	if err := a.updatePreferences(func(p *preferences) {
+		p.AI.BaseURL = srv.URL + "/v1"
+		p.AI.Model = "saved-model"
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a.openSettings(pageGeneral)
+	tt := ui.NewTester(a.settingsView, 760, 620)
+	if err := tt.Click(locales.PageAI()); err != nil {
+		t.Fatal(err)
+	}
+	if !a.ai.listing || !tt.HasText(locales.AiModelsFetching()) {
+		t.Fatal("进入已配置的 AI 页应显示模型正在加载")
+	}
+	select {
+	case got := <-requests:
+		if want := (request{"GET", "/v1/models", "Bearer test-key"}); got != want {
+			t.Fatalf("自动拉取请求 = %+v, want %+v", got, want)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("没有收到自动拉取请求")
+	}
+
+	id := a.ai.modelRequest
+	a.finishAIModels(id, a.aiSettingsSource(), []string{"model-from-service"}, nil)
+	tt.Frame()
+	a.openSettings(pageAI)
+	if a.ai.modelRequest != id || a.prefs.AI.Model != "saved-model" || a.settingsUI.aiModelText != "saved-model" {
+		t.Fatal("重绘或聚焦当前页不能重复拉取，加载结果不能改动已选模型")
+	}
+	a.settingsUI.aiBaseURLText = srv.URL + "/other"
+	a.loadSavedAIModels()
+	if a.ai.modelRequest != id {
+		t.Fatal("不得自动向未保存的草稿地址发送请求")
+	}
+}
+
+// observedAIKeyring 记录后台存取，不需要启动原生窗口事件循环。
+type observedAIKeyring struct {
+	fakeAIKeyring
+	stored  chan struct{}
+	deleted chan struct{}
+}
+
+func (k *observedAIKeyring) Store(v []byte) error {
+	err := k.fakeAIKeyring.Store(v)
+	close(k.stored)
+	return err
+}
+
+func (k *observedAIKeyring) Delete() error {
+	err := k.fakeAIKeyring.Delete()
+	close(k.deleted)
+	return err
+}
+
+func TestAIKeyEnterSavesAndContextMenuClears(t *testing.T) {
+	a := newTestApp(t)
+	t.Cleanup(a.shutdown)
+	keyring := &observedAIKeyring{stored: make(chan struct{}), deleted: make(chan struct{})}
+	withAIKeyring(t, keyring)
+	a.openSettings(pageAI)
+	tt := ui.NewTester(a.settingsView, 760, 620)
+	if err := tt.Click(locales.AiKeyLabel()); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("test-key")
+	if a.ai.keyBusy {
+		t.Fatal("键入过程中不能保存不完整的密钥")
+	}
+	tt.Key(0, ui.KeyEnter)
+	select {
+	case <-keyring.stored:
+		if key, err := notes.LoadAIKey(keyring); err != nil || key != "test-key" {
+			t.Fatal("回车应把输入的密钥写入安全存储")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("回车未触发保存")
+	}
+	// 无原生窗口时直接模拟安全存储写入后的状态。
+	a.ai.keyBusy = false
+	a.settingsUI.aiKeyText = ""
+	a.refreshAIKeyState()
+	tt.Frame()
+	tt.Key(0, ui.KeyEnter)
+	if a.ai.keyBusy || !a.ai.keyConfigured {
+		t.Fatal("空输入回车不能覆盖或清除已存密钥")
+	}
+	if err := tt.RightClick(locales.AiKeyLabel()); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem(locales.AiKeyClear()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-keyring.deleted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("输入框菜单未清除安全存储中的密钥")
 	}
 }
 

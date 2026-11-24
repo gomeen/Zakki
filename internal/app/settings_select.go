@@ -9,10 +9,18 @@ const selectMaxHeight = 300
 // boundedSelect 与 ui.Select 同外观、同键盘行为的单选下拉，弹层限高可滚动；
 // 打开时由 SelectBase 把当前项滚入视野。
 func boundedSelect(c *ui.Context, selected *string, options []string) ui.Element {
+	return boundedSelectWithPlaceholder(c, selected, options, "")
+}
+
+func boundedSelectWithPlaceholder(c *ui.Context, selected *string, options []string, placeholder string) ui.Element {
 	t := c.Theme()
 	sel := ui.SelectBase(c, selected)
 	selectTrigger(c, sel.Trigger, func() {
-		ui.Text(c, *selected).SingleLine().Shrink(1)
+		if *selected == "" && placeholder != "" {
+			ui.Text(c, placeholder).SingleLine().Shrink(1).TextColor(t.TextMuted)
+		} else {
+			ui.Text(c, *selected).SingleLine().Shrink(1)
+		}
 	})
 	sel.Popup(func(panel ui.Element) {
 		selectPanel(c, panel)

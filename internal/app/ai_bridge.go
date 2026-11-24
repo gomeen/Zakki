@@ -34,6 +34,7 @@ type aiAssistState struct {
 	modelsSource  aiSettingsSource
 	manualModel   bool
 	modelRequest  uint64
+	modelCancel   context.CancelFunc
 	testRequest   uint64
 	testSource    aiSettingsSource
 	testModel     string
@@ -92,6 +93,14 @@ func (a *app) refreshAIKeyState() {
 	}
 }
 
+// aiSettingsDispatch 捕获设置窗投递入口；设置窗可以独立于主窗口运行。
+func (a *app) aiSettingsDispatch() func(func()) {
+	if a.settingsWin != nil {
+		return a.settingsWin.Update
+	}
+	return a.runOnMain
+}
+
 // saveAIKey 后台把输入框里的密钥写入安全存储；成功后清空输入框。
 // 密钥不落盘、不进日志，只经系统安全存储。
 func (a *app) saveAIKey() {
@@ -110,15 +119,20 @@ func (a *app) saveAIKey() {
 	}
 	a.ai.keyBusy = true
 	a.settingsUI.aiKeyErr = ""
+	source := a.aiSettingsSource()
+	dispatch := a.aiSettingsDispatch()
 	go func() {
 		err := notes.SaveAIKey(k, key)
-		a.runOnMain(func() {
+		dispatch(func() {
 			a.ai.keyBusy = false
 			if err == nil {
 				a.ai.invalidateConnection()
 				a.settingsUI.aiKeyText = ""
 				a.ai.keyConfigured = true
 				a.showToast(locales.AiKeySaved())
+				if source == a.aiSettingsSource() {
+					a.loadSavedAIModels()
+				}
 			} else {
 				a.settingsUI.aiKeyErr = err.Error()
 			}
@@ -138,14 +152,16 @@ func (a *app) clearAIKey() {
 	}
 	a.ai.keyBusy = true
 	a.settingsUI.aiKeyErr = ""
+	dispatch := a.aiSettingsDispatch()
 	go func() {
 		err := notes.ClearAIKey(k)
-		a.runOnMain(func() {
+		dispatch(func() {
 			a.ai.keyBusy = false
 			if err == nil {
 				a.ai.invalidateConnection()
 				a.ai.keyConfigured = false
 				a.showToast(locales.AiKeyCleared())
+				a.loadSavedAIModels()
 			} else {
 				a.settingsUI.aiKeyErr = err.Error()
 			}
@@ -172,6 +188,10 @@ func (a *app) currentAIModels() []string {
 
 func (s *aiAssistState) invalidateConnection() {
 	s.modelRequest++
+	if s.modelCancel != nil {
+		s.modelCancel()
+		s.modelCancel = nil
+	}
 	s.listing, s.manualModel = false, false
 	s.models, s.modelsErr = nil, ""
 	s.invalidateTest()
@@ -213,11 +233,12 @@ func (a *app) testAIConnection() {
 	a.ai.testing = true
 	a.ai.testResult = ""
 	a.refreshSettingsWindow()
+	dispatch := a.aiSettingsDispatch()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		err := client.TestConnection(ctx)
-		a.runOnMain(func() {
+		dispatch(func() {
 			if request != a.ai.testRequest {
 				return
 			}
@@ -234,13 +255,22 @@ func (a *app) testAIConnection() {
 	}()
 }
 
+// loadSavedAIModels 自动读取只使用已保存的连接配置，不向正在编辑的地址发送密钥。
+func (a *app) loadSavedAIModels() {
+	source := a.aiSettingsSource()
+	if a.settingsPage == pageAI && source.baseURL != "" &&
+		source == (aiSettingsSource{a.prefs.AI.Provider, strings.TrimSpace(a.prefs.AI.BaseURL)}) {
+		a.fetchAIModels()
+	}
+}
+
 func (a *app) fetchAIModels() {
 	if a.ai.listing || a.ai.keyBusy {
 		return
 	}
 	source := a.aiSettingsSource()
 	if a.ai.modelsSource != source {
-		a.ai.models, a.ai.manualModel = nil, false
+		a.ai.models = nil
 	}
 	a.ai.modelsSource = source
 	if source.baseURL == "" {
@@ -258,12 +288,14 @@ func (a *app) fetchAIModels() {
 	request := a.ai.modelRequest
 	a.ai.listing = true
 	a.ai.modelsErr = ""
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	a.ai.modelCancel = cancel
 	a.refreshSettingsWindow()
+	dispatch := a.aiSettingsDispatch()
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		ids, err := client.ListModels(ctx)
-		a.runOnMain(func() {
+		dispatch(func() {
 			a.finishAIModels(request, source, ids, err)
 		})
 	}()
@@ -274,11 +306,12 @@ func (a *app) finishAIModels(request uint64, source aiSettingsSource, ids []stri
 		return
 	}
 	a.ai.listing = false
+	a.ai.modelCancel = nil
 	if source == a.aiSettingsSource() {
 		if err != nil {
 			a.ai.modelsErr = aiErrText(err)
 		} else {
-			a.ai.models, a.ai.manualModel = ids, false
+			a.ai.models = ids
 		}
 	}
 	a.refreshSettingsWindow()
