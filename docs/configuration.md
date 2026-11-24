@@ -199,7 +199,7 @@ Windows 的对应目录为 `%APPDATA%\Zakki\`，与默认程序安装目录 `%LO
 | 仅发送当前标签 | `ai.contextCurrentOnly`，缺键/false（默认）= 问答参考所有标签内容（其他标签逐个截断、总量封顶）；开启后只发送当前标签。编辑建议始终只针对当前标签，与此开关无关 |
 | 提供方 | OpenAI / DeepSeek / OpenRouter / Ollama（本地）/ 自定义；预设自动填入接口地址，「自定义」保留手填值 |
 | 接口地址 | OpenAI 兼容 Base URL，含版本路径（如 `https://api.openai.com/v1`）；只允许 https，或指向本机的 http（本地模型服务） |
-| 模型 | 手填模型名，不做模型列表拉取 |
+| 模型 | 手填模型名，或点「获取模型列表」从端点拉取（`GET /models`，OpenAI 兼容）后下拉选择；选择即保存，列表获取失败可重试或继续手填 |
 | API 密钥 | 只存入系统安全存储（macOS 钥匙串 / Windows DPAPI，条目 `Zakki AI`/`apikey`），绝不写入 preferences.json、zakki.json 或日志；输入框不回显已存值，提供「保存到安全存储 / 清除」与状态行 |
 | 连接测试 | 发一条最小补全请求验证地址、模型与密钥，行内显示结果 |
 | 恢复本页默认值 | 只恢复 ai 节（关闭并清空非凭据配置）；安全存储里的密钥不动，可在本页显式清除 |

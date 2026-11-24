@@ -28,6 +28,9 @@ type aiAssistState struct {
 	testing       bool          // 连接测试进行中
 	testResult    string        // 行内结果；空 = 无结果
 	testErr       bool          // 结果是否为失败
+	listing       bool          // 模型列表拉取进行中
+	models        []string      // 已拉取的模型 ID（空 = 未拉取）
+	modelsErr     string        // 拉取失败的本地化文案；空 = 无错误
 	bar           aiBarState    // 助理条会话
 	asker         aiAsker       // 非空时替代 aiClient（测试注入）
 	enabledPrev   bool          // 上一次偏好应用时的开关：从关到开时默认显示助理条
@@ -157,6 +160,52 @@ func (a *app) testAIConnection() {
 				a.ai.testResult, a.ai.testErr = locales.AiTestOK(), false
 			} else {
 				a.ai.testResult, a.ai.testErr = locales.AiTestFailed(aiErrText(err)), true
+			}
+			a.refreshSettingsWindow()
+		})
+	}()
+}
+
+// fetchAIModels 后台拉取端点的模型列表；结果回主线程存入 ai.models。
+// 沿用草稿里的端点（尚未回车也可见），密钥从安全存储供给。
+func (a *app) fetchAIModels() {
+	if a.ai.listing {
+		return
+	}
+	base := strings.TrimSpace(a.settingsUI.aiBaseURLText)
+	if base == "" {
+		base = strings.TrimSpace(a.prefs.AI.BaseURL)
+	}
+	if base == "" {
+		a.ai.modelsErr = locales.AiModelsNeedEndpoint()
+		a.refreshSettingsWindow()
+		return
+	}
+	client := a.aiClient()
+	// 草稿端点可能尚未提交；直接按草稿重建客户端。
+	if base != strings.TrimSpace(a.prefs.AI.BaseURL) {
+		client = ai.New(ai.Config{BaseURL: base,
+			APIKey: func(context.Context) (string, error) {
+				if k := a.aiKeyring(); k != nil {
+					return notes.LoadAIKey(k)
+				}
+				return "", nil
+			}})
+	}
+	a.ai.listing = true
+	a.ai.modelsErr = ""
+	a.refreshSettingsWindow()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		ids, err := client.ListModels(ctx)
+		a.runOnMain(func() {
+			a.ai.listing = false
+			if err != nil {
+				a.ai.models = nil
+				a.ai.modelsErr = aiErrText(err)
+			} else {
+				a.ai.models = ids
 			}
 			a.refreshSettingsWindow()
 		})

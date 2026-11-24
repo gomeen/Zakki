@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -110,6 +111,65 @@ func (c *Client) TestConnection(ctx context.Context) error {
 	}
 	_, err := c.complete(ctx, "You are a connection test. Reply with the single word: pong.", "ping", 8, false)
 	return err
+}
+
+// ListModels 拉取端点的模型列表（GET /models，OpenAI 兼容）；
+// 返回按字典序排序的模型 ID。端点或密钥无效时如实报错。
+func (c *Client) ListModels(ctx context.Context) ([]string, error) {
+	if strings.TrimSpace(c.cfg.BaseURL) == "" {
+		return nil, ErrNotConfigured
+	}
+	url := strings.TrimRight(c.cfg.BaseURL, "/") + "/models"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrNetwork, err)
+	}
+	if c.cfg.APIKey != nil {
+		key, err := c.cfg.APIKey(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if key != "" {
+			httpReq.Header.Set("Authorization", "Bearer "+key)
+		}
+	}
+	resp, err := c.cfg.HTTP.Do(httpReq)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ErrCancelled
+		}
+		return nil, fmt.Errorf("%w: %v", ErrNetwork, err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrNetwork, err)
+	}
+	switch {
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return nil, fmt.Errorf("%w（HTTP %d）", ErrAuth, resp.StatusCode)
+	case resp.StatusCode < 200 || resp.StatusCode >= 300:
+		return nil, fmt.Errorf("%w: HTTP %d：%s", ErrNetwork, resp.StatusCode, truncateForError(string(data)))
+	}
+	var out struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrParse, err)
+	}
+	var ids []string
+	for _, m := range out.Data {
+		if id := strings.TrimSpace(m.ID); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("%w: 端点没有返回任何模型", ErrParse)
+	}
+	sort.Strings(ids)
+	return ids, nil
 }
 
 // complete 发起一次补全并返回首个 choice 的文本。jsonMode 要求

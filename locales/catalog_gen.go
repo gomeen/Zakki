@@ -6125,6 +6125,46 @@ func (msgs Messages) AiModelHint() string {
 	return Catalog.Format(msgs.locale, "aiModelHint", nil)
 }
 
+// AiModelsFetch says "Fetch model list"
+// in the language the app shows.
+func AiModelsFetch() string { return In(i18n.Locale()).AiModelsFetch() }
+
+// AiModelsFetch says "Fetch model list"
+// in the language of msgs.
+func (msgs Messages) AiModelsFetch() string {
+	return Catalog.Format(msgs.locale, "aiModelsFetch", nil)
+}
+
+// AiModelsFetching says "Fetching models…"
+// in the language the app shows.
+func AiModelsFetching() string { return In(i18n.Locale()).AiModelsFetching() }
+
+// AiModelsFetching says "Fetching models…"
+// in the language of msgs.
+func (msgs Messages) AiModelsFetching() string {
+	return Catalog.Format(msgs.locale, "aiModelsFetching", nil)
+}
+
+// AiModelsLoaded says "{n} models available. Pick one above."
+// in the language the app shows.
+func AiModelsLoaded(n string) string { return In(i18n.Locale()).AiModelsLoaded(n) }
+
+// AiModelsLoaded says "{n} models available. Pick one above."
+// in the language of msgs.
+func (msgs Messages) AiModelsLoaded(n string) string {
+	return Catalog.Format(msgs.locale, "aiModelsLoaded", map[string]any{"n": n})
+}
+
+// AiModelsNeedEndpoint says "Enter the endpoint first, then fetch."
+// in the language the app shows.
+func AiModelsNeedEndpoint() string { return In(i18n.Locale()).AiModelsNeedEndpoint() }
+
+// AiModelsNeedEndpoint says "Enter the endpoint first, then fetch."
+// in the language of msgs.
+func (msgs Messages) AiModelsNeedEndpoint() string {
+	return Catalog.Format(msgs.locale, "aiModelsNeedEndpoint", nil)
+}
+
 // AiKeyTitle says "API Key"
 // in the language the app shows.
 func AiKeyTitle() string { return In(i18n.Locale()).AiKeyTitle() }

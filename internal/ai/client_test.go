@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -308,5 +309,46 @@ func TestProviderPresets(t *testing.T) {
 	}
 	if Providers[len(Providers)-1].ID != "custom" {
 		t.Error("custom 应在最后")
+	}
+}
+
+// TestListModels 假端点验证 /models 拉取：排序、去空、鉴权头与错误分类。
+func TestListModels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer k1" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		fmt.Fprint(w, `{"data":[{"id":"b-m"},{"id":"a-m"},{"id":"  "},{"id":"c-m"}],"object":"list"}`)
+	}))
+	defer srv.Close()
+	c := New(Config{BaseURL: srv.URL + "/v1",
+		APIKey: func(context.Context) (string, error) { return "k1", nil }})
+	ids, err := c.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	want := []string{"a-m", "b-m", "c-m"}
+	if !reflect.DeepEqual(ids, want) {
+		t.Fatalf("应排序去空: %v want %v", ids, want)
+	}
+	// 错误密钥 → ErrAuth。
+	bad := New(Config{BaseURL: srv.URL + "/v1",
+		APIKey: func(context.Context) (string, error) { return "wrong", nil }})
+	if _, err := bad.ListModels(context.Background()); !errors.Is(err, ErrAuth) {
+		t.Fatalf("错误密钥应报 ErrAuth: %v", err)
+	}
+	// 空列表 → ErrParse。
+	empty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"data":[]}`)
+	}))
+	defer empty.Close()
+	e := New(Config{BaseURL: empty.URL})
+	if _, err := e.ListModels(context.Background()); !errors.Is(err, ErrParse) {
+		t.Fatalf("空列表应报 ErrParse: %v", err)
 	}
 }

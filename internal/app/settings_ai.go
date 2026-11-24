@@ -5,6 +5,7 @@ package app
 // 密钥绝不进偏好文件。文案一律经 locales.*。
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -113,14 +114,37 @@ func (a *app) aiEndpointRow(c *ui.Context) {
 	})
 }
 
-// aiModelRow 模型名：手填，不做 /v1/models 拉取。
+// aiModelRow 模型名：手填，或拉取端点模型列表后下拉选择（保留手填兼容
+// 任意 OpenAI 兼容服务）。选择即提交，免回车。
 func (a *app) aiModelRow(c *ui.Context) {
 	settingsRow(c, locales.AiModel(), locales.AiModelHint(), func() {
+		if len(a.ai.models) > 0 {
+			sel := a.settingsUI.aiModelText
+			if boundedSelect(c, &sel, a.ai.models).Width(240).Changed() {
+				a.settingsUI.aiModelText = sel
+				a.settingsUI.draft.AI.Model = sel
+				a.pushDraft(func(p *preferences) { p.AI.Model = sel })
+			}
+			return
+		}
 		if ui.TextInput(c.Key("ai-model"), &a.settingsUI.aiModelText).Width(240).
 			Placeholder("gpt-4o-mini").Submitted() {
 			v := strings.TrimSpace(a.settingsUI.aiModelText)
 			a.settingsUI.draft.AI.Model = v
 			a.pushDraft(func(p *preferences) { p.AI.Model = v })
+		}
+	})
+	// 获取列表：拉取成功变下拉；失败行内提示（可重试）。
+	ui.Row(c).Gap(8).PaddingY(6).Children(func() {
+		if ui.Button(c.Key("ai-models-fetch"), locales.AiModelsFetch()).Disabled(a.ai.listing).Clicked() {
+			a.fetchAIModels()
+		}
+		if a.ai.listing {
+			ui.Text(c, locales.AiModelsFetching()).FontSize(12).TextColor(tMuted(c))
+		} else if a.ai.modelsErr != "" {
+			ui.Text(c, a.ai.modelsErr).FontSize(12).TextColor(c.Theme().Danger)
+		} else if len(a.ai.models) > 0 {
+			ui.Text(c, locales.AiModelsLoaded(strconv.Itoa(len(a.ai.models)))).FontSize(12).TextColor(tMuted(c))
 		}
 	})
 }
