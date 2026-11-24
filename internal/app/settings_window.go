@@ -170,7 +170,14 @@ func (ui *settingsUIState) mergeDraftFromPrefs(p preferences) {
 	ui.draft.Keymap = next.Keymap
 	ui.draft.Advanced = next.Advanced
 	ui.synced = next
+	baseText, modelText := ui.aiBaseURLText, ui.aiModelText
 	ui.syncDraftBindings()
+	if old.AI.BaseURL == next.AI.BaseURL && old.AI.Provider == next.AI.Provider {
+		ui.aiBaseURLText = baseText
+	}
+	if old.AI.Model == next.AI.Model {
+		ui.aiModelText = modelText
+	}
 }
 
 func (ui *settingsUIState) syncDraftBindings() {
@@ -272,6 +279,7 @@ func (a *app) openSettings(page string) {
 		// 否则 setKeymapRecording 误判为无变化而跳过恢复）。
 		a.setKeymapRecording("")
 		a.settingsUI.fontPreparation.stop()
+		a.ai.invalidateConnection()
 		a.settingsWin = nil
 		a.settingsWindow.CompareAndSwap(win, nil)
 		a.settingsUI = settingsUIState{}
@@ -429,6 +437,9 @@ func (a *app) resetPageDefaults(page string) {
 			p.Keymap = defaults.Keymap
 		}
 	})
+	if page == pageAI {
+		a.ai.invalidateConnection()
+	}
 	a.settingsUI.syncDraftFromPrefs(a.prefs)
 	a.setKeymapRecording("")
 	a.syncGlobalHotkey()

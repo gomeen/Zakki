@@ -47,6 +47,72 @@ func TestAIPageRenders(t *testing.T) {
 			t.Fatalf("AI 页缺少 %q: %v", want, tt.Texts())
 		}
 	}
+	var lastY float32 = -1
+	for _, label := range []string{
+		locales.AiProvider(), locales.AiBaseURL(), locales.AiKeyTitle(), locales.AiModel(),
+		locales.AiTestButton(), locales.AiContextCurrentOnly(), locales.AiEnable(),
+	} {
+		bounds, ok := tt.Find(label)
+		if !ok || bounds.Y <= lastY {
+			t.Fatalf("%q 未按配置顺序显示: %+v", label, bounds)
+		}
+		lastY = bounds.Y
+	}
+}
+
+func TestAIPageModelInputModes(t *testing.T) {
+	a := newTestApp(t)
+	t.Cleanup(a.shutdown)
+	a.settingsPage = pageAI
+	a.settingsUI.syncDraftFromPrefs(a.prefs)
+	a.settingsUI.aiBaseURLText = "http://localhost:11434/v1"
+	a.ai.modelsSource = a.aiSettingsSource()
+	a.ai.models = []string{"demo-model"}
+	tt := ui.NewTester(a.settingsView, 900, 900)
+	tt.Frame()
+	if err := tt.Click(locales.AiModelManual()); err != nil {
+		t.Fatal(err)
+	}
+	if !a.ai.manualModel || !tt.HasText(locales.AiModelChoose()) {
+		t.Fatal("拉取成功后仍应能切换到手动输入")
+	}
+	if err := tt.Click(locales.AiModelChoose()); err != nil {
+		t.Fatal(err)
+	}
+	if a.ai.manualModel {
+		t.Fatal("应切回模型下拉")
+	}
+	a.settingsUI.aiBaseURLText = "http://localhost:12345/v1"
+	if len(a.currentAIModels()) != 0 {
+		t.Fatal("修改端点后不能继续使用旧模型列表")
+	}
+}
+
+func TestAISettingsDiscardStaleModels(t *testing.T) {
+	a := newTestApp(t)
+	t.Cleanup(a.shutdown)
+	a.settingsUI.aiBaseURLText = "https://first.example/v1"
+	source := a.aiSettingsSource()
+	request := a.ai.modelRequest
+	a.ai.invalidateConnection()
+	a.settingsUI.aiBaseURLText = "https://second.example/v1"
+	a.ai.listing = true
+	a.finishAIModels(request, source, []string{"old-model"}, nil)
+	if !a.ai.listing || len(a.ai.models) != 0 {
+		t.Fatal("旧请求不能覆盖新请求的状态或模型列表")
+	}
+}
+
+func TestAISettingsRejectInsecureDraft(t *testing.T) {
+	a := newTestApp(t)
+	t.Cleanup(a.shutdown)
+	a.settingsUI.aiBaseURLText = "http://remote.example/v1"
+	a.settingsUI.aiModelText = "demo-model"
+	a.fetchAIModels()
+	a.testAIConnection()
+	if a.ai.listing || a.ai.modelsErr == "" || a.ai.testing || !a.ai.testErr {
+		t.Fatal("模型列表与连接测试都必须在发请求前拒绝非法地址")
+	}
 }
 
 func TestAIPageDraftAppliesWithValidation(t *testing.T) {

@@ -20,25 +20,28 @@ func (a *app) aiPage(c *ui.Context) {
 		ui.Column(c).FillWidth().Padding(0, 22, 0, 0).Children(func() {
 			settingsSectionTitle(c, locales.AiSection())
 			settingsLead(c, locales.AiSectionHint())
-			a.aiEnableRow(c)
-			sectionDivider(c)
-			a.aiContextRow(c)
-			sectionDivider(c)
+
 			a.aiProviderRow(c)
 			a.aiEndpointRow(c)
-			a.aiModelRow(c)
-			sectionDivider(c)
 			a.aiKeyRows(c)
-			sectionDivider(c)
+			a.aiModelRow(c)
 			a.aiTestRow(c)
+
+			sectionDivider(c)
+			settingsSectionTitle(c, locales.AiBehaviorTitle())
+			a.aiContextRow(c)
+			a.aiEnableRow(c)
+			if a.settingsUI.keyErr != "" {
+				ui.Text(c, a.settingsUI.keyErr).FontSize(12).TextColor(c.Theme().Danger).Wrap()
+			}
+
 			ui.Box(c).Grow(1)
 			a.cardResetFooter(c, "ai", pageAI)
 		})
 	})
 }
 
-// aiEnableRow 启用开关；开启要求端点与模型已配置（偏好校验兜底，
-// 失败时回滚开关并在页内提示）。
+// aiEnableRow 开启时同时提交用户尚未回车的连接配置。
 func (a *app) aiEnableRow(c *ui.Context) {
 	settingsRow(c, locales.AiEnable(), locales.AiEnableHint(), func() {
 		if ui.Switch(c.Key("ai-enabled"), &a.settingsUI.draft.AI.Enabled).Label(locales.AiEnable()).Changed() {
@@ -48,12 +51,8 @@ func (a *app) aiEnableRow(c *ui.Context) {
 			if err := a.updatePreferences(func(p *preferences) {
 				p.AI.Enabled = on
 				if on {
-					if v := strings.TrimSpace(a.settingsUI.aiBaseURLText); v != "" {
-						p.AI.BaseURL, a.settingsUI.draft.AI.BaseURL = v, v
-					}
-					if v := strings.TrimSpace(a.settingsUI.aiModelText); v != "" {
-						p.AI.Model, a.settingsUI.draft.AI.Model = v, v
-					}
+					p.AI.BaseURL = strings.TrimSpace(a.settingsUI.aiBaseURLText)
+					p.AI.Model = strings.TrimSpace(a.settingsUI.aiModelText)
 				}
 			}); err != nil {
 				a.settingsUI.draft.AI.Enabled = a.prefs.AI.Enabled
@@ -80,12 +79,15 @@ func (a *app) aiContextRow(c *ui.Context) {
 			a.settingsUI.keyErr = ""
 		}
 	})
+	ui.Text(c, locales.AiPrivacy()).FontSize(12).TextColor(tMuted(c)).Wrap()
 }
 
 // aiProviderRow 提供方预设：切换预填端点（custom 保留用户输入）。
 func (a *app) aiProviderRow(c *ui.Context) {
 	settingsRow(c, locales.AiProvider(), locales.AiProviderHint(), func() {
-		if boundedSelect(c, &a.settingsUI.aiProviderSel, aiProviderOptions()).Width(200).Changed() {
+		c.Key("ai-provider")
+		if boundedSelect(c, &a.settingsUI.aiProviderSel, aiProviderOptions()).Width(240).Changed() {
+			a.ai.invalidateConnection()
 			id := aiProviderIDOfDisplay(a.settingsUI.aiProviderSel)
 			a.settingsUI.draft.AI.Provider = id
 			mutate := func(p *preferences) { p.AI.Provider = id }
@@ -105,8 +107,12 @@ func (a *app) aiProviderRow(c *ui.Context) {
 // aiEndpointRow 接口地址：提交时去空白写入偏好。
 func (a *app) aiEndpointRow(c *ui.Context) {
 	settingsRow(c, locales.AiBaseURL(), locales.AiBaseURLHint(), func() {
-		if ui.TextInput(c.Key("ai-baseurl"), &a.settingsUI.aiBaseURLText).Width(240).
-			Placeholder("https://api.openai.com/v1").Submitted() {
+		input := ui.TextInput(c.Key("ai-baseurl"), &a.settingsUI.aiBaseURLText).Width(240).
+			Placeholder("https://api.openai.com/v1")
+		if input.Changed() {
+			a.ai.invalidateConnection()
+		}
+		if input.Submitted() {
 			v := strings.TrimSpace(a.settingsUI.aiBaseURLText)
 			a.settingsUI.draft.AI.BaseURL = v
 			a.pushDraft(func(p *preferences) { p.AI.BaseURL = v })
@@ -117,78 +123,102 @@ func (a *app) aiEndpointRow(c *ui.Context) {
 // aiModelRow 模型名：手填，或拉取端点模型列表后下拉选择（保留手填兼容
 // 任意 OpenAI 兼容服务）。选择即提交，免回车。
 func (a *app) aiModelRow(c *ui.Context) {
-	settingsRow(c, locales.AiModel(), locales.AiModelHint(), func() {
-		if len(a.ai.models) > 0 {
-			sel := a.settingsUI.aiModelText
-			if boundedSelect(c, &sel, a.ai.models).Width(240).Changed() {
-				a.settingsUI.aiModelText = sel
-				a.settingsUI.draft.AI.Model = sel
-				a.pushDraft(func(p *preferences) { p.AI.Model = sel })
+	models := a.currentAIModels()
+	hint := locales.AiModelHint()
+	if len(models) > 0 && !a.ai.manualModel {
+		hint = locales.AiModelsLoaded(strconv.Itoa(len(models)))
+	}
+	settingsRow(c, locales.AiModel(), hint, func() {
+		ui.Column(c.Key("ai-model-controls")).AlignItems(ui.End).Gap(6).Children(func() {
+			if len(models) > 0 && !a.ai.manualModel {
+				c.Key("ai-model-select")
+				if boundedSelect(c, &a.settingsUI.aiModelText, models).Width(240).Changed() {
+					a.saveAIModel()
+				}
+			} else {
+				input := ui.TextInput(c.Key("ai-model"), &a.settingsUI.aiModelText).Width(240).
+					Placeholder("gpt-4o-mini")
+				if input.Changed() {
+					a.ai.invalidateTest()
+				}
+				if input.Submitted() {
+					a.saveAIModel()
+				}
 			}
-			return
-		}
-		if ui.TextInput(c.Key("ai-model"), &a.settingsUI.aiModelText).Width(240).
-			Placeholder("gpt-4o-mini").Submitted() {
-			v := strings.TrimSpace(a.settingsUI.aiModelText)
-			a.settingsUI.draft.AI.Model = v
-			a.pushDraft(func(p *preferences) { p.AI.Model = v })
-		}
+			ui.Row(c.Key("ai-model-actions")).Gap(8).Children(func() {
+				label := locales.AiModelsFetch()
+				if a.ai.listing {
+					label = locales.AiModelsFetching()
+				}
+				if ui.Button(c.Key("ai-models-fetch"), label).Disabled(a.ai.listing || a.ai.keyBusy).Clicked() {
+					a.fetchAIModels()
+				}
+				if len(models) > 0 {
+					label := locales.AiModelManual()
+					if a.ai.manualModel {
+						label = locales.AiModelChoose()
+					}
+					if ui.Button(c.Key("ai-model-mode"), label).Clicked() {
+						a.ai.manualModel = !a.ai.manualModel
+					}
+				}
+			})
+		})
 	})
-	// 获取列表：拉取成功变下拉；失败行内提示（可重试）。
-	ui.Row(c).Gap(8).PaddingY(6).Children(func() {
-		if ui.Button(c.Key("ai-models-fetch"), locales.AiModelsFetch()).Disabled(a.ai.listing).Clicked() {
-			a.fetchAIModels()
-		}
-		if a.ai.listing {
-			ui.Text(c, locales.AiModelsFetching()).FontSize(12).TextColor(tMuted(c))
-		} else if a.ai.modelsErr != "" {
-			ui.Text(c, a.ai.modelsErr).FontSize(12).TextColor(c.Theme().Danger)
-		} else if len(a.ai.models) > 0 {
-			ui.Text(c, locales.AiModelsLoaded(strconv.Itoa(len(a.ai.models)))).FontSize(12).TextColor(tMuted(c))
-		}
-	})
+	if a.ai.modelsErr != "" && a.ai.modelsSource == a.aiSettingsSource() {
+		ui.Text(c, a.ai.modelsErr).FontSize(12).TextColor(c.Theme().Danger).Wrap()
+	}
+}
+
+func (a *app) saveAIModel() {
+	a.ai.invalidateTest()
+	baseURL := a.aiSettingsSource().baseURL
+	model := strings.TrimSpace(a.settingsUI.aiModelText)
+	if err := a.updatePreferences(func(p *preferences) {
+		p.AI.BaseURL, p.AI.Model = baseURL, model
+	}); err != nil {
+		a.settingsUI.keyErr = err.Error()
+		return
+	}
+	a.settingsUI.aiBaseURLText, a.settingsUI.aiModelText = baseURL, model
+	a.settingsUI.keyErr = ""
 }
 
 // aiKeyRows API 密钥：密码式输入 + 保存到钥匙串 / 清除 + 状态行。
 // 密钥只进系统安全存储；输入框不回显已存值。
 func (a *app) aiKeyRows(c *ui.Context) {
-	settingsSectionTitle(c, locales.AiKeyTitle())
-	settingsLead(c, locales.AiKeyHint())
-	settingsRow(c, locales.AiKeyLabel(), "", func() {
+	settingsRow(c, locales.AiKeyTitle(), locales.AiKeyHint(), func() {
 		ui.TextInput(c.Key("ai-key"), &a.settingsUI.aiKeyText).Width(240).
-			Placeholder("sk-…")
+			Placeholder("sk-…").Password().Disabled(a.ai.keyBusy)
 	})
-	ui.Row(c).Gap(8).PaddingY(6).Children(func() {
+	ui.Row(c).FillWidth().Justify(ui.End).Gap(8).Children(func() {
 		if ui.Button(c.Key("ai-key-save"), locales.AiKeySave()).Disabled(a.ai.keyBusy).Clicked() {
 			a.saveAIKey()
 		}
 		if ui.Button(c.Key("ai-key-clear"), locales.AiKeyClear()).Disabled(a.ai.keyBusy || !a.ai.keyConfigured).Clicked() {
 			a.clearAIKey()
 		}
-		if a.ai.keyBusy {
-			ui.Text(c, locales.AiKeyBusy()).FontSize(12).TextColor(tMuted(c))
-		}
 	})
-	if a.settingsUI.aiKeyErr != "" {
+	if a.ai.keyBusy {
+		ui.Text(c, locales.AiKeyBusy()).FontSize(12).TextColor(tMuted(c))
+	} else if a.settingsUI.aiKeyErr != "" {
 		ui.Text(c, a.settingsUI.aiKeyErr).FontSize(12).TextColor(c.Theme().Danger)
-	}
-	if a.ai.keyConfigured {
+	} else if a.ai.keyConfigured {
 		ui.Text(c, locales.AiKeyConfigured()).FontSize(12).TextColor(tMuted(c))
 	}
-	// 隐私说明：明示数据流向，本地 Ollama 不出本机。
-	ui.Text(c, locales.AiPrivacy()).FontSize(12).TextColor(tMuted(c)).Wrap()
 }
 
 // aiTestRow 连接测试：一条最小补全请求，行内展示结果。
 func (a *app) aiTestRow(c *ui.Context) {
 	settingsRow(c, locales.AiTest(), locales.AiTestHint(), func() {
-		if ui.Button(c.Key("ai-test"), locales.AiTestButton()).Disabled(a.ai.testing).Clicked() {
+		if ui.Button(c.Key("ai-test"), locales.AiTestButton()).Disabled(a.ai.testing || a.ai.keyBusy).Clicked() {
 			a.testAIConnection()
 		}
 	})
 	if a.ai.testing {
 		ui.Text(c, locales.AiTestRunning()).FontSize(12).TextColor(tMuted(c))
-	} else if a.ai.testResult != "" {
+	} else if a.ai.testResult != "" && a.ai.testSource == a.aiSettingsSource() &&
+		a.ai.testModel == strings.TrimSpace(a.settingsUI.aiModelText) {
 		color := c.Theme().TextMuted
 		if a.ai.testErr {
 			color = c.Theme().Danger

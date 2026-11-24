@@ -6115,11 +6115,11 @@ func (msgs Messages) AiModel() string {
 	return Catalog.Format(msgs.locale, "aiModel", nil)
 }
 
-// AiModelHint says "Type the model name exactly as the provider spells it."
+// AiModelHint says "Enter the model ID, or fetch a list from this service."
 // in the language the app shows.
 func AiModelHint() string { return In(i18n.Locale()).AiModelHint() }
 
-// AiModelHint says "Type the model name exactly as the provider spells it."
+// AiModelHint says "Enter the model ID, or fetch a list from this service."
 // in the language of msgs.
 func (msgs Messages) AiModelHint() string {
 	return Catalog.Format(msgs.locale, "aiModelHint", nil)
@@ -6145,14 +6145,34 @@ func (msgs Messages) AiModelsFetching() string {
 	return Catalog.Format(msgs.locale, "aiModelsFetching", nil)
 }
 
-// AiModelsLoaded says "{n} models available. Pick one above."
+// AiModelsLoaded says "{n} models available."
 // in the language the app shows.
 func AiModelsLoaded(n string) string { return In(i18n.Locale()).AiModelsLoaded(n) }
 
-// AiModelsLoaded says "{n} models available. Pick one above."
+// AiModelsLoaded says "{n} models available."
 // in the language of msgs.
 func (msgs Messages) AiModelsLoaded(n string) string {
 	return Catalog.Format(msgs.locale, "aiModelsLoaded", map[string]any{"n": n})
+}
+
+// AiModelManual says "Enter manually"
+// in the language the app shows.
+func AiModelManual() string { return In(i18n.Locale()).AiModelManual() }
+
+// AiModelManual says "Enter manually"
+// in the language of msgs.
+func (msgs Messages) AiModelManual() string {
+	return Catalog.Format(msgs.locale, "aiModelManual", nil)
+}
+
+// AiModelChoose says "Choose from list"
+// in the language the app shows.
+func AiModelChoose() string { return In(i18n.Locale()).AiModelChoose() }
+
+// AiModelChoose says "Choose from list"
+// in the language of msgs.
+func (msgs Messages) AiModelChoose() string {
+	return Catalog.Format(msgs.locale, "aiModelChoose", nil)
 }
 
 // AiModelsNeedEndpoint says "Enter the endpoint first, then fetch."
@@ -6265,11 +6285,21 @@ func (msgs Messages) AiKeyringUnavailable() string {
 	return Catalog.Format(msgs.locale, "aiKeyringUnavailable", nil)
 }
 
-// AiPrivacy says "What you send goes only to the service configured above: your instruction and note context (all tabs by default; narr…"
+// AiBehaviorTitle says "Assistant behavior"
+// in the language the app shows.
+func AiBehaviorTitle() string { return In(i18n.Locale()).AiBehaviorTitle() }
+
+// AiBehaviorTitle says "Assistant behavior"
+// in the language of msgs.
+func (msgs Messages) AiBehaviorTitle() string {
+	return Catalog.Format(msgs.locale, "aiBehaviorTitle", nil)
+}
+
+// AiPrivacy says "Instructions and note context go to the configured service. When you use a local Ollama endpoint, this data stays on …"
 // in the language the app shows.
 func AiPrivacy() string { return In(i18n.Locale()).AiPrivacy() }
 
-// AiPrivacy says "What you send goes only to the service configured above: your instruction and note context (all tabs by default; narr…"
+// AiPrivacy says "Instructions and note context go to the configured service. When you use a local Ollama endpoint, this data stays on …"
 // in the language of msgs.
 func (msgs Messages) AiPrivacy() string {
 	return Catalog.Format(msgs.locale, "aiPrivacy", nil)

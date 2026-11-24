@@ -28,12 +28,18 @@ type aiAssistState struct {
 	testing       bool          // 连接测试进行中
 	testResult    string        // 行内结果；空 = 无结果
 	testErr       bool          // 结果是否为失败
-	listing       bool          // 模型列表拉取进行中
-	models        []string      // 已拉取的模型 ID（空 = 未拉取）
-	modelsErr     string        // 拉取失败的本地化文案；空 = 无错误
-	bar           aiBarState    // 助理条会话
-	asker         aiAsker       // 非空时替代 aiClient（测试注入）
-	enabledPrev   bool          // 上一次偏好应用时的开关：从关到开时默认显示助理条
+	listing       bool
+	models        []string
+	modelsErr     string
+	modelsSource  aiSettingsSource
+	manualModel   bool
+	modelRequest  uint64
+	testRequest   uint64
+	testSource    aiSettingsSource
+	testModel     string
+	bar           aiBarState // 助理条会话
+	asker         aiAsker    // 非空时替代 aiClient（测试注入）
+	enabledPrev   bool       // 上一次偏好应用时的开关：从关到开时默认显示助理条
 }
 
 // aiKeyring 懒创建 AI 密钥的安全存储（失败只记日志，调用处如实展示）。
@@ -53,9 +59,19 @@ func (a *app) aiKeyring() notes.Keyring {
 // aiClient 按当前偏好装配客户端。密钥供给闭包捕获此刻的 keyring 实例，
 // 不在后台触碰 app 状态；无安全存储时不带鉴权（无法用需要密钥的服务）。
 func (a *app) aiClient() *ai.Client {
-	cfg := ai.Config{BaseURL: strings.TrimSpace(a.prefs.AI.BaseURL), Model: strings.TrimSpace(a.prefs.AI.Model)}
+	return a.aiClientFor(strings.TrimSpace(a.prefs.AI.BaseURL), strings.TrimSpace(a.prefs.AI.Model))
+}
+
+func (a *app) aiClientFor(baseURL, model string) *ai.Client {
+	cfg := ai.Config{BaseURL: baseURL, Model: model}
 	if k := a.aiKeyring(); k != nil {
-		cfg.APIKey = func(context.Context) (string, error) { return notes.LoadAIKey(k) }
+		cfg.APIKey = func(context.Context) (string, error) {
+			key, err := notes.LoadAIKey(k)
+			if errors.Is(err, notes.ErrKeyringEmpty) {
+				return "", nil
+			}
+			return key, err
+		}
 	}
 	return ai.New(cfg)
 }
@@ -99,6 +115,7 @@ func (a *app) saveAIKey() {
 		a.runOnMain(func() {
 			a.ai.keyBusy = false
 			if err == nil {
+				a.ai.invalidateConnection()
 				a.settingsUI.aiKeyText = ""
 				a.ai.keyConfigured = true
 				a.showToast(locales.AiKeySaved())
@@ -126,6 +143,7 @@ func (a *app) clearAIKey() {
 		a.runOnMain(func() {
 			a.ai.keyBusy = false
 			if err == nil {
+				a.ai.invalidateConnection()
 				a.ai.keyConfigured = false
 				a.showToast(locales.AiKeyCleared())
 			} else {
@@ -136,17 +154,62 @@ func (a *app) clearAIKey() {
 	}()
 }
 
-// testAIConnection 用当前已保存的配置发一条最小补全请求验证连通性。
+type aiSettingsSource struct {
+	provider string
+	baseURL  string
+}
+
+func (a *app) aiSettingsSource() aiSettingsSource {
+	return aiSettingsSource{a.settingsUI.draft.AI.Provider, strings.TrimSpace(a.settingsUI.aiBaseURLText)}
+}
+
+func (a *app) currentAIModels() []string {
+	if a.ai.modelsSource != a.aiSettingsSource() {
+		return nil
+	}
+	return a.ai.models
+}
+
+func (s *aiAssistState) invalidateConnection() {
+	s.modelRequest++
+	s.listing, s.manualModel = false, false
+	s.models, s.modelsErr = nil, ""
+	s.invalidateTest()
+}
+
+func (s *aiAssistState) invalidateTest() {
+	s.testRequest++
+	s.testing, s.testResult = false, ""
+}
+
+// validateAISettings 让草稿请求与偏好写入遵守同一地址校验，再读取密钥和联网。
+func (a *app) validateAISettings(source aiSettingsSource, model string) error {
+	p := a.prefs
+	p.AI.Provider, p.AI.BaseURL, p.AI.Model = source.provider, source.baseURL, model
+	return validatePrefs(p)
+}
+
+// testAIConnection 测试当前表单，未通过测试也不阻止启用。
 func (a *app) testAIConnection() {
-	if a.ai.testing {
+	if a.ai.testing || a.ai.keyBusy {
 		return
 	}
-	if strings.TrimSpace(a.prefs.AI.BaseURL) == "" || strings.TrimSpace(a.prefs.AI.Model) == "" {
+	source := a.aiSettingsSource()
+	model := strings.TrimSpace(a.settingsUI.aiModelText)
+	a.ai.testSource, a.ai.testModel = source, model
+	if source.baseURL == "" || model == "" {
 		a.ai.testResult, a.ai.testErr = locales.AiTestIncomplete(), true
 		a.refreshSettingsWindow()
 		return
 	}
-	client := a.aiClient()
+	if err := a.validateAISettings(source, model); err != nil {
+		a.ai.testResult, a.ai.testErr = err.Error(), true
+		a.refreshSettingsWindow()
+		return
+	}
+	client := a.aiClientFor(source.baseURL, model)
+	a.ai.testRequest++
+	request := a.ai.testRequest
 	a.ai.testing = true
 	a.ai.testResult = ""
 	a.refreshSettingsWindow()
@@ -155,43 +218,44 @@ func (a *app) testAIConnection() {
 		defer cancel()
 		err := client.TestConnection(ctx)
 		a.runOnMain(func() {
+			if request != a.ai.testRequest {
+				return
+			}
 			a.ai.testing = false
-			if err == nil {
-				a.ai.testResult, a.ai.testErr = locales.AiTestOK(), false
-			} else {
-				a.ai.testResult, a.ai.testErr = locales.AiTestFailed(aiErrText(err)), true
+			if source == a.aiSettingsSource() && model == strings.TrimSpace(a.settingsUI.aiModelText) {
+				if err == nil {
+					a.ai.testResult, a.ai.testErr = locales.AiTestOK(), false
+				} else {
+					a.ai.testResult, a.ai.testErr = locales.AiTestFailed(aiErrText(err)), true
+				}
 			}
 			a.refreshSettingsWindow()
 		})
 	}()
 }
 
-// fetchAIModels 后台拉取端点的模型列表；结果回主线程存入 ai.models。
-// 沿用草稿里的端点（尚未回车也可见），密钥从安全存储供给。
 func (a *app) fetchAIModels() {
-	if a.ai.listing {
+	if a.ai.listing || a.ai.keyBusy {
 		return
 	}
-	base := strings.TrimSpace(a.settingsUI.aiBaseURLText)
-	if base == "" {
-		base = strings.TrimSpace(a.prefs.AI.BaseURL)
+	source := a.aiSettingsSource()
+	if a.ai.modelsSource != source {
+		a.ai.models, a.ai.manualModel = nil, false
 	}
-	if base == "" {
+	a.ai.modelsSource = source
+	if source.baseURL == "" {
 		a.ai.modelsErr = locales.AiModelsNeedEndpoint()
 		a.refreshSettingsWindow()
 		return
 	}
-	client := a.aiClient()
-	// 草稿端点可能尚未提交；直接按草稿重建客户端。
-	if base != strings.TrimSpace(a.prefs.AI.BaseURL) {
-		client = ai.New(ai.Config{BaseURL: base,
-			APIKey: func(context.Context) (string, error) {
-				if k := a.aiKeyring(); k != nil {
-					return notes.LoadAIKey(k)
-				}
-				return "", nil
-			}})
+	if err := a.validateAISettings(source, ""); err != nil {
+		a.ai.modelsErr = err.Error()
+		a.refreshSettingsWindow()
+		return
 	}
+	client := a.aiClientFor(source.baseURL, "")
+	a.ai.modelRequest++
+	request := a.ai.modelRequest
 	a.ai.listing = true
 	a.ai.modelsErr = ""
 	a.refreshSettingsWindow()
@@ -200,16 +264,24 @@ func (a *app) fetchAIModels() {
 		defer cancel()
 		ids, err := client.ListModels(ctx)
 		a.runOnMain(func() {
-			a.ai.listing = false
-			if err != nil {
-				a.ai.models = nil
-				a.ai.modelsErr = aiErrText(err)
-			} else {
-				a.ai.models = ids
-			}
-			a.refreshSettingsWindow()
+			a.finishAIModels(request, source, ids, err)
 		})
 	}()
+}
+
+func (a *app) finishAIModels(request uint64, source aiSettingsSource, ids []string, err error) {
+	if request != a.ai.modelRequest {
+		return
+	}
+	a.ai.listing = false
+	if source == a.aiSettingsSource() {
+		if err != nil {
+			a.ai.modelsErr = aiErrText(err)
+		} else {
+			a.ai.models, a.ai.manualModel = ids, false
+		}
+	}
+	a.refreshSettingsWindow()
 }
 
 // aiErrText 把 ai 包的错误分类映射为本地化文案；未分类错误带原文呈现。
